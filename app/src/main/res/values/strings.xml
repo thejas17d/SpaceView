@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">SpaceView</string>
+    <string name="home_tagline">Measure anything. Place it at true size.</string>
+    <string name="home_sample_label">Sample reading</string>
+    <string name="home_sample_value" translatable="false">1 248 mm</string>
+    <string name="home_sample_tolerance" translatable="false">± 12 mm</string>
+    <string name="home_accuracy_good">Good</string>
+    <string name="home_mode_measure">Measure</string>
+    <string name="home_mode_measure_detail">Distance, height and area, each with its ±</string>
+    <string name="home_mode_scan">Scan object</string>
+    <string name="home_mode_scan_detail">Save an item with its exact dimensions</string>
+    <string name="home_mode_gallery">AR Gallery</string>
+    <string name="home_mode_gallery_detail">Place saved items in your room at true size</string>
+    <string name="home_coming_soon">Coming soon</string>
+    <string name="home_start_measuring">Start measuring</string>
+</resources>

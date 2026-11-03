@@ -1,0 +1,15 @@
+.gradle/
+build/
+.kotlin/
+local.properties
+.idea/
+*.iml
+captures/
+*.jks
+*.keystore
+keystore.properties
+
+# Multi-agent build coordination markers (local only)
+.build.lock/
+.build.lock
+.m0-ready

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy launcher icon for Android 7.x (API 24-25), which has no adaptive icons. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="@color/launcher_background"
+        android:pathData="M22,6 H86 A16,16 0 0 1 102,22 V86 A16,16 0 0 1 86,102 H22 A16,16 0 0 1 6,86 V22 A16,16 0 0 1 22,6 Z" />
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="1.5"
+        android:scaleY="1.5">
+        <path
+            android:pathData="M34,44 V34 H44 M64,34 H74 V44 M74,64 V74 H64 M44,74 H34 V64"
+            android:strokeWidth="3.5"
+            android:strokeColor="@color/launcher_paper"
+            android:strokeLineCap="square" />
+        <path
+            android:pathData="M54,41 V50 M54,58 V67 M41,54 H50 M58,54 H67"
+            android:strokeWidth="2.5"
+            android:strokeColor="@color/launcher_signal"
+            android:strokeLineCap="butt" />
+        <path
+            android:fillColor="@color/launcher_signal"
+            android:pathData="M52.25,54 a1.75,1.75 0 1,0 3.5,0 a1.75,1.75 0 1,0 -3.5,0 Z" />
+    </group>
+</vector>

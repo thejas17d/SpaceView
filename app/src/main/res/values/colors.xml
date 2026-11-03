@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window background shown before Compose draws its first frame. Matches SpaceViewTheme. -->
+    <color name="window_background">#FFF6F5F1</color>
+    <color name="launcher_background">#FF16181B</color>
+    <color name="launcher_signal">#FFFFD400</color>
+    <color name="launcher_paper">#FFF6F5F1</color>
+</resources>

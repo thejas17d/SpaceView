@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and lower. Only settings are backed up for now; whether gallery items
+     (database + GLB/JPEG files, which must be restored together) join them is decided in M3. -->
+<full-backup-content>
+    <include domain="file" path="datastore/" />
+</full-backup-content>
