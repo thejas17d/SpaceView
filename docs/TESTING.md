@@ -54,14 +54,24 @@ Check: the true value is usually inside the shown ±; the Good/Fair/Rough badge 
 - No stutter with depth on; wall points improve.
 
 ## 11. Calibration
-- Card at ~30 cm and A4 at ~50 cm: either accepted, or "too uncertain" (often the card — by design).
-- "Calibrated" chip appears; results say calibrated; date shows on Home.
-- After restarting the app the calibration is kept but only applies at a similar distance.
+Calibration is a **known length**: a straight span you measured with a tape, 1–5 m, both ends on one flat surface. Card / A4 are hidden (`MeasureViewModel.CALIBRATION_SMALL_REFERENCES_ENABLED = false`): with the 1 cm tier floor the engine rejects them every time. Re-enable them only after the bench test justifies a smaller floor.
+- Picker shows only "Known length". Measure a tape-measured 2–3 m span (table edge, or a door's width along the wall), type the tape value: cm, or inches with the Imperial unit setting.
+- Typed values outside 1–5 m (100–500 cm, 39.4–196.8 in) and non-numbers show the range error; nothing is calibrated.
+- The measured AR value is **not** shown before you type (so it cannot be copied in).
+- A 2 m+ span held steady: usually accepted with a factor near 0% and ± under about 1%. A 1 m span: usually "Too uncertain" (expected on non-LiDAR phones).
+- Ends on two different surfaces (e.g. door jamb to jamb across the opening): "Both ends must be on the same flat surface".
+- After applying: the "Calibrated" chip shows only on readings whose points are all on that same surface; a floor → table height or floor → wall reading is **not** calibrated.
+- Calibration applies only in the AR session that made it. Leave Measure and come back, press "Try again", rotate or change font size: readings are no longer calibrated (the date still shows on Home / Settings).
+- Settings → Clear calibration removes it; after 30 days Settings marks it as stale.
 
 ## 12. Save and History
 - Save with and without a name. History shows newest first with ± and badge; delete works.
 - Change units in Settings → History reformats.
-- After 4+ saved measurements, leaving the measure screen may show a test interstitial on the Home screen (never over the camera). The History screen shows a test banner at the bottom.
+- Ads (test ads in debug):
+  - Leaving Measure **without saving** never shows an interstitial.
+  - After 4+ saved measurements in total, leaving Measure after a save may show a test interstitial — only once the Home screen has fully appeared, **never over the camera**.
+  - The History screen shows a test banner fixed at the bottom, at least a finger-width from any button.
+  - Settings: depth toggle, calibration date (and "over 30 days old" warning), Clear calibration with confirm.
 
 ## 13. Release build
 - Repeat a quick flow on the release APK (catches R8 shrinking crashes).

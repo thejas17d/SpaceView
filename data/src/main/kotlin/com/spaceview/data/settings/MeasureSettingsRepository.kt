@@ -2,6 +2,7 @@ package com.spaceview.data.settings
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -26,12 +27,17 @@ import java.io.IOException
  * A stored scale calibration with its full scope (the engine applies a factor only on the
  * reference's plane and at a similar camera distance).
  *
+ * It is used **only inside the ARCore session that produced it** (M2 review M3): VIO scale errors of
+ * two sessions are independent, so an old factor would make the reading worse while tightening its
+ * ±, and the plane / anchor are world coordinates of that session. Outside it the record is kept
+ * only so the UI can say when the user last calibrated.
+ *
  * @property calibratedAtMillis wall-clock time it was measured (epoch ms).
  * @property planeNormal / [planeOffset] the reference's plane (n·p + d = 0) in that AR session's world frame.
  * @property anchor the reference's centroid on that plane.
  * @property rangeM camera-to-reference distance at calibration.
- * @property sessionId id of the AR visit it was made in. World coordinates (plane, anchor) are
- *   only meaningful inside that visit; afterwards only the factor and range scope carry over.
+ * @property sessionId random id of the ARCore session it was made in (new for every session
+ *   SceneView creates, including retries and activity recreation).
  */
 data class CalibrationRecord(
     val factor: Double,
@@ -42,22 +48,28 @@ data class CalibrationRecord(
     val planeOffset: Double,
     val anchor: Vec3,
     val rangeM: Double,
-    val sessionId: Long,
+    val sessionId: String,
 ) {
-    /**
-     * As an engine calibration. [sameSession] true keeps the plane/anchor scope; false drops it
-     * (a new AR session has a new world origin, so the stored plane would be meaningless) and keeps
-     * the range scope.
-     */
-    fun toScaleCalibration(sameSession: Boolean): ScaleCalibration = if (sameSession) {
+    /** As an engine calibration with its full plane, anchor and range scope. */
+    fun toScaleCalibration(): ScaleCalibration =
         ScaleCalibration(factor, sigma, reference = reference, plane = Plane(planeNormal, planeOffset), anchor = anchor, rangeM = rangeM)
-    } else {
-        ScaleCalibration(factor, sigma, reference = reference, rangeM = rangeM)
-    }
+
+    /** True once the record is older than [MAX_AGE_MILLIS] (or dated in the future: the clock changed). */
+    fun isStale(nowMillis: Long): Boolean = nowMillis - calibratedAtMillis !in 0..MAX_AGE_MILLIS
+
+    /**
+     * The calibration to apply in the ARCore session [currentSessionId] at [nowMillis], or null: only
+     * the session that made it may use it, and never once it is stale.
+     */
+    fun applicableIn(currentSessionId: String?, nowMillis: Long): ScaleCalibration? =
+        if (currentSessionId != null && currentSessionId == sessionId && !isStale(nowMillis)) toScaleCalibration() else null
 
     companion object {
+        /** A calibration is stale after 30 days. */
+        const val MAX_AGE_MILLIS: Long = 30L * 24 * 60 * 60 * 1000
+
         /** Record from an accepted engine calibration; null when its scope (plane, anchor, range) is incomplete. */
-        fun from(c: ScaleCalibration, reference: ReferenceObject?, atMillis: Long, sessionId: Long): CalibrationRecord? {
+        fun from(c: ScaleCalibration, reference: ReferenceObject?, atMillis: Long, sessionId: String): CalibrationRecord? {
             val plane = c.plane ?: return null
             val anchor = c.anchor ?: plane.point
             val range = c.rangeM ?: return null
@@ -90,9 +102,14 @@ class MeasureSettingsRepository(private val store: DataStore<Preferences>) {
         .map { it.toSettings() }
         .distinctUntilChanged()
 
+    /**
+     * Stores [record], replacing any earlier one. Throws [IllegalArgumentException] for an implausible
+     * record and [IOException] when the file cannot be written (callers catch and report it).
+     */
     suspend fun setCalibration(record: CalibrationRecord) {
         require(record.factor > Calibrator.MIN_FACTOR && record.factor < Calibrator.MAX_FACTOR && record.sigma >= 0 && record.sigma.isFinite())
         require(record.rangeM > 0 && record.rangeM.isFinite() && record.planeNormal.isFinite && record.anchor.isFinite && record.planeOffset.isFinite())
+        require(record.sessionId.isNotBlank())
         store.edit {
             it[CAL_FACTOR] = record.factor
             it[CAL_SIGMA] = record.sigma
@@ -101,14 +118,13 @@ class MeasureSettingsRepository(private val store: DataStore<Preferences>) {
             it[CAL_RANGE] = record.rangeM
             it[CAL_SCOPE] = encode(record.planeNormal, record.planeOffset, record.anchor)
             it[CAL_SESSION] = record.sessionId
+            it.remove(LEGACY_CAL_SESSION)
         }
     }
 
+    /** Removes the stored calibration (Settings: "Clear calibration"). Throws [IOException] on a write failure. */
     suspend fun clearCalibration() {
-        store.edit {
-            it.remove(CAL_FACTOR); it.remove(CAL_SIGMA); it.remove(CAL_AT); it.remove(CAL_REF); it.remove(CAL_RANGE)
-            it.remove(CAL_SCOPE); it.remove(CAL_SESSION)
-        }
+        store.edit { clearCalibrationKeys(it) }
     }
 
     suspend fun setDepthEnabled(enabled: Boolean) {
@@ -130,7 +146,17 @@ class MeasureSettingsRepository(private val store: DataStore<Preferences>) {
         private val CAL_RANGE = doublePreferencesKey("calibration_range_m")
         /** Plane normal (3), offset, anchor (3) as 7 comma-separated doubles (Locale.ROOT). */
         private val CAL_SCOPE = stringPreferencesKey("calibration_scope")
-        private val CAL_SESSION = longPreferencesKey("calibration_session")
+        /** ARCore session id (a UUID string). */
+        private val CAL_SESSION = stringPreferencesKey("calibration_session_id")
+
+        /** M2 builds stored the visit time here; such records are never applied (wrong session identity). */
+        private val LEGACY_CAL_SESSION = longPreferencesKey("calibration_session")
+
+        /** Removes every calibration key, including the M2 legacy session key. */
+        internal fun clearCalibrationKeys(p: MutablePreferences) {
+            p.remove(CAL_FACTOR); p.remove(CAL_SIGMA); p.remove(CAL_AT); p.remove(CAL_REF); p.remove(CAL_RANGE)
+            p.remove(CAL_SCOPE); p.remove(CAL_SESSION); p.remove(LEGACY_CAL_SESSION)
+        }
 
         private fun encode(n: Vec3, d: Double, a: Vec3): String =
             doubleArrayOf(n.x, n.y, n.z, d, a.x, a.y, a.z).joinToString(",") { it.toString() }
@@ -158,7 +184,7 @@ class MeasureSettingsRepository(private val store: DataStore<Preferences>) {
             // A calibration without its full scope (plane, anchor, range, session) is invalid.
             val scope = decode(this[CAL_SCOPE])
             val range = this[CAL_RANGE]
-            val session = this[CAL_SESSION]
+            val session = this[CAL_SESSION]?.takeIf { it.isNotBlank() }
             val calibration = if (
                 factor != null && sigma != null && at != null && scope != null && range != null && session != null &&
                 factor.isFinite() && sigma.isFinite() && sigma >= 0 && range > 0 && range.isFinite() &&

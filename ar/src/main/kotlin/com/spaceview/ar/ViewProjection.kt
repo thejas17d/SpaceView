@@ -25,7 +25,7 @@ class ViewProjection(
     init {
         require(viewMatrix.size >= 16 && projectionMatrix.size >= 16)
         require(widthPx > 0 && heightPx > 0)
-        Mat4.multiply(projectionMatrix.toDoubles(), viewMatrix.toDoubles(), vp)
+        Mat4.multiply(projectionMatrix, viewMatrix, vp)
         inv = Mat4.invert(vp)
     }
 
@@ -90,8 +90,6 @@ class ViewProjection(
         return Vec3(ox / ow, oy / ow, oz / ow)
     }
 
-    private fun FloatArray.toDoubles() = DoubleArray(16) { this[it].toDouble() }
-
     private companion object {
         /** Points with clip w below this are treated as behind the camera (≈ 1 cm in front). */
         const val MIN_W = 0.01
@@ -103,6 +101,15 @@ data class ScreenPoint(val x: Float, val y: Float)
 
 /** Column-major 4×4 helpers (same layout as OpenGL / ARCore). */
 internal object Mat4 {
+    /** out = a × b in double precision, straight from ARCore's float matrices (no copies). */
+    fun multiply(a: FloatArray, b: FloatArray, out: DoubleArray) {
+        for (c in 0 until 4) for (r in 0 until 4) {
+            var s = 0.0
+            for (k in 0 until 4) s += a[k * 4 + r].toDouble() * b[c * 4 + k].toDouble()
+            out[c * 4 + r] = s
+        }
+    }
+
     /** out = a × b. [out] must not alias [a] or [b]. */
     fun multiply(a: DoubleArray, b: DoubleArray, out: DoubleArray) {
         for (c in 0 until 4) for (r in 0 until 4) {

@@ -58,7 +58,8 @@ class UncertaintyTest {
     }
 
     @Test fun lengthCombinesRandomAndScale() {
-        val model = UncertaintyModel(DeviceTier.NO_DEPTH)
+        // The absolute floor is tested on its own (B1 tests below); here it is switched off.
+        val model = UncertaintyModel(DeviceTier.NO_DEPTH, absFloor95 = 0.0)
         val m = model.length(RawLength(1.0, 0.003))
         val s = DeviceTier.NO_DEPTH.scaleSigmaRel
         assertEquals(1.0, m.value, 0.0)
@@ -75,13 +76,17 @@ class UncertaintyTest {
     }
 
     @Test fun customScaleSigma() {
-        val model = UncertaintyModel(scaleSigmaRel = 0.0)
+        val model = UncertaintyModel(scaleSigmaRel = 0.0, absFloor95 = 0.0)
         assertEquals(0.002, model.length(RawLength(3.0, 0.002)).sigma, 1e-15)
+        // With the tier floor (default) the same length can never drop below it.
+        val floored = UncertaintyModel(scaleSigmaRel = 0.0).length(RawLength(3.0, 0.002))
+        assertEquals(sqrt(0.002 * 0.002 + DeviceTier.NO_DEPTH.floorLengthSigma * DeviceTier.NO_DEPTH.floorLengthSigma), floored.sigma, 1e-15)
     }
 
     @Test fun calibratedModelUsesCalibrationUncertainty() {
         val cal = ScaleCalibration(0.97, 0.97 * 0.002)
-        val model = UncertaintyModel(DeviceTier.NO_DEPTH).withCalibration(cal)
+        val model = UncertaintyModel(DeviceTier.NO_DEPTH, absFloor95 = 0.0).withCalibration(cal)
+        assertEquals(0.0, model.absFloor95, 0.0) // withCalibration keeps the floor setting
         assertEquals(0.97, model.scaleFactor, 0.0)
         val rel = sqrt(0.002 * 0.002 + 0.003 * 0.003)
         assertEquals(rel, model.effectiveScaleSigmaRel, 1e-12)
@@ -92,7 +97,7 @@ class UncertaintyTest {
     }
 
     @Test fun productPropagation() {
-        val model = UncertaintyModel(scaleSigmaRel = 0.01)
+        val model = UncertaintyModel(scaleSigmaRel = 0.01, absFloor95 = 0.0)
         val area = model.product(listOf(RawLength(2.0, 0.02), RawLength(1.0, 0.01)))
         assertEquals(2.0, area.value, 1e-12)
         // random rel: √(0.01² + 0.01²); scale fully correlated: 2 × 1%.
@@ -103,7 +108,7 @@ class UncertaintyTest {
     }
 
     @Test fun distanceProjectsCovarianceOnTheLine() {
-        val model = UncertaintyModel(scaleSigmaRel = 0.0)
+        val model = UncertaintyModel(scaleSigmaRel = 0.0, absFloor95 = 0.0)
         // Large error perpendicular to the segment must not count; along it, it must.
         val a = UncertainPoint(Vec3.ZERO, Cov3(1e-6, 0.0, 0.0, 1e-2, 0.0, 1e-2), includesLocalisation = true)
         val b = UncertainPoint(Vec3(1.0, 0.0, 0.0), Cov3(1e-6, 0.0, 0.0, 1e-2, 0.0, 1e-2), includesLocalisation = true)
@@ -117,7 +122,7 @@ class UncertaintyTest {
     }
 
     @Test fun heightAndHorizontal() {
-        val model = UncertaintyModel(scaleSigmaRel = 0.0)
+        val model = UncertaintyModel(scaleSigmaRel = 0.0, absFloor95 = 0.0)
         val floor = UncertainPoint(Vec3(0.3, 0.0, -1.0)).withLocalisationSigma(0.002)
         val top = UncertainPoint(Vec3(0.8, 1.75, -1.4)).withLocalisationSigma(0.002)
         val h = model.height(floor, top)

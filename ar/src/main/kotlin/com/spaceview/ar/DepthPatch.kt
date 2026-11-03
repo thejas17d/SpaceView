@@ -1,7 +1,6 @@
 package com.spaceview.ar
 
 import com.spaceview.engine.Pose
-import com.spaceview.engine.Vec3
 
 /**
  * A small window of ARCore raw depth (16-bit millimetres + 8-bit confidence) copied out of the
@@ -43,6 +42,12 @@ class DepthPatch(
     ): Int {
         var n = 0
         val capacity = out.size / 3
+        // Rotation matrix of the sensor pose, so each pixel is transformed without allocating (minor 8).
+        val q = sensorPose.rotation
+        val r00 = 1 - 2 * (q.y * q.y + q.z * q.z); val r01 = 2 * (q.x * q.y - q.z * q.w); val r02 = 2 * (q.x * q.z + q.y * q.w)
+        val r10 = 2 * (q.x * q.y + q.z * q.w); val r11 = 1 - 2 * (q.x * q.x + q.z * q.z); val r12 = 2 * (q.y * q.z - q.x * q.w)
+        val r20 = 2 * (q.x * q.z - q.y * q.w); val r21 = 2 * (q.y * q.z + q.x * q.w); val r22 = 1 - 2 * (q.x * q.x + q.y * q.y)
+        val t = sensorPose.translation
         for (r in 0 until height) for (c in 0 until width) {
             if (n >= capacity) return n
             val i = r * width + c
@@ -52,11 +57,12 @@ class DepthPatch(
             if (d < minDepthM || d > maxDepthM) continue
             val u = (x0 + c) + 0.5
             val v = (y0 + r) + 0.5
-            val local = Vec3(d * (u - cx) / fx, d * (cy - v) / fy, -d)
-            val w = sensorPose.transformPoint(local)
-            out[n * 3] = w.x.toFloat()
-            out[n * 3 + 1] = w.y.toFloat()
-            out[n * 3 + 2] = w.z.toFloat()
+            val lx = d * (u - cx) / fx
+            val ly = d * (cy - v) / fy
+            val lz = -d
+            out[n * 3] = (r00 * lx + r01 * ly + r02 * lz + t.x).toFloat()
+            out[n * 3 + 1] = (r10 * lx + r11 * ly + r12 * lz + t.y).toFloat()
+            out[n * 3 + 2] = (r20 * lx + r21 * ly + r22 * lz + t.z).toFloat()
             n++
         }
         return n

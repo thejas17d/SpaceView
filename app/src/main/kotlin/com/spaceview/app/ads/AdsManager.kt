@@ -6,6 +6,8 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.core.view.doOnPreDraw
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import com.google.android.gms.ads.AdError
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
@@ -20,12 +22,15 @@ import com.google.android.ump.UserMessagingPlatform
 import com.spaceview.app.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -39,6 +44,16 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Placement (docs/research/ui-ux.md §5): banners only on non-camera screens ([BannerAd]); one
  * preloaded interstitial, shown **only** through [maybeShowAfterSave] and only when [AdPolicy]
  * allows it. If no ad is ready, nothing is shown and nothing waits.
+ *
+ * Interstitial flow after measuring ([MeasureVisitTracker], M2 review M6):
+ *  1. navigation calls [onMeasureEntered] / [onMeasureLeaving] around each Measure visit and
+ *     [onArScreenEntered] / [onArScreenLeft] around every AR/camera destination;
+ *  2. [recordCompletedScan] marks the current visit as "saved";
+ *  3. leaving a visit with a save arms one pending chance; leaving without a save never does;
+ *  4. the next non-AR screen calls [onNonArScreenResumed] once it is RESUMED (navigation keeps a
+ *     destination at STARTED until its transition has finished). That waits until no AR screen is
+ *     composed, then asks [AdPolicy]. The ad therefore never opens over the camera.
+ * Interstitials are only preloaded from non-AR screens, never while AR is in the foreground.
  *
  * Main-thread API: call everything from the main thread.
  */
@@ -71,6 +86,11 @@ class AdsManager(
     private var interstitialLoadedAt = 0L
     private var interstitialLoading = false
     private var showing = false
+
+    /** "Saved this visit", the pending after-measure chance and AR-foreground tracking. */
+    private val visits = MeasureVisitTracker(clock = SystemClock::elapsedRealtime)
+    private val arForeground = MutableStateFlow(false)
+    private var pendingShowJob: Job? = null
 
     /**
      * Call from `MainActivity.onCreate` (after `setContent`). Defers all consent and SDK work until
@@ -166,11 +186,12 @@ class AdsManager(
     }
 
     /**
-     * Loads one interstitial if none is loaded or loading. Called automatically when the next save
-     * could be eligible; call it too when the user enters a scan/measure flow.
+     * Loads one interstitial if none is loaded or loading. Does nothing while an AR/camera screen is
+     * in the foreground (the ads WebView and network work would compete with tracking); the next
+     * non-AR screen to resume preloads instead ([onNonArScreenResumed]).
      */
     fun preloadInterstitial() {
-        if (!_canShowAds.value || interstitialLoading) return
+        if (!_canShowAds.value || interstitialLoading || visits.arInForeground) return
         if (interstitial != null && !isStale()) return
         interstitial = null
         interstitialLoading = true
@@ -198,21 +219,98 @@ class AdsManager(
     private fun isStale(): Boolean = SystemClock.elapsedRealtime() - interstitialLoadedAt > MAX_AD_AGE_MS
 
     /**
-     * Call exactly once when a scan or measurement has been saved successfully (before the Saved
-     * screen is left). Counts toward the frequency cap and preloads an ad if the next exit may use it.
+     * Call exactly once when a scan or measurement has been saved successfully. Counts toward the
+     * frequency cap and marks the current Measure visit as "saved". Never preloads: it runs on the
+     * AR screen.
      */
     fun recordCompletedScan() {
+        visits.onScanSaved()
         scope.launch {
-            policy.recordCompletedScan()
-            if (policy.nextSaveMayShow() || policy.decide(NextAction.DONE) == AdDecision.SHOW) preloadInterstitial()
+            try {
+                policy.recordCompletedScan()
+            } catch (e: Exception) {
+                // Disk full or a corrupt counter file must not crash measuring; the cap just under-counts.
+                Log.w(TAG, "Could not record scan: ${e.message}")
+            }
         }
     }
 
+    /** A Measure destination ([key] = its back-stack entry id) is on screen. */
+    fun onMeasureEntered(key: String) {
+        visits.enterMeasure(key)
+        pendingShowJob?.cancel()
+    }
+
     /**
-     * The **only** way an interstitial is shown. Call when the user leaves the "Saved" result.
-     * Shows the preloaded ad if [AdPolicy] allows it for [nextAction]; otherwise does nothing.
-     * [onContinue] runs exactly once: after the ad closes, or straight away when no ad is shown.
-     * Never call this from a camera/AR screen.
+     * The user is leaving Measure visit [key] (call before popping it). Arms one after-measure
+     * chance only if a result was saved during this visit.
+     */
+    fun onMeasureLeaving(key: String) {
+        val eligible = visits.leaveMeasure(key)
+        if (BuildConfig.DEBUG) Log.d(TAG, "Leaving measure, saved this visit=$eligible")
+    }
+
+    /** An AR/camera destination entered composition. Pair with [onArScreenLeft]. */
+    fun onArScreenEntered() {
+        visits.arScreenEntered()
+        arForeground.value = visits.arInForeground
+    }
+
+    /** An AR/camera destination left composition (after its exit transition). */
+    fun onArScreenLeft() {
+        visits.arScreenLeft()
+        arForeground.value = visits.arInForeground
+    }
+
+    /**
+     * Call when a non-AR screen (Home, History, Settings) reaches RESUMED. Uses a pending
+     * after-measure chance once the AR screen has left composition; otherwise preloads an
+     * interstitial if an upcoming exit could be eligible. Pair with [onNonArScreenPaused].
+     */
+    fun onNonArScreenResumed(activity: Activity) {
+        pendingShowJob?.cancel()
+        if (!visits.consumePending()) {
+            scope.launch { preloadIfUseful() }
+            return
+        }
+        pendingShowJob = scope.launch {
+            // The destination is RESUMED once its transition has finished; the AR content leaves
+            // composition in the same or the next frame. Wait for that, but only briefly.
+            val arGone = withTimeoutOrNull(AR_EXIT_WAIT_MS) { arForeground.first { !it } } != null
+            if (!arGone || !activity.isResumedNow()) return@launch
+            maybeShowAfterSave(activity, NextAction.BACK) { scope.launch { preloadIfUseful() } }
+        }
+    }
+
+    /** The non-AR screen paused (app switch, next screen): a pending chance is dropped, never deferred. */
+    fun onNonArScreenPaused() {
+        pendingShowJob?.cancel()
+        pendingShowJob = null
+    }
+
+    private suspend fun preloadIfUseful() {
+        if (visits.arInForeground || !_canShowAds.value) return
+        val useful = try {
+            policy.nextSaveMayShow() || policy.decide(NextAction.DONE) == AdDecision.SHOW
+        } catch (e: Exception) {
+            Log.w(TAG, "Ad counters unreadable: ${e.message}")
+            false
+        }
+        if (useful) preloadInterstitial()
+    }
+
+    private fun Activity.isResumedNow(): Boolean =
+        !isFinishing && !isDestroyed &&
+            (this as? LifecycleOwner)?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) != false
+
+    /**
+     * The **only** way an interstitial is shown. Shows the preloaded ad if [AdPolicy] allows it for
+     * [nextAction]; otherwise does nothing. [onContinue] runs exactly once: after the ad closes, or
+     * straight away when no ad is shown.
+     *
+     * Call only from a RESUMED non-AR screen after the user saved something and reached a natural
+     * break (normally through [onNonArScreenResumed]). Never from a camera/AR screen, and never on
+     * a plain exit without a save.
      */
     fun maybeShowAfterSave(
         activity: Activity,
@@ -220,10 +318,15 @@ class AdsManager(
         onContinue: () -> Unit,
     ) {
         scope.launch {
-            val decision = policy.decide(nextAction, AdScreen.NON_CAMERA)
+            val screen = if (visits.arInForeground) AdScreen.CAMERA_AR else AdScreen.NON_CAMERA
+            val decision = try {
+                policy.decide(nextAction, screen)
+            } catch (e: Exception) {
+                Log.w(TAG, "Ad counters unreadable: ${e.message}")
+                AdDecision.TOO_SOON
+            }
             val ad = interstitial
-            val ready = ad != null && !isStale() && !showing && _canShowAds.value &&
-                !activity.isFinishing && !activity.isDestroyed
+            val ready = ad != null && !isStale() && !showing && _canShowAds.value && activity.isResumedNow()
             if (decision != AdDecision.SHOW || !ready) {
                 if (BuildConfig.DEBUG) Log.d(TAG, "No interstitial: $decision, ready=$ready")
                 onContinue()
@@ -240,7 +343,13 @@ class AdsManager(
             }
             ad.fullScreenContentCallback = object : FullScreenContentCallback() {
                 override fun onAdShowedFullScreenContent() {
-                    scope.launch { policy.recordInterstitialShown() }
+                    scope.launch {
+                        try {
+                            policy.recordInterstitialShown()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Could not record interstitial: ${e.message}")
+                        }
+                    }
                 }
 
                 override fun onAdDismissedFullScreenContent() = finish()
@@ -257,6 +366,9 @@ class AdsManager(
     companion object {
         private const val TAG = "AdsManager"
         private const val MAX_AD_AGE_MS = 55L * 60 * 1000
+
+        /** Longest wait for the AR destination to leave composition once the next screen is RESUMED. */
+        private const val AR_EXIT_WAIT_MS = 1_500L
 
         @Volatile private var instance: AdsManager? = null
 

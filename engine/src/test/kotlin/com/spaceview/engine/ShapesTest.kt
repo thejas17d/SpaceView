@@ -9,9 +9,10 @@ import kotlin.math.abs
 import kotlin.math.sqrt
 
 class ShapesTest {
-    private val exactModel = UncertaintyModel(scaleSigmaRel = 0.0)
+    /** No scale error and no absolute floor: the geometry terms are tested in isolation. */
+    private val exactModel = UncertaintyModel(scaleSigmaRel = 0.0, absFloor95 = 0.0)
 
-    /** Point whose covariance is complete (sigma includes localisation), so no tier floor is added. */
+    /** Point whose covariance is complete (sigma includes localisation), so no stand-in is added. */
     private fun loc(p: Vec3, sigma: Double) = UncertainPoint(p).withLocalisationSigma(sigma)
 
     /** 60 × 40 cm frame on the wall z = −1.5, top-left at (−0.3, 1.6). */
@@ -78,8 +79,11 @@ class ShapesTest {
 
     @Test fun noisyRectangleIsAccurateAndHonest() {
         val rng = Random(60)
-        val model = UncertaintyModel(DeviceTier.NO_DEPTH)
+        // Without the floor the model must match the simulated noise (not over-cover) …
+        val model = UncertaintyModel(DeviceTier.NO_DEPTH, absFloor95 = 0.0)
+        val floored = UncertaintyModel(DeviceTier.NO_DEPTH)
         var inside = 0
+        var insideFloored = 0
         var sumErr = 0.0
         val trials = 500
         repeat(trials) {
@@ -87,13 +91,19 @@ class ShapesTest {
             val corners = frame.map {
                 UncertainPoint.of(it * scale + Vec3(rng.nextGaussian(), rng.nextGaussian(), rng.nextGaussian()) * 0.003, 0.003)
             }
-            val r = Shapes.rectangle(corners, Plane.fromPointNormal(Vec3(0.0, 0.0, -1.5 * scale), Vec3.UNIT_Z), model)
+            val plane = Plane.fromPointNormal(Vec3(0.0, 0.0, -1.5 * scale), Vec3.UNIT_Z)
+            val r = Shapes.rectangle(corners, plane, model)
+            val rf = Shapes.rectangle(corners, plane, floored)
             sumErr += abs(r.width.value - 0.6)
             if (abs(r.width.value - 0.6) <= r.width.bound95) inside++
+            if (abs(rf.width.value - 0.6) <= rf.width.bound95) insideFloored++
+            assertTrue(rf.width.sigma >= floored.floorLengthSigma)
         }
         assertTrue("mean err ${sumErr / trials}", sumErr / trials < 0.008)
         val coverage = inside.toDouble() / trials
         assertTrue("coverage=$coverage", coverage in 0.90..0.995)
+        // … and the shipped (floored) model only ever covers more.
+        assertTrue(insideFloored >= inside)
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -107,7 +117,7 @@ class ShapesTest {
     }
 
     @Test fun boxFromRawDimensions() {
-        val model = UncertaintyModel(scaleSigmaRel = 0.01)
+        val model = UncertaintyModel(scaleSigmaRel = 0.01, absFloor95 = 0.0)
         val b = Shapes.box(RawLength(0.45, 0.0), RawLength(0.26, 0.0), RawLength(0.35, 0.0), model)
         assertEquals(0.45, b.width.value, 1e-12)
         assertEquals(0.45 * 0.26 * 0.35, b.volume.value, 1e-12)

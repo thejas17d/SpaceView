@@ -2,6 +2,7 @@ package com.spaceview.engine
 
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.log10
 import kotlin.math.pow
@@ -89,14 +90,14 @@ class ContextFormatted(val primary: FormattedLength, val secondary: String?) {
 /**
  * Unit conversion and **precision-honest** formatting. All functions are pure.
  *
- * Rounding rule ("never show more precision than the ±"):
- * - Decimal units: the ±95 is first rounded to its displayed significant figures — one, two when it
+ * Rounding rule ("never show more precision than the ±, never a smaller ± than computed"):
+ * - The displayed ± is always rounded **up** (M2 review M1): the shown ± is ≥ the computed ±95.
+ * - Decimal units: the ±95 is rounded up to its displayed significant figures — one, two when it
  *   starts with 1 ("± 1.4") — and the value is then rounded to the decimal place of the leading digit
- *   of that **rounded** ± (±1.4 cm → whole cm; ±0.5 cm → 0.1 cm; ±12 cm → 10 cm; ±0.999 cm shows as
- *   "± 1.0" with a whole-cm value), never finer than the unit's minimum (1 mm).
- * - Fractional inches / feet-inches: the ± is rounded to the largest of 1/16, 1/8, 1/4, 1/2, 1 inch
- *   not exceeding it, then the value step is the largest of those not exceeding the rounded ±; the ±
- *   is shown on that step (never as 0).
+ *   of that **rounded** ± (±1.4 cm → whole cm; ±0.5 cm → 0.1 cm; ±12 cm → 10 cm; ±0.95 cm shows as
+ *   "± 1.0" with a whole-cm value; ±2.3 cm shows as "± 3"), never finer than the unit's minimum (1 mm).
+ * - Fractional inches / feet-inches: the ± is shown as the smallest of 1/16, 1/8, 1/4, 1/2, 1 inch
+ *   not below it (whole inches rounded up above 1″), and the value is rounded to that step (1″ at most).
  * Output always uses '.' as decimal separator and Western digits (Locale.ROOT).
  */
 object Units {
@@ -138,16 +139,18 @@ object Units {
         val min = minStep(unit)
         if (!(plusMinus > 0)) return min
         return when (unit) {
-            LengthUnit.INCH_FRACTION, LengthUnit.FEET_INCHES -> fractionStep(roundTo(plusMinus, fractionStep(plusMinus)))
+            LengthUnit.INCH_FRACTION, LengthUnit.FEET_INCHES -> minOf(fractionPlusMinus(plusMinus), 1.0)
             else -> decimalSteps(plusMinus, min).valueStep
         }
     }
 
-    /** Largest of 1/16 … 1 inch not exceeding [x] (1/16 when x is smaller). */
-    private fun fractionStep(x: Double): Double {
-        var s = FRACTION_STEPS[0]
-        for (c in FRACTION_STEPS) if (c <= x + 1e-9) s = c
-        return s
+    /**
+     * Displayed fractional ± for [x] inches: the smallest of 1/16 … 1 inch not below it, or whole inches
+     * rounded up above 1″ (M1: never smaller than [x]).
+     */
+    private fun fractionPlusMinus(x: Double): Double {
+        for (c in FRACTION_STEPS) if (c >= x * (1 - REL_EPS)) return c
+        return ceilTo(x, 1.0)
     }
 
     /** Rounded ± (as displayed), the step it is shown with, and the value step derived from it. */
@@ -159,12 +162,16 @@ object Units {
         return if (x / lead < 2.0 - 1e-9) lead / 10 else lead
     }
 
-    /** MINOR-9: round the ± to its displayed figures first, then derive both steps from the rounded ±. */
+    /**
+     * MINOR-9 / M2 review M1: round the ± **up** to its displayed figures first, then derive both steps
+     * from the rounded ±. Rounding up can add a digit (0.95 → 1.0), so the step is re-derived and the ±
+     * rounded up again on it; the result is never below [pm].
+     */
     private fun decimalSteps(pm: Double, min: Double): DecimalSteps {
         if (!(pm > 0)) return DecimalSteps(0.0, min, min)
-        val r1 = maxOf(roundTo(pm, maxOf(min, sigFigStep(pm))), min)
+        val r1 = maxOf(ceilTo(pm, maxOf(min, sigFigStep(pm))), min)
         val pmStep = maxOf(min, sigFigStep(r1))
-        val r2 = maxOf(roundTo(r1, pmStep), pmStep)
+        val r2 = maxOf(ceilTo(r1, pmStep), pmStep)
         return DecimalSteps(r2, pmStep, maxOf(min, decimalLeadingPlace(r2)))
     }
 
@@ -243,6 +250,12 @@ object Units {
 
     private fun decimalsFor(step: Double): Int = if (step >= 1.0) 0 else (-floor(log10(step) + 1e-9)).toInt()
 
+    /** Relative tolerance for binary round-off (0.1 × 3 must not round up to 0.4). */
+    private const val REL_EPS = 1e-9
+
+    /** Smallest multiple of [step] ≥ [v] (v ≥ 0), tolerant of binary round-off. */
+    private fun ceilTo(v: Double, step: Double): Double = ceil(v / step - REL_EPS).coerceAtLeast(0.0) * step
+
     private fun roundTo(v: Double, step: Double): Double {
         val r = (abs(v) / step).roundToLong() * step
         return if (v < 0) -r else r
@@ -266,8 +279,8 @@ object Units {
     }
 
     private fun formatPlusMinus(pm: Double, unit: LengthUnit, step: Double): String = when (unit) {
-        LengthUnit.INCH_FRACTION -> fractionText(maxOf(roundTo(pm, step), step))
-        LengthUnit.FEET_INCHES -> fractionText(maxOf(roundTo(pm, step), step)) + "″"
+        LengthUnit.INCH_FRACTION -> fractionText(maxOf(fractionPlusMinus(pm), step))
+        LengthUnit.FEET_INCHES -> fractionText(maxOf(fractionPlusMinus(pm), step)) + "″"
         else -> decimalPlusMinus(pm, minStep(unit))
     }
 

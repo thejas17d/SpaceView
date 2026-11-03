@@ -15,7 +15,7 @@
     <string name="home_rectangle">आयत</string>
     <string name="home_rectangle_detail">फ़्रेम, दरवाज़े या टीवी की चौड़ाई, ऊँचाई और क्षेत्रफल</string>
     <string name="home_calibrate">कैलिब्रेट करें</string>
-    <string name="home_calibrate_detail">बैंक कार्ड या A4 कागज़ से सटीकता बढ़ाएँ</string>
+    <string name="home_calibrate_detail">टेप से नापी गई किसी लंबाई से सटीकता बढ़ाएँ</string>
     <string name="home_calibrated_on">%1$s को कैलिब्रेट किया गया</string>
     <string name="home_history">हिस्ट्री</string>
     <string name="home_history_detail">आपके सेव किए गए नाप</string>
@@ -45,6 +45,7 @@
     <string name="measure_new">नया नाप</string>
     <string name="measure_save">सेव करें</string>
     <string name="measure_saved">हिस्ट्री में सेव हो गया</string>
+    <string name="measure_storage_failed">सेव नहीं हो सका। थोड़ी स्टोरेज खाली करके फिर कोशिश करें।</string>
     <string name="measure_start_over">फिर से शुरू करें</string>
     <string name="measure_coach_move">फ़ोन को धीरे-धीरे दाएँ-बाएँ घुमाएँ।</string>
     <string name="measure_coach_title">शुरुआत</string>
@@ -92,7 +93,7 @@
     <string name="tip_hold_still">हर पॉइंट पर फ़ोन को एक सेकंड स्थिर रखें।</string>
     <string name="tip_face_surface">सतह के ठीक सामने से नापें।</string>
     <string name="tip_aim_at_texture">किनारों या कोनों जैसी साफ़ दिखने वाली जगहों पर निशाना लगाएँ।</string>
-    <string name="tip_calibrate">कार्ड या A4 कागज़ से कैलिब्रेट करें।</string>
+    <string name="tip_calibrate">टेप से नापी गई किसी लंबाई (2 m या ज़्यादा) से कैलिब्रेट करें।</string>
     <string name="tip_measure_again">पक्का करने के लिए किसी दूसरे कोण से फिर नापें।</string>
     <!-- Calibration -->
     <string name="calib_title">कैलिब्रेट करें</string>
@@ -106,12 +107,20 @@
     <string name="calib_result_body">स्केल सुधार %1$s (± %2$s)</string>
     <string name="calib_apply">यह कैलिब्रेशन इस्तेमाल करें</string>
     <string name="calib_retry">फिर से नापें</string>
-    <string name="calib_applied">कैलिब्रेट हो गया। अब नतीजों पर कैलिब्रेटेड लिखा दिखेगा।</string>
+    <string name="calib_applied">इस सेशन के लिए कैलिब्रेट हो गया। उस सतह के नतीजों पर कैलिब्रेटेड लिखा दिखेगा।</string>
     <string name="calib_reject_out_of_range">यह नतीजा बहुत अलग है। बिंदु दिखने तक फ़ोन धीरे घुमाएँ, फिर कोशिश करें।</string>
     <string name="calib_reject_inconsistent">भुजाएँ कार्ड या कागज़ से मेल नहीं खातीं। देख लें कि आपने उसके कोनों पर ही निशाना लगाया था।</string>
-    <string name="calib_reject_noisy">नाप इतना पक्का नहीं कि काम आए। पास जाएँ या A4 कागज़ इस्तेमाल करें।</string>
+    <string name="calib_reject_noisy">नाप इतना पक्का नहीं कि काम आए। लंबी दूरी (2 m या ज़्यादा) लें और हर सिरे पर फ़ोन स्थिर रखें।</string>
     <string name="calib_reject_skewed">कोनों से आयत नहीं बन रहा। ठीक कोनों पर निशाना लगाएँ।</string>
     <string name="calib_reject_invalid">भुजाएँ नापी नहीं जा सकीं। फिर कोशिश करें।</string>
+    <string name="calib_known_length">पहले से नापी लंबाई</string>
+    <string name="calib_known_length_detail">कोई सीधी दूरी जिसे आपने टेप से नापा हो, 1 से 5 m (2 m या ज़्यादा सबसे अच्छा), दोनों सिरे एक ही सपाट सतह पर: जैसे मेज़ का किनारा, या दीवार पर दरवाज़े की चौड़ाई।</string>
+    <string name="calib_known_span_hint">उसी दूरी के दोनों सिरों पर निशाना लगाएँ जिसे आपने टेप से नापा था।</string>
+    <string name="calib_known_length_enter">टेप पर लंबाई</string>
+    <string name="calib_known_length_label">टेप की लंबाई (%1$s)</string>
+    <string name="calib_known_length_range">%1$s से %2$s के बीच लंबाई लिखें।</string>
+    <string name="calib_check">जाँचें</string>
+    <string name="calib_reject_not_one_surface">दोनों सिरे एक ही सपाट सतह पर होने चाहिए। फिर कोशिश करें।</string>
     <!-- History -->
     <string name="history_title">हिस्ट्री</string>
     <string name="history_empty">अभी तक कोई नाप सेव नहीं किया गया।</string>
@@ -155,7 +164,7 @@
     <string name="onboarding_how_body">अच्छी रोशनी रखें। फ़ोन को धीरे-धीरे दाएँ-बाएँ घुमाएँ, जब तक सतह पर बिंदु न दिखें। लगभग एक हाथ की दूरी पर रहें।</string>
     <string name="onboarding_accuracy_title">सटीकता के बारे में साफ़ बात</string>
     <string name="onboarding_accuracy_body" formatted="false">फ़ोन से लिया गया नाप आम तौर पर ±2% तक सही होता है (1 m पर लगभग ±1–2 cm)। हर नतीजे के साथ उसका अपना ± और अच्छा, ठीक-ठाक या अंदाज़न रेटिंग दिखती है।</string>
-    <string name="onboarding_calibrate_prompt">बेहतर सटीकता के लिए किसी भी बैंक कार्ड या A4 कागज़ से एक बार कैलिब्रेट कर लें। इसमें लगभग 20 सेकंड लगते हैं।</string>
+    <string name="onboarding_calibrate_prompt">बेहतर सटीकता के लिए 1 m या उससे लंबी कोई सीधी दूरी, जिसे आपने टेप से नापा हो, उससे कैलिब्रेट करें। इसमें लगभग एक मिनट लगता है।</string>
     <string name="onboarding_calibrate_now">अभी कैलिब्रेट करें</string>
     <string name="onboarding_calibrate_later">बाद में</string>
     <!-- Settings -->
@@ -171,7 +180,7 @@
     <string name="settings_sounds">आवाज़</string>
     <string name="settings_sounds_detail">पॉइंट जोड़ने पर हल्की क्लिक की आवाज़</string>
     <string name="settings_recalibrate">फिर से कैलिब्रेट करें</string>
-    <string name="settings_recalibrate_detail">सटीकता बढ़ाने के लिए बैंक कार्ड या A4 कागज़ इस्तेमाल करें</string>
+    <string name="settings_recalibrate_detail">सटीकता बढ़ाने के लिए टेप से नापी गई कोई लंबाई इस्तेमाल करें</string>
     <string name="settings_section_privacy">निजता</string>
     <string name="settings_privacy_options">विज्ञापन निजता विकल्प</string>
     <string name="settings_privacy_options_detail">विज्ञापन से जुड़ी अपनी सहमति देखें या बदलें</string>
@@ -186,6 +195,17 @@
     <string name="settings_accuracy_note" formatted="false">आम तौर पर ±2% (1 m पर लगभग ±1–2 cm)। हर नतीजे के साथ उसका अपना ± दिखता है। बिल्कुल सही नाप चाहिए तो फ़ीते से जाँच लें।</string>
     <string name="settings_licences">ओपन-सोर्स लाइसेंस</string>
     <string name="settings_licences_apache">Apache License 2.0: www.apache.org/licenses/LICENSE-2.0</string>
+    <string name="settings_depth">डेप्थ इस्तेमाल करें (अगर फ़ोन में हो)</string>
+    <string name="settings_depth_detail">सादी दीवारों और फ़र्श पर पॉइंट ज़्यादा स्थिर रहते हैं। बैटरी ज़्यादा खर्च होती है।</string>
+    <string name="settings_calibration_none">कोई कैलिब्रेशन सेव नहीं है</string>
+    <string name="settings_calibration_on">%1$s को कैलिब्रेट किया गया</string>
+    <string name="settings_calibration_stale">%1$s को कैलिब्रेट किया गया। 30 दिन से पुराना है: फिर से कैलिब्रेट करें।</string>
+    <string name="settings_clear_calibration">कैलिब्रेशन हटाएँ</string>
+    <string name="settings_clear_calibration_detail">सेव किया गया स्केल सुधार इस्तेमाल न करें</string>
+    <string name="settings_clear_calibration_title">कैलिब्रेशन हटाएँ?</string>
+    <string name="settings_clear_calibration_body">जब तक आप फिर से कैलिब्रेट नहीं करते, नतीजों में स्केल सुधार इस्तेमाल नहीं होगा।</string>
+    <string name="settings_clear_calibration_confirm">हटाएँ</string>
+    <string name="settings_cancel">रद्द करें</string>
     <string name="settings_contact">सहायता से संपर्क करें</string>
     <!-- Ads -->
     <string name="ads_label">विज्ञापन</string>

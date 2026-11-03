@@ -14,7 +14,6 @@ import com.google.ar.core.Frame
 import com.google.ar.core.Session
 import com.google.ar.core.TrackingState
 import com.spaceview.engine.DeviceTier
-import com.spaceview.engine.LocalisationInput
 import com.spaceview.engine.Plane
 import com.spaceview.engine.ReferenceObject
 import com.spaceview.engine.ScaleCalibration
@@ -39,6 +38,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.util.UUID
+import kotlin.math.abs
 
 /**
  * Throttled (≤ ~10 Hz) snapshot of the measuring state for the UI. Value-equal snapshots are not
@@ -121,6 +122,19 @@ class OverlayFrame {
  * (which creates, resumes, pauses and closes it with the lifecycle; this class never outlives it
  * and drops every ARCore reference on pause/[close]).
  *
+ * Anchor lifetime (M2 review M5): anchors are detached only in [onSessionPaused], which SceneView
+ * calls on the main thread before it hands `Session.pause()`/`Session.close()` to its teardown
+ * executor, and never afterwards. [close] only drops references (`Session.close()` releases every
+ * anchor). After a pause a finished measurement keeps its last positions (unanchored, still
+ * savable); an unfinished one is cleared, because new points could not be trusted to share a world
+ * frame with points from before the pause. Every anchor / session use checks `closed` and `live`.
+ *
+ * State ownership (M2 review minor 3): the main thread owns the point list and the fields derived
+ * from it (point count, completeness, pending commit, freeze, mode, session running); the worker
+ * owns the per-frame fields (tracking, surface, stability, reading, tip). Every change to the points
+ * bumps a generation counter, samples carry it, and the worker drops results of an older generation,
+ * so a buffered frame can never resurrect a reading after Save, Undo or Clear.
+ *
  * Threading: all public functions and the SceneView callbacks run on the **main** thread (where
  * SceneView's frame loop runs). Per frame the main thread only does the native reads (hit test,
  * point cloud, raw depth window), copies the data out and releases it; gating, averaging, plane
@@ -154,6 +168,14 @@ class MeasureSession(
     val overlay = OverlayFrame()
     var onOverlayChanged: (() -> Unit)? = null
 
+    private val _sessionId = MutableStateFlow<String?>(null)
+    /**
+     * Identity of the current ARCore session: a new random id every time SceneView creates a session
+     * (first start, "Try again", activity recreation). World coordinates (calibration plane, anchors)
+     * are only meaningful within one id (M2 review M3). Null before the first session.
+     */
+    val sessionId: StateFlow<String?> = _sessionId.asStateFlow()
+
     // ---- main-thread state ------------------------------------------------------------------
     private var session: Session? = null
     @Volatile private var capabilities: ArCapabilities? = null
@@ -163,18 +185,25 @@ class MeasureSession(
     private var viewH = 0
     private var lastPointCloudTs = -1L
     private val cloudBuffer = FloatArray(3 * MAX_CLOUD_POINTS)
+    private val viewMatrix = FloatArray(16)
+    private val projMatrix = FloatArray(16)
     private var lastPlaneHit: ArHit? = null
     private var commitRequestedAtMs = -1L
     private var freezeRequested = false
     private var frozenCapture: FrozenCaptureState? = null
     private var pendingAdjust: Vec3? = null
-    private var lastFocalPx = FrameReaders.DEFAULT_FOCAL_PX
+    private var intrinsics: ImageIntrinsics? = null
+    private var viewPxPerImagePx = Double.POSITIVE_INFINITY
     private var lastTracking = CameraTracking.STOPPED
     private var closed = false
+    /** True between resume and pause: only then may anchors be created or detached. */
+    private var live = false
+
+    /** Bumped (main thread) on every change to [endpoints]; the worker drops older results. */
+    @Volatile private var generation = 0
 
     @Volatile private var model: UncertaintyModel = UncertaintyModel(DeviceTier.NO_DEPTH)
     @Volatile private var calibration: ScaleCalibration? = null
-    @Volatile private var calibrationFloorRel = UncertaintyModel.DEFAULT_CALIBRATED_FLOOR_REL
 
     /** Latest commit candidate published by the worker. */
     @Volatile private var candidate: CommitCandidate? = null
@@ -186,12 +215,11 @@ class MeasureSession(
     // ---- configuration ------------------------------------------------------------------------
 
     /**
-     * Calibration to apply to readings (null = none). [floorRel] is the residual relative scale σ
-     * that calibration cannot remove; pass a larger value for a calibration from an earlier session.
+     * Calibration to apply to readings (null = none). It must come from **this** ARCore session
+     * ([sessionId]); the composer applies it only to readings whose points lie on its plane.
      */
-    fun setCalibration(c: ScaleCalibration?, floorRel: Double = UncertaintyModel.DEFAULT_CALIBRATED_FLOOR_REL) {
+    fun setCalibration(c: ScaleCalibration?) {
         calibration = c
-        calibrationFloorRel = floorRel
         rebuildModel()
     }
 
@@ -209,6 +237,7 @@ class MeasureSession(
     fun setViewSize(width: Int, height: Int) {
         viewW = width
         viewH = height
+        updateViewScale()
     }
 
     // ---- SceneView callbacks ----------------------------------------------------------------------
@@ -227,21 +256,58 @@ class MeasureSession(
 
     @MainThread
     fun onSessionCreated(session: Session) {
+        if (closed) return
+        // A new session has a new world frame: nothing from an earlier one carries over. Its anchors
+        // were detached in onSessionPaused (or released by Session.close()); only drop references.
+        if (endpoints.isNotEmpty()) {
+            endpoints.clear()
+            bumpGeneration()
+            _state.update { it.copy(pointCount = 0, isComplete = false, reading = null, tip = null, pendingCommit = false) }
+        }
         this.session = session
+        lastPlaneHit = null
+        lastPointCloudTs = -1L
+        intrinsics = null
+        updateViewScale()
+        _sessionId.value = UUID.randomUUID().toString()
     }
 
     @MainThread
     fun onSessionResumed(session: Session) {
+        if (closed) return
         this.session = session
+        live = true
         _state.update { it.copy(sessionRunning = true) }
     }
 
-    /** Also called by SceneView right before it closes the session. */
+    /**
+     * Also called by SceneView on the main thread right before it pauses and closes the session on
+     * its teardown executor: the last moment anchors may be detached (M2 review M5).
+     */
     @MainThread
     fun onSessionPaused(session: Session) {
+        if (closed) return
         commitRequestedAtMs = -1L
         freezeRequested = false
-        _state.update { it.copy(sessionRunning = false, pendingCommit = false) }
+        if (frozenCapture != null) endFreeze(apply = false)
+        for (e in endpoints) {
+            e.anchor?.let { a -> runCatching { a.detach() } }
+            e.anchor = null
+        }
+        lastPlaneHit = null
+        live = false
+        val incomplete = endpoints.isNotEmpty() && endpoints.size < mode.requiredPoints
+        if (incomplete) {
+            endpoints.clear()
+            bumpGeneration()
+        }
+        _state.update {
+            if (incomplete) {
+                it.copy(sessionRunning = false, pendingCommit = false, pointCount = 0, isComplete = false, reading = null, tip = null)
+            } else {
+                it.copy(sessionRunning = false, pendingCommit = false)
+            }
+        }
     }
 
     /** `onSessionUpdated`: once per ARCore frame, main thread. */
@@ -249,15 +315,15 @@ class MeasureSession(
     fun onFrame(session: Session, frame: Frame) {
         if (closed || viewW <= 0 || viewH <= 0) return
         this.session = session
+        live = true // a frame means the session is running
+        if (!_state.value.sessionRunning) _state.update { it.copy(sessionRunning = true) }
         val camera = frame.camera
         val tracking = FrameReaders.tracking(camera.trackingState)
         lastTracking = tracking
         val reason = FrameReaders.reason(camera.trackingFailureReason)
-        val viewM = FloatArray(16)
-        val projM = FloatArray(16)
-        camera.getViewMatrix(viewM, 0)
-        camera.getProjectionMatrix(projM, 0, NEAR_M, FAR_M)
-        val vp = ViewProjection(viewM, projM, viewW, viewH)
+        camera.getViewMatrix(viewMatrix, 0)
+        camera.getProjectionMatrix(projMatrix, 0, NEAR_M, FAR_M)
+        val vp = ViewProjection(viewMatrix, projMatrix, viewW, viewH)
         val centreX = viewW / 2f
         val centreY = viewH / 2f
         val light = frame.lightEstimate.let { if (it.state == com.google.ar.core.LightEstimate.State.VALID) it.pixelIntensity else Float.NaN }
@@ -267,9 +333,12 @@ class MeasureSession(
         var cloud: FloatArray? = null
         var depth: DepthPatch? = null
         if (tracking == CameraTracking.TRACKING) {
-            // Focal length in *view* pixels (the hit-test resolution): P[1][1] = 2·fy / H.
-            val fyView = projM[5].toDouble() * viewH / 2.0
-            if (fyView.isFinite() && fyView > 0) lastFocalPx = fyView
+            // Camera-image intrinsics (fixed for the session's camera config): the aim error is
+            // defined in camera-image pixels, never in view pixels (M2 review B1).
+            if (intrinsics == null) {
+                intrinsics = FrameReaders.imageIntrinsics(frame)
+                updateViewScale()
+            }
             hit = FrameReaders.centreHit(frame, centreX, centreY)
             if (hit?.kind == HitKind.PLANE) lastPlaneHit = hit
             FrameReaders.pointCloud(frame, lastPointCloudTs, cloudBuffer)?.let { (n, ts) ->
@@ -280,11 +349,16 @@ class MeasureSession(
             if (capabilities?.depthActive == true) depth = FrameReaders.depthPatch(frame, centreX, centreY)
         }
 
-        // Anchor refinement: read the current pose of every committed point.
+        // Anchor refinement: read the current pose of every committed, anchored point. Points left
+        // unanchored by a pause keep their last position (a finished, frozen result).
         var allTracking = true
+        var anyUnanchored = false
         for (e in endpoints) {
-            if (e.anchor.trackingState == TrackingState.TRACKING) {
-                e.data = e.data.movedTo(e.anchor.pose.position())
+            val a = e.anchor
+            if (a == null) {
+                anyUnanchored = true
+            } else if (a.trackingState == TrackingState.TRACKING) {
+                e.data = e.data.movedTo(a.pose.position())
             } else {
                 allTracking = false
             }
@@ -293,23 +367,25 @@ class MeasureSession(
         processCommitRequest(session, tracking)
         if (freezeRequested) captureFreeze(frame, vp, tracking)
 
+        val snapshot = if (endpoints.isEmpty()) emptyList() else ArrayList<EndpointData>(endpoints.size).also { l -> for (e in endpoints) l += e.data }
         val sample = FrameSample(
             timestampNs = frame.timestamp,
+            generation = generation,
             tracking = tracking,
             reason = reason,
             cameraPose = camera.pose.toEngine(),
             light = light,
             centreRay = vp.centreRay(),
-            hit = hit?.let { HitData(it.position, it.normal, it.kind, it.distance) },
+            hit = hit?.let { HitSample(it.position, it.normal, it.kind, it.distance) },
             cloud = cloud,
             cloudCount = cloudCount,
             depth = depth,
-            endpoints = endpoints.map { it.data },
+            endpoints = snapshot,
             pointsTracking = allTracking,
-            focalPx = lastFocalPx,
+            intrinsics = intrinsics,
+            viewPxPerImagePx = viewPxPerImagePx,
             mode = mode,
             frozen = frozenCapture != null,
-            pendingCommit = commitRequestedAtMs >= 0,
         )
         frames.trySend(sample)
 
@@ -321,7 +397,7 @@ class MeasureSession(
         } else {
             null
         }
-        overlay.pointsVisible = allTracking && tracking == CameraTracking.TRACKING
+        overlay.pointsVisible = allTracking && !anyUnanchored && tracking == CameraTracking.TRACKING
         overlay.mode = mode
         overlay.hidden = frozenCapture != null
         onOverlayChanged?.invoke()
@@ -335,9 +411,9 @@ class MeasureSession(
      */
     @MainThread
     fun addPoint() {
-        if (frozenCapture != null) return
+        if (closed || frozenCapture != null) return
         if (endpoints.size >= mode.requiredPoints) clear()
-        if (lastTracking != CameraTracking.TRACKING) {
+        if (!live || lastTracking != CameraTracking.TRACKING) {
             _events.tryEmit(MeasureEvent.CommitRejected(CommitFailure.NOT_TRACKING))
             return
         }
@@ -345,34 +421,34 @@ class MeasureSession(
         _state.update { it.copy(pendingCommit = true) }
     }
 
-    /** Removes the last point. */
+    /** Removes the last point (all of them when a pause left them unanchored). */
     @MainThread
     fun undo() {
-        if (frozenCapture != null) return
+        if (closed || frozenCapture != null) return
+        if (endpoints.any { it.anchor == null }) {
+            clear()
+            return
+        }
         commitRequestedAtMs = -1L
-        endpoints.removeLastOrNull()?.anchor?.detach()
-        _state.update { it.copy(pointCount = endpoints.size, isComplete = false, tip = null, pendingCommit = false) }
+        endpoints.removeLastOrNull()?.let { detach(it) }
+        bumpGeneration()
+        _state.update { it.copy(pointCount = endpoints.size, isComplete = false, tip = null, reading = null, pendingCommit = false) }
     }
 
     /** Removes all points. */
     @MainThread
     fun clear() {
+        if (closed) return
         commitRequestedAtMs = -1L
-        for (e in endpoints) e.anchor.detach()
+        for (e in endpoints) detach(e)
         endpoints.clear()
+        bumpGeneration()
         _state.update { it.copy(pointCount = 0, isComplete = false, tip = null, reading = null, pendingCommit = false) }
     }
 
-    /** Committed endpoints (for saving). */
+    /** Committed endpoints. */
     @MainThread
     fun committedPoints(): List<EndpointData> = endpoints.map { it.data }
-
-    /** Final reading recomputed now from the current anchor poses (call at save time). */
-    @MainThread
-    fun finalReading(): Reading? {
-        if (endpoints.size < mode.requiredPoints) return null
-        return runCatching { MeasurementComposer.compose(mode, endpoints.map { it.data }, null, model) }.getOrNull()
-    }
 
     /**
      * Calibration from the three committed corners of a reference card / sheet, using this device
@@ -385,10 +461,21 @@ class MeasureSession(
         return MeasurementComposer.calibrationCheck(reference, endpoints.map { it.data }, uncalibrated)
     }
 
+    /**
+     * Calibration from the two committed ends of a tape-measured span ([trueValue] ± [trueSigma] m),
+     * using this device tier's *uncalibrated* model. Null until two ends are placed.
+     */
+    @MainThread
+    fun knownLengthCheck(trueValue: Double, trueSigma: Double): CalibrationCheck? {
+        if (endpoints.size < 2) return null
+        val uncalibrated = UncertaintyModel(capabilities?.tier ?: DeviceTier.NO_DEPTH)
+        return MeasurementComposer.knownLengthCheck(trueValue, trueSigma, endpoints.map { it.data }, uncalibrated)
+    }
+
     /** Freezes the current camera frame so the last point can be adjusted with the magnifier. */
     @MainThread
     fun freeze() {
-        if (endpoints.isEmpty() || frozenCapture != null) {
+        if (closed || !live || endpoints.isEmpty() || frozenCapture != null || endpoints.any { it.anchor == null }) {
             _events.tryEmit(MeasureEvent.FreezeUnavailable)
             return
         }
@@ -410,7 +497,7 @@ class MeasureSession(
         val p = plane.intersect(ray, MIN_ADJUST_COS) ?: return null
         if (p.distanceTo(last.data.point.position) > MAX_ADJUST_M) return null
         pendingAdjust = p
-        val adjusted = adjustedEndpoint(last.data, p, cap.cameraPosition)
+        val adjusted = adjustedEndpoint(last.data, p, cap)
         val pts = endpoints.dropLast(1).map { it.data } + adjusted
         val reading = runCatching { MeasurementComposer.compose(mode, pts, null, model) }.getOrNull()
         val screen = cap.projection.project(p) ?: ScreenPoint(x, y)
@@ -423,12 +510,13 @@ class MeasureSession(
         val cap = frozenCapture
         val p = pendingAdjust
         val s = session
-        if (apply && cap != null && p != null && s != null && endpoints.isNotEmpty()) {
+        if (apply && !closed && live && cap != null && p != null && s != null && endpoints.isNotEmpty()) {
             val last = endpoints.last()
             val anchor = runCatching { s.createAnchor(translationPose(p)) }.getOrNull()
             if (anchor != null) {
-                last.anchor.detach()
-                endpoints[endpoints.size - 1] = Endpoint(anchor, adjustedEndpoint(last.data, p, cap.cameraPosition))
+                detach(last)
+                endpoints[endpoints.size - 1] = Endpoint(anchor, adjustedEndpoint(last.data, p, cap))
+                bumpGeneration()
             }
         }
         frozenCapture = null
@@ -437,12 +525,16 @@ class MeasureSession(
         _state.update { it.copy(isFrozen = false, pointCount = endpoints.size) }
     }
 
-    /** Releases everything. Call when the AR screen leaves composition. Idempotent. */
+    /**
+     * Releases everything. Call when the AR screen leaves composition. Idempotent. Never touches an
+     * anchor or the session: SceneView may already be closing it on another thread, and
+     * `Session.close()` releases every anchor (M2 review M5).
+     */
     @MainThread
     fun close() {
         if (closed) return
         closed = true
-        for (e in endpoints) runCatching { e.anchor.detach() }
+        live = false
         endpoints.clear()
         session = null
         lastPlaneHit = null
@@ -457,7 +549,7 @@ class MeasureSession(
 
     private fun processCommitRequest(session: Session, tracking: CameraTracking) {
         val requested = commitRequestedAtMs
-        if (requested < 0) return
+        if (requested < 0 || closed || !live) return
         val now = SystemClock.elapsedRealtime()
         val c = candidate
         val fresh = c != null && SystemClock.elapsedRealtimeNanos() - c.wallNs < STALE_NS
@@ -469,6 +561,7 @@ class MeasureSession(
             }
             val anchor = createAnchor(session, data) ?: run { finishCommit(CommitFailure.NOT_TRACKING); return }
             endpoints += Endpoint(anchor, data)
+            bumpGeneration()
             commitRequestedAtMs = -1L
             val complete = endpoints.size >= mode.requiredPoints
             _state.update { it.copy(pendingCommit = false, pointCount = endpoints.size, isComplete = complete) }
@@ -492,17 +585,43 @@ class MeasureSession(
         _events.tryEmit(MeasureEvent.CommitRejected(failure))
     }
 
-    /** Plane-attached anchor when the point is on the tracked plane, else a world anchor. */
+    /**
+     * Plane-attached anchor when the point lies on the last hit plane (inside its polygon **and**
+     * within [PLANE_ANCHOR_MAX_OFFSET_M] of it: `isPoseInPolygon` ignores height, so a table-top point
+     * could otherwise be attached to the floor plane, M2 review minor 5), else a world anchor.
+     */
     private fun createAnchor(session: Session, data: EndpointData): Anchor? {
+        if (closed || !live) return null
         val pose = translationPose(data.point.position)
         val plane = lastPlaneHit?.trackable
         if (data.kind == HitKind.PLANE && plane is com.google.ar.core.Plane &&
             plane.trackingState == TrackingState.TRACKING && plane.subsumedBy == null &&
-            runCatching { plane.isPoseInPolygon(pose) }.getOrDefault(false)
+            runCatching { onPlane(plane, data.point.position) && plane.isPoseInPolygon(pose) }.getOrDefault(false)
         ) {
             runCatching { return plane.createAnchor(pose) }
         }
         return runCatching { session.createAnchor(pose) }.getOrNull()
+    }
+
+    private fun onPlane(plane: com.google.ar.core.Plane, p: Vec3): Boolean {
+        val c = plane.centerPose
+        return abs((p - c.position()) dot c.yAxisVec()) <= PLANE_ANCHOR_MAX_OFFSET_M
+    }
+
+    /** Detaches [e]'s anchor while the session is live (main thread, never after a pause/close). */
+    private fun detach(e: Endpoint) {
+        val a = e.anchor ?: return
+        e.anchor = null
+        if (live && !closed) runCatching { a.detach() }
+    }
+
+    private fun bumpGeneration() {
+        generation++
+    }
+
+    private fun updateViewScale() {
+        val intr = intrinsics
+        viewPxPerImagePx = if (intr != null && viewW > 0 && viewH > 0) AimModel.viewPxPerImagePx(intr, viewW, viewH) else Double.POSITIVE_INFINITY
     }
 
     private fun captureFreeze(frame: Frame, vp: ViewProjection, tracking: CameraTracking) {
@@ -516,7 +635,7 @@ class MeasureSession(
             _events.tryEmit(MeasureEvent.FreezeUnavailable)
             return
         }
-        val cap = FrozenCaptureState(vp, frame.camera.pose.position())
+        val cap = FrozenCaptureState(vp, frame.camera.pose.position(), still.intrinsics, still.viewPxPerImagePx)
         frozenCapture = cap
         pendingAdjust = null
         val points = endpoints.map { it.data.point.position }
@@ -534,10 +653,12 @@ class MeasureSession(
         }
     }
 
-    private fun adjustedEndpoint(original: EndpointData, p: Vec3, cameraPosition: Vec3): EndpointData {
-        val range = cameraPosition.distanceTo(p)
-        // Conservative: the original aim term stays and the loupe placement error is added on top.
-        val sigma = LocalisationInput(range, lastFocalPx, ADJUST_PIXELS).sigmaMeters
+    private fun adjustedEndpoint(original: EndpointData, p: Vec3, cap: FrozenCaptureState): EndpointData {
+        val range = cap.cameraPosition.distanceTo(p)
+        // The still is the CPU image: the placement error is in its pixels with its focal length
+        // (M2 review B1). Conservative: the original aim term stays and this error is added on top.
+        val loc = cap.stillIntrinsics?.let { AimModel.adjust(range, it, cap.viewPxPerImagePx) }
+        val sigma = loc?.sigmaMeters ?: model.unlocalisedEndpointSigma
         return EndpointData(
             point = original.point.movedTo(p).withLocalisationSigma(sigma),
             normal = original.normal,
@@ -546,14 +667,14 @@ class MeasureSession(
             planeBiasRel = original.planeBiasRel,
             spreadRms = original.spreadRms,
             incidenceCos = original.incidenceCos,
-            focalPx = lastFocalPx,
-            pixelErrorPx = ADJUST_PIXELS,
+            focalPx = loc?.focalLengthPx ?: 0.0,
+            pixelErrorPx = loc?.pixelErrorPx ?: 0.0,
         )
     }
 
     private fun rebuildModel() {
         val tier = capabilities?.tier ?: DeviceTier.NO_DEPTH
-        model = UncertaintyModel(tier, calibration, calibratedScaleFloorRel = calibrationFloorRel)
+        model = UncertaintyModel(tier, calibration)
     }
 
     // ---- worker -----------------------------------------------------------------------------------
@@ -564,7 +685,7 @@ class MeasureSession(
         val surface = LocalSurfaceModel()
         val depthPoints = FloatArray(3 * MAX_DEPTH_POINTS)
         var lastPublishMs = 0L
-        var lastPointCount = -1
+        var lastGeneration = -1
         var lastStatus: TrackingStatus? = null
         var lowLightSeen = false
 
@@ -572,62 +693,56 @@ class MeasureSession(
             val gateResult = gate.update(s.timestampNs, s.tracking, s.reason, s.cameraPose, s.light)
             if (s.endpoints.isEmpty()) lowLightSeen = false
             if (gateResult.lowLight) lowLightSeen = true
+            val tracked = gateResult.sampleQuality != TrackingQuality.NOT_TRACKING
 
-            // Raw 3-D points for our own plane fit.
+            // Raw 3-D points for our own plane fit, pre-filtered to a cone around the reticle ray.
+            val ray = s.centreRay
             val cloud = s.cloud
-            if (cloud != null && s.cloudCount > 0) surface.addPoints(cloud, s.cloudCount, s.timestampNs)
+            if (cloud != null && s.cloudCount > 0) surface.addPoints(cloud, s.cloudCount, s.timestampNs, ray)
             s.depth?.let { patch ->
                 val n = patch.toWorldPoints(depthPoints)
-                if (n > 0) surface.addPoints(depthPoints, n, s.timestampNs)
+                if (n > 0) surface.addPoints(depthPoints, n, s.timestampNs, ray)
             }
 
-            val ray = s.centreRay
-            var livePoint: Vec3? = null
-            var normal: Vec3? = null
-            var kind: HitKind? = null
-            var range = 0.0
-            var planeBias = 0.0
-            if (gateResult.sampleQuality != TrackingQuality.NOT_TRACKING && ray != null) {
-                val hit = s.hit
-                if (hit != null && hit.kind == HitKind.PLANE) {
-                    livePoint = hit.position; normal = hit.normal; kind = HitKind.PLANE; range = hit.distance
-                } else {
-                    surface.update(ray, s.timestampNs)
-                    val fitted = surface.intersect(ray, s.cameraPose.translation)
-                    if (fitted != null) {
-                        livePoint = fitted.position; normal = fitted.normal; kind = HitKind.FITTED_SURFACE
-                        range = fitted.range; planeBias = fitted.planeBiasRel
-                    } else if (hit != null) {
-                        livePoint = hit.position; normal = hit.normal; kind = hit.kind; range = hit.distance
-                    }
-                }
-            }
-            val loc = if (range > 0 && s.focalPx > 0) LocalisationInput(range, s.focalPx, AIM_PIXELS) else null
-            if (!s.frozen) {
-                // While the user works on a frozen still, tracking stays fresh but nothing is averaged.
-                stabilizer.add(livePoint, range, gateResult.sampleQuality, loc)
-            }
-
-            val est = stabilizer.estimate
-            val liveData: EndpointData? = if (livePoint != null && kind != null) {
-                val incidence = if (normal != null && ray != null) kotlin.math.abs(normal dot ray.direction) else null
-                // The estimate already carries the aim term (engine-localised); a raw live point gets it here.
-                val point = est?.point ?: loc?.let { UncertainPoint(livePoint).withLocalisation(it) } ?: UncertainPoint(livePoint)
-                EndpointData(point, normal, kind, range, planeBias, est?.spreadRms ?: 0.0, incidence, s.focalPx, AIM_PIXELS)
+            val chosen = if (tracked && ray != null) {
+                SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs)
             } else {
                 null
             }
-            candidate = if (liveData != null && est != null) {
+            val range = chosen?.range ?: 0.0
+            val loc = s.intrinsics?.let { AimModel.aim(range, it, s.viewPxPerImagePx) }
+            if (!s.frozen) {
+                // While the user works on a frozen still, tracking stays fresh but nothing is averaged.
+                // NOT_TRACKING resets the stabiliser even without a position (M2 review minor 4).
+                stabilizer.add(chosen?.position, range, gateResult.sampleQuality, loc)
+            }
+
+            val est = stabilizer.estimate
+            val liveData: EndpointData? = if (chosen != null) {
+                val normal = chosen.normal
+                val incidence = if (normal != null && ray != null) abs(normal dot ray.direction) else null
+                // The estimate already carries the aim term (engine-localised); a raw live point gets it here.
+                val point = est?.point ?: loc?.let { UncertainPoint(chosen.position).withLocalisation(it) } ?: UncertainPoint(chosen.position)
+                EndpointData(
+                    point, normal, chosen.kind, range, chosen.planeBiasRel, est?.spreadRms ?: 0.0, incidence,
+                    loc?.focalLengthPx ?: 0.0, loc?.pixelErrorPx ?: 0.0,
+                )
+            } else {
+                null
+            }
+            // Only a full-quality frame may offer a commit (never during the post-loss warm-up).
+            candidate = if (liveData != null && est != null && gateResult.sampleQuality == TrackingQuality.TRACKING) {
                 CommitCandidate(liveData, est.isStable, s.timestampNs, SystemClock.elapsedRealtimeNanos())
             } else {
                 null
             }
 
             val now = SystemClock.elapsedRealtime()
-            val discreteChange = s.endpoints.size != lastPointCount || gateResult.status != lastStatus
+            val discreteChange = s.generation != lastGeneration || gateResult.status != lastStatus
             if (!discreteChange && now - lastPublishMs < PUBLISH_INTERVAL_MS) continue
+            if (s.generation != generation) continue // the points changed since this frame: stale
             lastPublishMs = now
-            lastPointCount = s.endpoints.size
+            lastGeneration = s.generation
             lastStatus = gateResult.status
 
             val complete = s.endpoints.size >= s.mode.requiredPoints
@@ -635,26 +750,27 @@ class MeasureSession(
                 MeasurementComposer.compose(s.mode, s.endpoints, if (complete) null else liveData, model)
             }.getOrNull()
             val tip = if (complete && reading != null) MeasurementComposer.tipFor(reading, s.endpoints, lowLightSeen) else null
-            val next = MeasureState(
-                mode = s.mode,
-                sessionRunning = true,
-                tracking = gateResult.status,
-                hasSurface = livePoint != null,
-                surfaceKind = kind,
-                targetDistanceCm = if (livePoint != null) (range * 100).toInt() else null,
-                stability = if (livePoint == null) 0f else ((stabilizer.progress * 10).toInt() / 10f),
-                locked = stabilizer.isLocked,
-                pointCount = s.endpoints.size,
-                reading = reading,
-                isComplete = complete,
-                tip = tip,
-                pointsTracking = s.pointsTracking,
-                lowLight = gateResult.lowLight,
-                capabilities = capabilities,
-                isFrozen = s.frozen,
-                pendingCommit = s.pendingCommit,
-            )
-            _state.value = next
+            val stability = if (chosen == null) 0f else ((stabilizer.progress * 10).toInt() / 10f)
+            val locked = stabilizer.isLocked
+            // Merge only the worker-owned fields, and only while the points are still those of this frame.
+            _state.update { cur ->
+                if (s.generation != generation) {
+                    cur
+                } else {
+                    cur.copy(
+                        tracking = gateResult.status,
+                        hasSurface = chosen != null,
+                        surfaceKind = chosen?.kind,
+                        targetDistanceCm = if (chosen != null) (range * 100).toInt() else null,
+                        stability = stability,
+                        locked = locked,
+                        reading = reading,
+                        tip = tip,
+                        pointsTracking = s.pointsTracking,
+                        lowLight = gateResult.lowLight,
+                    )
+                }
+            }
         }
     }
 
@@ -668,31 +784,36 @@ class MeasureSession(
 
     // ---- types ------------------------------------------------------------------------------------
 
-    private class Endpoint(val anchor: Anchor, var data: EndpointData)
+    /** A committed point. [anchor] is null once a pause detached it (the data is then frozen). */
+    private class Endpoint(var anchor: Anchor?, var data: EndpointData)
 
-    private class FrozenCaptureState(val projection: ViewProjection, val cameraPosition: Vec3)
-
-    private class HitData(val position: Vec3, val normal: Vec3?, val kind: HitKind, val distance: Double)
+    private class FrozenCaptureState(
+        val projection: ViewProjection,
+        val cameraPosition: Vec3,
+        val stillIntrinsics: ImageIntrinsics?,
+        val viewPxPerImagePx: Double,
+    )
 
     private class CommitCandidate(val data: EndpointData, val locked: Boolean, val timestampNs: Long, val wallNs: Long)
 
     private class FrameSample(
         val timestampNs: Long,
+        val generation: Int,
         val tracking: CameraTracking,
         val reason: FailureReason,
         val cameraPose: com.spaceview.engine.Pose,
         val light: Float,
         val centreRay: com.spaceview.engine.Ray?,
-        val hit: HitData?,
+        val hit: HitSample?,
         val cloud: FloatArray?,
         val cloudCount: Int,
         val depth: DepthPatch?,
         val endpoints: List<EndpointData>,
         val pointsTracking: Boolean,
-        val focalPx: Double,
+        val intrinsics: ImageIntrinsics?,
+        val viewPxPerImagePx: Double,
         val mode: MeasureMode,
         val frozen: Boolean,
-        val pendingCommit: Boolean,
     )
 
     companion object {
@@ -702,11 +823,8 @@ class MeasureSession(
         /** How long "+" waits for a steady point. */
         const val COMMIT_TIMEOUT_MS = 2500L
 
-        /** Aiming error of the centre crosshair, in view pixels (placeholder to tune). */
-        const val AIM_PIXELS = 2.0
-
-        /** Placement error on a 2× magnified frozen frame, in view pixels (placeholder to tune). */
-        const val ADJUST_PIXELS = 1.0
+        /** A plane anchor is used only for points within this distance of the plane (else a world anchor). */
+        const val PLANE_ANCHOR_MAX_OFFSET_M = 0.01
 
         /** A frozen-frame adjustment may move the point at most this far along its surface. */
         const val MAX_ADJUST_M = 0.3

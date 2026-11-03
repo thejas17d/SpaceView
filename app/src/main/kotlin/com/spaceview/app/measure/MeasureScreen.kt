@@ -35,7 +35,7 @@ import kotlinx.coroutines.delay
 /**
  * Measure route: permission / ARCore gate, then the AR measuring screen.
  *
- * @param startWithCalibration open straight into the calibration flow (card or A4).
+ * @param startWithCalibration open straight into the calibration flow (a tape-measured known length).
  */
 @Composable
 fun MeasureRoute(
@@ -52,7 +52,8 @@ fun MeasureRoute(
 /** UI-only calibration state of the screen. */
 internal sealed interface CalibrationStep {
     data object Choosing : CalibrationStep
-    data class Measuring(val reference: ReferenceObject) : CalibrationStep
+    /** [reference] null = a known (tape-measured) length, measured as a distance; else a card / sheet. */
+    data class Measuring(val reference: ReferenceObject?) : CalibrationStep
 }
 
 @Composable
@@ -83,18 +84,18 @@ private fun MeasureArScreen(
         val soundsOn by rememberUpdatedState(settings.soundsEnabled)
         var transient by remember { mutableStateOf<TransientMessage?>(null) }
 
-        // Calibration flow measures a rectangle with the *uncalibrated* model.
+        // Calibration measures a distance (known length) or a rectangle (card / A4) with the *uncalibrated* model.
         val calibrating = calibration is CalibrationStep.Measuring
-        LaunchedEffect(calibrating, measureMode) {
-            session.setMode(if (calibrating) MeasureMode.RECTANGLE else measureMode)
+        val calibrationMode = (calibration as? CalibrationStep.Measuring)?.let {
+            if (it.reference == null) MeasureMode.DISTANCE else MeasureMode.RECTANGLE
         }
-        LaunchedEffect(calibrating, settings.calibration) {
-            if (calibrating) {
-                session.setCalibration(null)
-            } else {
-                val (c, floor) = vm.calibrationForSession(settings.calibration)
-                session.setCalibration(c, floor)
-            }
+        val arSessionId by session.sessionId.collectAsStateWithLifecycle()
+        LaunchedEffect(calibrationMode, measureMode) {
+            session.setMode(calibrationMode ?: measureMode)
+        }
+        // A stored calibration applies only inside the ARCore session that made it (M2 review M3).
+        LaunchedEffect(calibrating, settings.calibration, arSessionId) {
+            session.setCalibration(if (calibrating) null else vm.calibrationFor(settings.calibration, arSessionId))
         }
         LaunchedEffect(session) {
             session.events.collect { e ->
@@ -114,6 +115,7 @@ private fun MeasureArScreen(
                         TransientMessage.Saved
                     }
                     MeasureVmEvent.CalibrationApplied -> TransientMessage.CalibrationApplied
+                    MeasureVmEvent.StorageFailed -> TransientMessage.StorageFailed
                 }
             }
         }
@@ -199,7 +201,8 @@ private fun MeasureArScreen(
                     onUndo = session::undo,
                     onFreeze = session::freeze,
                     onNew = session::clear,
-                    onSave = { label -> session.finalReading()?.let { vm.save(it, label) }; session.clear() },
+                    // Saves exactly the reading on the result card (M2 review minor 1).
+                    onSave = { reading, label -> vm.save(reading, label); session.clear() },
                     onStartOver = session::clear,
                     onRetrySession = { sessionFailed = false; sessionKey++ },
                     onDismissSafety = vm::dismissSafetyNotice,
@@ -210,14 +213,13 @@ private fun MeasureArScreen(
                         if (startWithCalibration) onClose()
                     },
                     onApplyCalibration = { outcome ->
-                        vm.applyCalibration(outcome)
+                        vm.applyCalibration(outcome, arSessionId)
                         calibration = null
                         session.clear()
                     },
                     onRetryCalibration = session::clear,
-                    finalReading = session::finalReading,
                     calibrationCheck = session::calibrationCheck,
-                    calibratedToday = settings.calibration?.sessionId == vm.visitStartedAtMillis,
+                    knownLengthCheck = session::knownLengthCheck,
                 )
             }
         }
@@ -230,6 +232,7 @@ internal sealed interface TransientMessage {
     data object FreezeUnavailable : TransientMessage
     data object Saved : TransientMessage
     data object CalibrationApplied : TransientMessage
+    data object StorageFailed : TransientMessage
 }
 
 private const val TRANSIENT_MS = 3000L

@@ -3,7 +3,5 @@ android.permission.ACCESS_ADSERVICES_ATTRIBUTION
 android.permission.ACCESS_ADSERVICES_TOPICS
 android.permission.ACCESS_NETWORK_STATE
 android.permission.CAMERA
-android.permission.FOREGROUND_SERVICE
 android.permission.INTERNET
-android.permission.WAKE_LOCK
 com.google.android.gms.permission.AD_ID

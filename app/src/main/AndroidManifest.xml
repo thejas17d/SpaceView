@@ -2,7 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Camera is the only permission. It is requested at runtime when the user opens Measure or Scan. -->
+    <!-- Camera is the only runtime (dangerous) permission. It is requested when the user opens
+         Measure or Scan. Everything else below is a normal install-time permission for ads;
+         ci/allowed-permissions.txt must match the merged release manifest. -->
     <!-- The camera is genuinely required (AR Required), so lint's ChromeOS advice to mark the
          implied camera feature optional does not apply. -->
     <uses-permission
@@ -17,6 +19,26 @@
          tracking), so it is stripped. -->
     <uses-permission
         android:name="android.permission.VIBRATE"
+        tools:node="remove" />
+
+    <!-- Merged in by androidx.work:work-runtime 2.7.0, which play-services-ads 25.5.0 pulls in for
+         two plain background Workers (OfflinePingSender, OfflineNotificationPoster). Checked in the
+         bytecode (M2 review minor 13): neither the ads SDK nor UMP calls setForegroundAsync, uses
+         ForegroundInfo or enqueues expedited work, so WorkManager never starts its
+         SystemForegroundService and the permission is unused. Removing it also avoids Play's
+         foreground-service type declaration (targetSdk 34+). Re-check when play-services-ads or
+         work-runtime changes version (ci/release-dependencies.txt flags that). -->
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE"
+        tools:node="remove" />
+
+    <!-- Merged in by work-runtime and play-services-measurement-sdk-api. Its only users in the
+         release dex: WorkManager's foreground path (unused, see above), its SystemAlarmService path
+         (API 22 and lower only; minSdk is 24, so JobScheduler is used) and the ads SDK's video
+         player wake lock, which checks the permission first and plays without a CPU wake lock when
+         it is missing. Nothing acquires it unconditionally, so it is stripped. -->
+    <uses-permission
+        android:name="android.permission.WAKE_LOCK"
         tools:node="remove" />
 
     <!-- AR Required: Play lists the app only on ARCore-certified devices and installs
@@ -59,7 +81,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode|locale|layoutDirection|fontScale"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

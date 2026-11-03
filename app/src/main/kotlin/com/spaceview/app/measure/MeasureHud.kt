@@ -67,17 +67,16 @@ internal fun MeasureHud(
     onUndo: () -> Unit,
     onFreeze: () -> Unit,
     onNew: () -> Unit,
-    onSave: (String?) -> Unit,
+    onSave: (Reading, String?) -> Unit,
     onStartOver: () -> Unit,
     onRetrySession: () -> Unit,
     onDismissSafety: () -> Unit,
-    onChooseReference: (ReferenceObject) -> Unit,
+    onChooseReference: (ReferenceObject?) -> Unit,
     onCancelCalibration: () -> Unit,
     onApplyCalibration: (CalibrationOutcome.Accepted) -> Unit,
     onRetryCalibration: () -> Unit,
-    finalReading: () -> Reading?,
     calibrationCheck: (ReferenceObject) -> CalibrationCheck?,
-    calibratedToday: Boolean,
+    knownLengthCheck: (Double, Double) -> CalibrationCheck?,
 ) {
     val coaching = state.tracking == TrackingStatus.INITIALIZING || !state.sessionRunning
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -92,7 +91,8 @@ internal fun MeasureHud(
                     ChromePill(stringResource(R.string.calib_title))
                 }
                 Spacer(Modifier.weight(1f))
-                if (calibration == null && settings.calibration != null) {
+                // Only when the reading on screen is calibrated (M2 review M3 / minor 17).
+                if (calibration == null && state.reading?.calibrated == true) {
                     ChromePill(stringResource(R.string.measure_calibrated_chip))
                 } else {
                     Spacer(Modifier.width(48.dp))
@@ -116,23 +116,31 @@ internal fun MeasureHud(
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             when {
                 calibration == CalibrationStep.Choosing -> ReferencePicker(onChooseReference)
-                calibration is CalibrationStep.Measuring && state.isComplete && state.reading != null -> CalibrationResultCard(
+                calibration is CalibrationStep.Measuring && calibration.reference == null &&
+                    state.isComplete && state.reading?.isLive == false -> KnownLengthCard(
+                    unit = MeasureViewModel.knownLengthUnit(settings.units),
+                    check = knownLengthCheck,
+                    onApply = onApplyCalibration,
+                    onRetry = onRetryCalibration,
+                )
+                calibration is CalibrationStep.Measuring && calibration.reference != null &&
+                    state.isComplete && state.reading != null -> CalibrationResultCard(
                     reference = calibration.reference,
                     reading = state.reading!!,
                     check = calibrationCheck,
                     onApply = onApplyCalibration,
                     onRetry = onRetryCalibration,
                 )
-                calibration == null && state.isComplete && state.reading != null -> ResultCard(
+                calibration == null && state.isComplete && state.reading?.isLive == false -> ResultCard(
                     reading = state.reading!!,
                     tip = state.tip,
                     units = settings.units,
                     calibrationDateMillis = if (state.reading!!.calibrated) settings.calibration?.calibratedAtMillis else null,
-                    calibratedThisVisit = calibratedToday,
+                    // Points not tracked: the numbers cannot be refreshed or trusted, so no Save (minor 2).
+                    saveEnabled = state.pointsTracking,
                     onSave = onSave,
                     onNew = onNew,
                     onUndo = onUndo,
-                    finalReading = finalReading,
                 )
                 !sessionFailed -> Controls(state, onAddPoint, onUndo, onFreeze)
             }
@@ -179,7 +187,9 @@ private fun HintArea(
         !state.hasSurface -> CoachingCard(message = stringResource(R.string.measure_no_surface))
         else -> {
             val instruction = instructionRes(state.mode, state.pointCount)
-            val extra = (calibration as? CalibrationStep.Measuring)?.let { stringResource(R.string.calib_same_surface) }
+            val extra = (calibration as? CalibrationStep.Measuring)?.let {
+                stringResource(if (it.reference == null) R.string.calib_known_span_hint else R.string.calib_same_surface)
+            }
             CoachingCard(message = if (extra != null) "${stringResource(instruction)} $extra" else stringResource(instruction))
         }
     }
@@ -196,6 +206,7 @@ private fun TransientMessage.messageRes(): Int = when (this) {
     TransientMessage.FreezeUnavailable -> R.string.measure_freeze_unavailable
     TransientMessage.Saved -> R.string.measure_saved
     TransientMessage.CalibrationApplied -> R.string.calib_applied
+    TransientMessage.StorageFailed -> R.string.measure_storage_failed
 }
 
 @StringRes

@@ -86,11 +86,17 @@ enum class Quality {
     }
 }
 
-/** Per-endpoint aim/localisation error inputs from the AR layer. */
+/**
+ * Per-endpoint aim/localisation error inputs from the AR layer.
+ *
+ * [focalLengthPx] and [pixelErrorPx] must be in the **same camera-image pixels** (M2 review B1): the
+ * camera intrinsics of the image the error is defined in, never the screen/view resolution, so the ±
+ * depends on the camera and not on how sharp the display is.
+ */
 data class LocalisationInput(
     val rangeMeters: Double,       // camera-to-point distance
-    val focalLengthPx: Double,     // camera intrinsics focal length in pixels
-    val pixelErrorPx: Double = 2.0 // user aim/tap + edge error in pixels (tunable)
+    val focalLengthPx: Double,     // camera-image focal length in pixels
+    val pixelErrorPx: Double = 2.0 // user aim/tap + edge error in those camera-image pixels (tunable)
 ) {
     init {
         require(rangeMeters.isFinite() && rangeMeters >= 0) { "rangeMeters must be finite and >= 0" }
@@ -103,14 +109,16 @@ data class LocalisationInput(
 }
 
 /**
- * Device accuracy tier: sets the prior for the distance-proportional VIO / depth scale error, and the
- * conservative absolute floor used when the AR layer supplies no [LocalisationInput].
+ * Device accuracy tier: sets the prior for the distance-proportional VIO / depth scale error, the
+ * absolute floor of every measured length, and the conservative stand-in used when the AR layer
+ * supplies no [LocalisationInput].
  *
  * @property scale95 relative scale error at ≈95% (e.g. 0.02 = "±2% of the length").
- * @property absFloor95 smallest ±95 a point-to-point length may show when neither endpoint carries
- *   localisation information (research: "never better than ±1 cm" on non-LiDAR Android). It is applied
- *   as an isotropic per-endpoint σ of [unlocalisedEndpointSigma], added in quadrature to the jitter
- *   standard error, so the ± can never collapse to frame jitter alone.
+ * @property absFloor95 absolute ±95 floor of **every** measured length (research: "never better than
+ *   ±1 cm" on non-LiDAR Android). It is always added in quadrature as a length σ of [floorLengthSigma]
+ *   (M2 review B1), whether or not the endpoints carry localisation: localisation widens the ±, it never
+ *   replaces the floor. Endpoints *without* localisation additionally get [unlocalisedEndpointSigma]
+ *   each, as a stand-in for the unknown aim error.
  * Values are engineering estimates from docs/research/measurement-engine.md §1.2/§1.4 and **must be tuned**
  * from the bench-test protocol per device tier.
  */
@@ -127,9 +135,12 @@ enum class DeviceTier(val scale95: Double, val absFloor95: Double) {
     /** 1σ relative scale error. */
     val scaleSigmaRel: Double get() = scale95 / Uncertainty.K95
 
+    /** 1σ absolute floor added in quadrature to every measured length ([absFloor95] / K95). */
+    val floorLengthSigma: Double get() = absFloor95 / Uncertainty.K95
+
     /**
      * 1σ isotropic localisation error assumed for an endpoint that has no [LocalisationInput]
-     * (two such endpoints give a length σ of [absFloor95] / K95).
+     * (two such endpoints add a length σ of [absFloor95] / K95, on top of the floor itself).
      */
     val unlocalisedEndpointSigma: Double get() = absFloor95 / (Uncertainty.K95 * sqrt(2.0))
 }
@@ -158,15 +169,17 @@ class RawLength(
 /**
  * Turns raw AR geometry into [Measurement]s:
  *
- * σ² = (k·σ_random)² + (σ_scale,rel · value)² + (extraRel · value)²
+ * σ² = k²·(σ_random² + σ_floor²) + (σ_scale,rel · value)² + (extraRel · value)²
  *
- * where k is the calibration scale factor (1 when uncalibrated) and σ_scale,rel is the device-tier VIO
- * scale error, or — once calibrated — the calibration's own relative uncertainty (which includes its
- * residual) combined with [calibratedScaleFloorRel] for what calibration cannot fix (drift, other planes).
+ * where k is the calibration scale factor (1 when uncalibrated), σ_floor is the tier's absolute floor
+ * ([floorLengthSigma], always present for measured lengths, M2 review B1) and σ_scale,rel is
+ * the device-tier VIO scale error, or — once calibrated — the calibration's own relative uncertainty
+ * (which includes its residual) combined with [calibratedScaleFloorRel] for what calibration cannot fix.
  *
  * σ_random always contains endpoint localisation (MAJOR-1): from a [LocalisationInput] when the caller
  * supplies one, otherwise the tier's conservative [DeviceTier.unlocalisedEndpointSigma] per endpoint
- * (see [RawLength.unlocalisedEndpoints], [localise]). A jitter-only standard error is never the whole ±.
+ * (see [RawLength.unlocalisedEndpoints], [localise]). A jitter-only standard error is never the whole ±,
+ * and no localisation, however fine, removes the floor.
  *
  * Immutable; use [withCalibration] to derive a calibrated model.
  */
@@ -177,8 +190,19 @@ class UncertaintyModel(
     val scaleSigmaRel: Double = tier.scaleSigmaRel,
     /** Residual 1σ relative scale error that remains after calibration (research: ~0.3–0.5%). */
     val calibratedScaleFloorRel: Double = DEFAULT_CALIBRATED_FLOOR_REL,
+    /**
+     * Absolute ±95 floor of every measured length; defaults to the tier's [DeviceTier.absFloor95].
+     * Override only to tune from bench data or to test other terms in isolation.
+     */
+    val absFloor95: Double = tier.absFloor95,
 ) {
-    init { require(scaleSigmaRel >= 0 && calibratedScaleFloorRel >= 0) }
+    init { require(scaleSigmaRel >= 0 && calibratedScaleFloorRel >= 0 && absFloor95 >= 0 && absFloor95.isFinite()) }
+
+    /** 1σ floor added in quadrature to every measured length ([absFloor95] / K95). */
+    val floorLengthSigma: Double get() = absFloor95 / Uncertainty.K95
+
+    /** 1σ stand-in localisation of an endpoint without [LocalisationInput] ([absFloor95] / (K95·√2)). */
+    val unlocalisedEndpointSigma: Double get() = absFloor95 / (Uncertainty.K95 * sqrt(2.0))
 
     /** Scale factor applied to raw lengths (1.0 when uncalibrated). */
     val scaleFactor: Double get() = calibration?.factor ?: 1.0
@@ -191,7 +215,7 @@ class UncertaintyModel(
         }
 
     /** Same model with [c] applied (null removes calibration). */
-    fun withCalibration(c: ScaleCalibration?) = UncertaintyModel(tier, c, scaleSigmaRel, calibratedScaleFloorRel)
+    fun withCalibration(c: ScaleCalibration?) = UncertaintyModel(tier, c, scaleSigmaRel, calibratedScaleFloorRel, absFloor95)
 
     /**
      * This model if its calibration (if any) is valid for a measurement on [plane] at [rangeM], otherwise
@@ -204,6 +228,29 @@ class UncertaintyModel(
     }
 
     /**
+     * This model if its calibration (if any) is valid for a measurement whose endpoints are [points]
+     * (with their surface [normals], when known) seen from [rangeM]; otherwise the uncalibrated model.
+     * Unlike [forScope], points on different surfaces never count as "unknown plane": every point must
+     * lie on the calibrated plane (M2 review M2, see [ScaleCalibration.appliesToPoints]).
+     */
+    fun forPoints(points: List<Vec3>, normals: List<Vec3?>? = null, rangeM: Double? = null): UncertaintyModel {
+        val c = calibration ?: return this
+        return if (c.appliesToPoints(points, normals, rangeM)) this else withCalibration(null)
+    }
+
+    /**
+     * Random variance of [raw] before calibration and scale terms: its own σ², the stand-in for each
+     * unlocalised endpoint and, for measured lengths, the tier floor. Shared with [Calibrator] so a
+     * calibration is judged with exactly the error model that readings use.
+     */
+    fun randomVariance(raw: RawLength): Double {
+        if (!raw.isMeasured) return raw.randomSigma * raw.randomSigma
+        val stand = unlocalisedEndpointSigma
+        val floor = floorLengthSigma
+        return raw.randomSigma * raw.randomSigma + raw.unlocalisedEndpoints * stand * stand + floor * floor
+    }
+
+    /**
      * Adds the endpoint localisation term to [p]: [localisation]'s σ when given, otherwise the tier's
      * conservative [DeviceTier.unlocalisedEndpointSigma]. Points that already include localisation are
      * returned unchanged (no double counting).
@@ -211,7 +258,7 @@ class UncertaintyModel(
     fun localise(p: UncertainPoint, localisation: LocalisationInput? = null): UncertainPoint = when {
         p.includesLocalisation -> p
         localisation != null -> p.withLocalisation(localisation)
-        else -> p.withLocalisationSigma(tier.unlocalisedEndpointSigma)
+        else -> p.withLocalisationSigma(unlocalisedEndpointSigma)
     }
 
     /** Converts a raw length to a calibrated [Measurement]. [extraRelSigma] adds e.g. a plane-bias term. */
@@ -230,13 +277,11 @@ class UncertaintyModel(
         var absRandVar = 0.0 // only used for single lengths (keeps σ meaningful at value = 0)
         var measuredDims = 0
         val k = scaleFactor
-        val floorVar = tier.unlocalisedEndpointSigma * tier.unlocalisedEndpointSigma
         for (r in raws) {
             val kk = if (r.isMeasured) k else 1.0
             val v = kk * r.value
-            // Endpoints with jitter only get the tier's conservative localisation floor (MAJOR-1).
-            val rs2 = r.randomSigma * r.randomSigma + if (r.isMeasured) r.unlocalisedEndpoints * floorVar else 0.0
-            val s = kk * sqrt(rs2)
+            // Unlocalised endpoints get the stand-in (MAJOR-1); every measured length gets the floor (B1).
+            val s = kk * sqrt(randomVariance(r))
             value *= v
             if (r.isMeasured) measuredDims++
             if (raws.size == 1) absRandVar = s * s

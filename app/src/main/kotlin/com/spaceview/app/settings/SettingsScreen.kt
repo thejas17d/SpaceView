@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -58,10 +59,15 @@ import com.spaceview.app.BuildConfig
 import com.spaceview.app.R
 import com.spaceview.app.ads.AdsManager
 import com.spaceview.app.ads.BannerAd
+import com.spaceview.app.appContainer
 import com.spaceview.app.common.InstrumentCard
 import com.spaceview.app.ui.theme.SpaceViewTheme
+import com.spaceview.data.settings.MeasureSettings
+import com.spaceview.data.settings.MeasureSettingsRepository
 import com.spaceview.engine.UnitPreference
 import kotlinx.coroutines.launch
+import java.text.DateFormat
+import java.util.Date
 
 /**
  * Settings wired to the app-wide [AdsManager]: privacy options open the UMP form and a banner
@@ -87,8 +93,9 @@ fun SettingsRoute(
 }
 
 /**
- * Settings screen (S14): units, sounds, recalibrate, privacy options, "Remove ads" (coming
- * soon), about and open-source licences. Settings persist in [SettingsRepository].
+ * Settings screen (S14): units, sounds, depth, calibration (status, recalibrate, clear), privacy
+ * options, "Remove ads" (coming soon), about and open-source licences. App settings persist in
+ * [SettingsRepository]; depth and calibration in [MeasureSettingsRepository].
  *
  * @param onRecalibrate open the calibration flow.
  * @param onOpenPrivacyOptions show the UMP privacy-options form (see [AdsManager.showPrivacyOptions]).
@@ -105,16 +112,27 @@ fun SettingsScreen(
     privacyOptionsRequired: Boolean = true,
     onBack: (() -> Unit)? = null,
     repository: SettingsRepository = SettingsRepository.get(LocalContext.current),
+    measureRepository: MeasureSettingsRepository = LocalContext.current.appContainer.measureSettings,
+    clock: () -> Long = LocalContext.current.appContainer.clock,
     banner: @Composable () -> Unit = {},
 ) {
     val units by repository.unitPreference.collectAsStateWithLifecycle(UnitPreference.AUTO)
     val sounds by repository.soundsEnabled.collectAsStateWithLifecycle(true)
+    val measure by measureRepository.settings.collectAsStateWithLifecycle(MeasureSettings())
     val scope = rememberCoroutineScope()
+    val calibratedAt = measure.calibration?.calibratedAtMillis
     SettingsContent(
         units = units,
         onUnitsChange = { scope.launch { repository.setUnitPreference(it) } },
         sounds = sounds,
         onSoundsChange = { scope.launch { repository.setSoundsEnabled(it) } },
+        depth = measure.depthEnabled,
+        // A disk error must not crash Settings; the switch then simply snaps back.
+        onDepthChange = { enabled -> scope.launch { runCatching { measureRepository.setDepthEnabled(enabled) } } },
+        calibratedAtMillis = calibratedAt,
+        // CalibrationRecord.isStale: older than 30 days (MAX_AGE_MILLIS) or dated in the future.
+        calibrationStale = measure.calibration?.isStale(clock()) == true,
+        onClearCalibration = { scope.launch { runCatching { measureRepository.clearCalibration() } } },
         onRecalibrate = onRecalibrate,
         onOpenPrivacyOptions = onOpenPrivacyOptions,
         privacyOptionsRequired = privacyOptionsRequired,
@@ -130,6 +148,11 @@ private fun SettingsContent(
     onUnitsChange: (UnitPreference) -> Unit,
     sounds: Boolean,
     onSoundsChange: (Boolean) -> Unit,
+    depth: Boolean,
+    onDepthChange: (Boolean) -> Unit,
+    calibratedAtMillis: Long?,
+    calibrationStale: Boolean,
+    onClearCalibration: () -> Unit,
     onRecalibrate: () -> Unit,
     onOpenPrivacyOptions: () -> Unit,
     privacyOptionsRequired: Boolean,
@@ -138,6 +161,7 @@ private fun SettingsContent(
     modifier: Modifier = Modifier,
 ) {
     var showLicences by rememberSaveable { mutableStateOf(false) }
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -160,20 +184,33 @@ private fun SettingsContent(
             }
 
             Section(R.string.settings_section_measuring) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 56.dp)
-                        .toggleable(value = sounds, role = Role.Switch, onValueChange = onSoundsChange)
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RowText(R.string.settings_sounds, R.string.settings_sounds_detail, Modifier.weight(1f))
-                    Spacer(Modifier.width(12.dp))
-                    Switch(checked = sounds, onCheckedChange = null)
-                }
+                SwitchRow(R.string.settings_sounds, R.string.settings_sounds_detail, sounds, onSoundsChange)
                 Divider()
-                ActionRow(R.string.settings_recalibrate, R.string.settings_recalibrate_detail, onClick = onRecalibrate)
+                SwitchRow(R.string.settings_depth, R.string.settings_depth_detail, depth, onDepthChange)
+                Divider()
+                val calibrationStatus = if (calibratedAtMillis == null) {
+                    stringResource(R.string.settings_recalibrate_detail)
+                } else {
+                    val date = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(calibratedAtMillis))
+                    stringResource(
+                        if (calibrationStale) R.string.settings_calibration_stale else R.string.settings_calibration_on,
+                        date,
+                    )
+                }
+                ActionRow(
+                    title = R.string.settings_recalibrate,
+                    detail = null,
+                    detailText = calibrationStatus,
+                    detailColor = if (calibrationStale) MaterialTheme.colorScheme.error else null,
+                    onClick = onRecalibrate,
+                )
+                Divider()
+                ActionRow(
+                    title = R.string.settings_clear_calibration,
+                    detail = if (calibratedAtMillis == null) R.string.settings_calibration_none else R.string.settings_clear_calibration_detail,
+                    enabled = calibratedAtMillis != null,
+                    onClick = { confirmClear = true },
+                )
             }
 
             Section(R.string.settings_section_privacy) {
@@ -224,6 +261,42 @@ private fun SettingsContent(
         }
     }
     if (showLicences) LicencesDialog(onDismiss = { showLicences = false })
+    if (confirmClear) {
+        ClearCalibrationDialog(
+            onConfirm = {
+                confirmClear = false
+                onClearCalibration()
+            },
+            onDismiss = { confirmClear = false },
+        )
+    }
+}
+
+@Composable
+private fun ClearCalibrationDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.settings_clear_calibration_confirm)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_cancel)) } },
+        title = { Text(stringResource(R.string.settings_clear_calibration_title)) },
+        text = { Text(stringResource(R.string.settings_clear_calibration_body)) },
+    )
+}
+
+@Composable
+private fun SwitchRow(@StringRes title: Int, @StringRes detail: Int, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RowText(title, detail, Modifier.weight(1f))
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = null)
+    }
 }
 
 @Composable
@@ -271,12 +344,21 @@ private fun Section(@StringRes title: Int, content: @Composable () -> Unit) {
 private fun Divider() = HorizontalDivider(color = SpaceViewTheme.colors.hairline)
 
 @Composable
-private fun RowText(@StringRes title: Int, @StringRes detail: Int?, modifier: Modifier = Modifier, enabled: Boolean = true) {
+private fun RowText(
+    @StringRes title: Int,
+    @StringRes detail: Int?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    detailText: String? = null,
+    detailColor: Color? = null,
+) {
     val alpha = if (enabled) 1f else 0.5f
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(stringResource(title), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha))
-        if (detail != null) {
-            Text(stringResource(detail), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha))
+        val text = detailText ?: detail?.let { stringResource(it) }
+        if (text != null) {
+            val color = detailColor ?: MaterialTheme.colorScheme.onSurfaceVariant
+            Text(text, style = MaterialTheme.typography.bodySmall, color = color.copy(alpha = alpha))
         }
     }
 }
@@ -303,9 +385,16 @@ private fun UnitOption(
     }
 }
 
-/** A tappable settings row; [onClick] null renders static text. */
+/** A tappable settings row; [onClick] null renders static text. [detailText] overrides [detail]. */
 @Composable
-private fun ActionRow(@StringRes title: Int, @StringRes detail: Int?, enabled: Boolean = true, onClick: (() -> Unit)?) {
+private fun ActionRow(
+    @StringRes title: Int,
+    @StringRes detail: Int?,
+    enabled: Boolean = true,
+    detailText: String? = null,
+    detailColor: Color? = null,
+    onClick: (() -> Unit)?,
+) {
     val base = Modifier
         .fillMaxWidth()
         .heightIn(min = 56.dp)
@@ -315,7 +404,7 @@ private fun ActionRow(@StringRes title: Int, @StringRes detail: Int?, enabled: B
         base
     }
     Row(clickable.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        RowText(title, detail, Modifier.weight(1f), enabled = enabled)
+        RowText(title, detail, Modifier.weight(1f), enabled = enabled, detailText = detailText, detailColor = detailColor)
     }
 }
 
@@ -356,7 +445,8 @@ private fun SettingsPreview() {
     SpaceViewTheme {
         SettingsContent(
             units = UnitPreference.AUTO, onUnitsChange = {}, sounds = true, onSoundsChange = {},
-            onRecalibrate = {}, onOpenPrivacyOptions = {}, privacyOptionsRequired = false, onBack = {}, banner = {},
+            depth = false, onDepthChange = {}, calibratedAtMillis = 1_760_000_000_000L, calibrationStale = true,
+            onClearCalibration = {}, onRecalibrate = {}, onOpenPrivacyOptions = {}, privacyOptionsRequired = false, onBack = {}, banner = {},
         )
     }
 }

@@ -191,7 +191,7 @@ object Shapes {
             val d = ray.direction
             val cosT = abs(n dot d)
             val loc = localisation?.get(i)
-            val sigma = loc?.copy(rangeMeters = t)?.sigmaMeters ?: model.tier.unlocalisedEndpointSigma
+            val sigma = loc?.copy(rangeMeters = t)?.sigmaMeters ?: model.unlocalisedEndpointSigma
             // Lateral (⟂ ray) isotropic error, moved along the ray onto the plane: m = u − d (n·u)/(n·d).
             val u1 = anyPerpendicular(d)
             val u2 = d cross u1

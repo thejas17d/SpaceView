@@ -4,6 +4,7 @@ import com.spaceview.engine.LocalisationInput
 import com.spaceview.engine.PointEstimate
 import com.spaceview.engine.PointEstimator
 import com.spaceview.engine.PointEstimatorConfig
+import com.spaceview.engine.SampleResult
 import com.spaceview.engine.TrackingQuality
 import com.spaceview.engine.Vec3
 import kotlin.math.max
@@ -18,6 +19,11 @@ import kotlin.math.max
  * first sample of the window), the window restarts. A few consecutive frames without any surface
  * under the reticle also restart it.
  *
+ * Tracking (M2 review minor 4): a [TrackingQuality.NOT_TRACKING] frame resets everything at once,
+ * with or without a position, so no pre-loss sample survives a short loss. While the quality is
+ * [TrackingQuality.LIMITED] (warm-up after a loss, fast motion) no estimate is exposed, so nothing can
+ * be committed from samples the gate is holding back.
+ *
  * Not thread-safe; owned by the measurement worker.
  */
 class SampleStabilizer(
@@ -31,7 +37,7 @@ class SampleStabilizer(
     private var misses = 0
     private var cached: PointEstimate? = null
 
-    /** Latest robust estimate, or null until enough steady samples were collected. */
+    /** Latest robust estimate, or null until enough steady samples were collected (and while LIMITED). */
     val estimate: PointEstimate? get() = cached
 
     /** 0..1 progress towards the first estimate (drives the reticle's stability ring). */
@@ -49,12 +55,17 @@ class SampleStabilizer(
 
     /**
      * Adds one frame's candidate point ([position] null = no surface under the reticle) seen from
-     * [rangeM] metres. [localisation] (aim error from range and focal length) is folded into the
-     * estimate by the engine, which then marks the point as localised.
+     * [rangeM] metres with tracking [quality]. [localisation] (aim error from range and focal length)
+     * is folded into the estimate by the engine, which then marks the point as localised.
      */
     fun add(position: Vec3?, rangeM: Double, quality: TrackingQuality, localisation: LocalisationInput? = null) {
+        if (quality == TrackingQuality.NOT_TRACKING) {
+            reset()
+            return
+        }
         if (position == null) {
             if (++misses >= maxMisses) reset()
+            if (quality != TrackingQuality.TRACKING) cached = null
             return
         }
         misses = 0
@@ -66,12 +77,12 @@ class SampleStabilizer(
             reference = null
         }
         val result = estimator.add(position, quality)
-        if (quality == TrackingQuality.NOT_TRACKING) {
-            reference = null
+        if (quality != TrackingQuality.TRACKING) {
+            // LIMITED: the sample was not used; keep the window but expose nothing to commit.
             cached = null
             return
         }
-        if (result == com.spaceview.engine.SampleResult.ACCEPTED && reference == null) reference = position
+        if (result == SampleResult.ACCEPTED && reference == null) reference = position
         cached = estimator.estimate(localisation)
         cached?.let { reference = it.position }
     }

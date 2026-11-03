@@ -176,19 +176,44 @@ internal object FrameReaders {
     }
 
     /**
-     * Copies the CPU camera image as NV21 and the mapping from image pixels to view pixels
-     * (3 view corners → image), for the freeze-frame. The image is closed before returning.
+     * Intrinsics of the CPU camera image (`Camera.getImageIntrinsics()`), the pixels the aim and
+     * freeze-frame errors are defined in (M2 review B1). Null when ARCore cannot provide them.
      */
-    fun captureStill(frame: Frame, viewW: Int, viewH: Int): StillCapture? {
-        val image = try { frame.acquireCameraImage() } catch (e: Exception) { return null }
-        return image.use { img ->
-            if (img.format != ImageFormat.YUV_420_888) return null
-            val nv21 = toNv21(img)
-            val view = floatArrayOf(0f, 0f, viewW.toFloat(), 0f, 0f, viewH.toFloat())
-            val imagePts = FloatArray(6)
-            frame.transformCoordinates2d(Coordinates2d.VIEW, view, Coordinates2d.IMAGE_PIXELS, imagePts)
-            StillCapture(nv21, img.width, img.height, imagePts, view)
+    fun imageIntrinsics(frame: Frame): ImageIntrinsics? = try {
+        val intr = frame.camera.imageIntrinsics
+        val f = intr.focalLength
+        val dims = intr.imageDimensions
+        val focal = (f[0].toDouble() + f[1].toDouble()) / 2
+        if (focal.isFinite() && focal > 0 && dims[0] > 0 && dims[1] > 0) ImageIntrinsics(focal, dims[0], dims[1]) else null
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
+     * Copies the CPU camera image as NV21 and the mapping from image pixels to view pixels
+     * (3 view corners → image), for the freeze-frame. The image is closed before returning. Any
+     * failure (conversion, coordinate transform) returns null and never escapes into SceneView's
+     * frame callback (M2 review minor 7).
+     */
+    fun captureStill(frame: Frame, viewW: Int, viewH: Int): StillCapture? = try {
+        frame.acquireCameraImage().use { img ->
+            if (img.format != ImageFormat.YUV_420_888) {
+                null
+            } else {
+                val nv21 = toNv21(img)
+                val view = floatArrayOf(0f, 0f, viewW.toFloat(), 0f, 0f, viewH.toFloat())
+                val imagePts = FloatArray(6)
+                frame.transformCoordinates2d(Coordinates2d.VIEW, view, Coordinates2d.IMAGE_PIXELS, imagePts)
+                // View pixels per still pixel along the view's top edge.
+                val dx = (imagePts[2] - imagePts[0]).toDouble()
+                val dy = (imagePts[3] - imagePts[1]).toDouble()
+                val imageSpan = kotlin.math.sqrt(dx * dx + dy * dy)
+                val scale = if (imageSpan > 0) viewW / imageSpan else Double.POSITIVE_INFINITY
+                StillCapture(nv21, img.width, img.height, imagePts, view, imageIntrinsics(frame), scale)
+            }
         }
+    } catch (e: Exception) {
+        null
     }
 
     private fun toNv21(image: Image): ByteArray {
@@ -226,8 +251,6 @@ internal object FrameReaders {
     /** Depth window half-size, in pixels of a 160-px-wide depth image (≈ ±5° around the reticle). */
     private const val PATCH_HALF_AT_160 = 10f
 
-    /** Typical focal length in view pixels until the first frame tells us (1080p-class portrait). */
-    const val DEFAULT_FOCAL_PX = 1500.0
 }
 
 /** CPU camera still for the freeze-frame: NV21 bytes plus image-pixel ↔ view-pixel mapping. */
@@ -239,4 +262,8 @@ class StillCapture(
     val imagePoints: FloatArray,
     /** The same three view corners in view pixels. */
     val viewPoints: FloatArray,
+    /** Intrinsics of this still (it is the CPU image), for the placement error; null if unknown. */
+    val intrinsics: ImageIntrinsics? = null,
+    /** View pixels per still pixel as drawn (≈3–4 for a VGA still on a phone). */
+    val viewPxPerImagePx: Double = Double.POSITIVE_INFINITY,
 )

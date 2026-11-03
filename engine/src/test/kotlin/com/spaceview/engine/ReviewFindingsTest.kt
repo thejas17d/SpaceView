@@ -52,19 +52,21 @@ class ReviewFindingsTest {
             assertEquals(2, raw.unlocalisedEndpoints)
             assertEquals(d.sigma, model.length(raw).sigma, 1e-15)
         }
-        // Localised endpoints use their own σ instead of the floor (here 0.5 mm each).
+        // Localised endpoints use their own σ instead of the stand-in (here 0.5 mm each) — and the
+        // tier floor F is still added in quadrature (M2 review B1: localisation never replaces it).
         val model = UncertaintyModel(scaleSigmaRel = 0.0)
+        val ff = DeviceTier.NO_DEPTH.floorLengthSigma * DeviceTier.NO_DEPTH.floorLengthSigma
         val a = UncertainPoint(Vec3.ZERO)
         val b = UncertainPoint(Vec3(1.0, 0.0, 0.0))
         val l = LocalisationInput(0.5, 2000.0, 2.0)
-        assertEquals(sqrt(2.0) * 0.0005, model.distance(a, b, l, l).sigma, 1e-15)
-        // One localised, one not: floor for one endpoint only.
+        assertEquals(sqrt(2 * 0.0005 * 0.0005 + ff), model.distance(a, b, l, l).sigma, 1e-15)
+        // One localised, one not: stand-in for one endpoint only, plus the floor.
         val f = DeviceTier.NO_DEPTH.unlocalisedEndpointSigma
-        assertEquals(sqrt(0.0005 * 0.0005 + f * f), model.distance(a, b, l, null).sigma, 1e-15)
+        assertEquals(sqrt(0.0005 * 0.0005 + f * f + ff), model.distance(a, b, l, null).sigma, 1e-15)
         assertEquals(1, Uncertainty.rawDistance(a.withLocalisation(l), b).unlocalisedEndpoints)
         // Height / horizontal take localisation too.
-        assertEquals(sqrt(2.0) * 0.0005, model.height(a, Vec3(0.0, 1.0, 0.0).let { UncertainPoint(it) }, Vec3.UP, l, l).sigma, 1e-15)
-        assertEquals(sqrt(2.0) * 0.0005, model.horizontalDistance(a, b, Vec3.UP, l, l).sigma, 1e-15)
+        assertEquals(sqrt(2 * 0.0005 * 0.0005 + ff), model.height(a, Vec3(0.0, 1.0, 0.0).let { UncertainPoint(it) }, Vec3.UP, l, l).sigma, 1e-15)
+        assertEquals(sqrt(2 * 0.0005 * 0.0005 + ff), model.horizontalDistance(a, b, Vec3.UP, l, l).sigma, 1e-15)
         // Typed (unmeasured) lengths never get the floor.
         assertEquals(0.0, model.length(RawLength(0.02, 0.0, isMeasured = false, unlocalisedEndpoints = 2)).sigma, 0.0)
     }
@@ -170,7 +172,7 @@ class ReviewFindingsTest {
 
     private val frame = listOf(Vec3(-0.3, 1.6, -1.5), Vec3(0.3, 1.6, -1.5), Vec3(0.3, 1.2, -1.5), Vec3(-0.3, 1.2, -1.5))
     private val wall = Plane.fromPointNormal(Vec3(0.0, 0.0, -1.5), Vec3.UNIT_Z)
-    private val exact = UncertaintyModel(scaleSigmaRel = 0.0)
+    private val exact = UncertaintyModel(scaleSigmaRel = 0.0, absFloor95 = 0.0)
 
     @Test fun bowTieOrderIsReordered() {
         // TL, TR, BL, BR (Z order): before the fix H came out as the 72 cm diagonal, badge FAIR.
@@ -193,6 +195,7 @@ class ReviewFindingsTest {
     private fun round4(v: Double) = Math.round(v * 1e4) / 1e4
 
     @Test fun reversedWindingKeepsTapOrder() {
+        // (exact = no scale error and no floor, so a perfect outline badges GOOD.)
         // TL, BL, BR, TR is a valid (counter-clockwise) outline: kept, first edge is the 40 cm one.
         val r = Shapes.rectangle(listOf(frame[0], frame[3], frame[2], frame[1]).map { loc(it, 0.0) }, wall, exact)
         assertFalse(r.cornersReordered)
@@ -246,8 +249,14 @@ class ReviewFindingsTest {
         val r = Shapes.rectangle(frame.map { UncertainPoint(it) }, wall, exact, localisation = List(4) { l })
         // W averages two edges of two 1 mm corners each; projection onto the wall keeps the in-plane part.
         assertEquals(0.001, r.width.sigma, 1e-12)
-        val floor = Shapes.rectangle(frame.map { UncertainPoint(it) }, wall, exact)
-        assertEquals(DeviceTier.NO_DEPTH.unlocalisedEndpointSigma, floor.width.sigma, 1e-12)
+        // Unlocalised corners get the tier stand-in, and the shipped model adds the floor on top.
+        val tier = UncertaintyModel(scaleSigmaRel = 0.0)
+        val stand = Shapes.rectangle(frame.map { UncertainPoint(it) }, wall, tier)
+        val f = tier.unlocalisedEndpointSigma
+        val ff = tier.floorLengthSigma
+        assertEquals(sqrt(f * f + ff * ff), stand.width.sigma, 1e-12)
+        val withLoc = Shapes.rectangle(frame.map { UncertainPoint(it) }, wall, tier, localisation = List(4) { l })
+        assertEquals(sqrt(0.001 * 0.001 + ff * ff), withLoc.width.sigma, 1e-12)
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -272,9 +281,11 @@ class ReviewFindingsTest {
         val withLoc = Shapes.rectangleFromRays(raysTo(frame), wall, exact, List(4) { l })!!
         val ranges = frame.map { it.distanceTo(cam) }
         assertTrue(withLoc.width.sigma >= ranges.min() / 1000.0 * 0.999)
-        // Without localisation the tier floor is used.
-        val floor = Shapes.rectangleFromRays(raysTo(frame), wall, exact)!!
-        assertTrue(floor.width.sigma >= DeviceTier.NO_DEPTH.unlocalisedEndpointSigma * 0.999)
+        // Without localisation the tier stand-in is used (and the floor, with the shipped model).
+        val tier = UncertaintyModel(scaleSigmaRel = 0.0)
+        val floor = Shapes.rectangleFromRays(raysTo(frame), wall, tier)!!
+        assertTrue(floor.width.sigma >= tier.unlocalisedEndpointSigma * 0.999)
+        assertTrue(floor.width.sigma >= tier.floorLengthSigma)
         // A ray pointing away from the wall misses.
         assertNull(Shapes.rectangleFromRays(listOf(Ray(cam, Vec3.UNIT_Z)) + raysTo(frame.take(3)), wall, exact))
     }
@@ -388,14 +399,19 @@ class ReviewFindingsTest {
     // ---- MINOR-4 / MINOR-5: calibration acceptance -----------------------------------------------
 
     @Test fun calibrationThatWidensThePlusMinusIsRejected() {
+        // Acceptance logic on its own (no absolute floor):
+        val noFloor = UncertaintyModel(absFloor95 = 0.0)
         // relSigma ≈ 0.99% (accepted before): with the 0.3% floor it would be 1.03% > the 1.02% prior.
-        val r = Calibrator.calibrate(listOf(KnownLength(1.0, 0.0, RawLength(1.0, 0.0099))))
+        val r = Calibrator.calibrate(listOf(KnownLength(1.0, 0.0, RawLength(1.0, 0.0099))), model = noFloor)
         assertEquals(CalibrationResult.Reason.TOO_NOISY, (r as CalibrationResult.Rejected).reason)
         // ~0.6% is not clearly better than the prior either (needs < 0.7 × 1.02% with the floor).
-        assertTrue(Calibrator.calibrate(listOf(KnownLength(1.0, 0.0, RawLength(1.0, 0.0068)))) is CalibrationResult.Rejected)
-        assertTrue(Calibrator.calibrate(listOf(KnownLength(1.0, 0.0, RawLength(1.0, 0.004)))) is CalibrationResult.Accepted)
+        assertTrue(Calibrator.calibrate(listOf(KnownLength(1.0, 0.0, RawLength(1.0, 0.0068))), model = noFloor) is CalibrationResult.Rejected)
+        assertTrue(Calibrator.calibrate(listOf(KnownLength(1.0, 0.0, RawLength(1.0, 0.004))), model = noFloor) is CalibrationResult.Accepted)
+        // With the shipped floor (σ 5.1 mm per length) the same 1 m reference is too noisy; a 3 m one is not.
+        assertTrue(Calibrator.calibrate(listOf(KnownLength(1.0, 0.0, RawLength(1.0, 0.004)))) is CalibrationResult.Rejected)
+        assertTrue(Calibrator.calibrate(listOf(KnownLength(3.0, 0.0, RawLength(3.0, 0.004)))) is CalibrationResult.Accepted)
         // On a hardware-depth tier the prior is already near the floor: calibration cannot help.
-        val ds = UncertaintyModel(DeviceTier.DEPTH_SENSOR)
+        val ds = UncertaintyModel(DeviceTier.DEPTH_SENSOR, absFloor95 = 0.0)
         assertTrue(Calibrator.calibrate(listOf(KnownLength(1.0, 0.0, RawLength(1.0, 0.0005))), model = ds) is CalibrationResult.Rejected)
     }
 
@@ -411,11 +427,13 @@ class ReviewFindingsTest {
         val raw = RawLength(0.0856, 0.0002, unlocalisedEndpoints = 2)
         val raw2 = RawLength(0.05398, 0.0002, unlocalisedEndpoints = 2)
         assertTrue(Calibrator.fromReference(ReferenceObject.ID1_CARD, raw, raw2) is CalibrationResult.Rejected)
-        // An A4 sheet at 50 cm on a 1080p stream (0.5 mm corners) calibrates, scoped to its plane and range.
+        // An A4 sheet at 50 cm with 0.5 mm corners calibrates, scoped to its plane and range, when the
+        // absolute floor is off (it is rejected under the shipped 1 cm floor: see the B1 tests).
         val a4 = listOf(Vec3(0.0, 1.0, -0.5), Vec3(0.297, 1.0, -0.5), Vec3(0.297, 0.79, -0.5), Vec3(0.0, 0.79, -0.5))
-        val r = Shapes.rectangle(a4.map { UncertainPoint(it) }, Plane.fromPointNormal(a4[0], Vec3.UNIT_Z),
+        val noFloor = UncertaintyModel(absFloor95 = 0.0)
+        val r = Shapes.rectangle(a4.map { UncertainPoint(it) }, Plane.fromPointNormal(a4[0], Vec3.UNIT_Z), noFloor,
             localisation = List(4) { LocalisationInput(0.5, 1500.0, 1.5) })
-        val cal = (Calibrator.fromReference(ReferenceObject.A4, r, rangeM = 0.5) as CalibrationResult.Accepted).calibration
+        val cal = (Calibrator.fromReference(ReferenceObject.A4, r, noFloor, rangeM = 0.5) as CalibrationResult.Accepted).calibration
         assertNotNull(cal.plane)
         assertEquals(0.5, cal.rangeM!!, 0.0)
         assertTrue(cal.anchor!!.approxEquals(Vec3(0.1485, 0.895, -0.5), 1e-9))

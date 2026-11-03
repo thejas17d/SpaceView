@@ -73,6 +73,29 @@ class ScaleCalibration(
         return true
     }
 
+    /**
+     * True if this calibration may be applied to a measurement whose endpoints are [points] (with
+     * optional surface [normals], one per point, null = unknown) at camera range [targetRangeM].
+     * With a known [plane], **every** point must lie within [MAX_PLANE_OFFSET_M] of it and every known
+     * normal must be within [MAX_PLANE_ANGLE_DEG] of its normal: points on several surfaces (floor → table,
+     * floor → wall) are not on the calibrated plane, so the reading is uncalibrated (M2 review M2).
+     * The range scope is as in [appliesTo]. Without a plane, only the range scope applies.
+     */
+    fun appliesToPoints(points: List<Vec3>, normals: List<Vec3?>? = null, targetRangeM: Double? = null): Boolean {
+        require(normals == null || normals.size == points.size) { "One normal per point" }
+        if (points.isEmpty()) return false
+        if (!appliesTo(null, targetRangeM)) return false
+        val p = plane ?: return true
+        val cosMax = cos(Math.toRadians(MAX_PLANE_ANGLE_DEG))
+        for ((i, pt) in points.withIndex()) {
+            if (abs(p.signedDistance(pt)) > MAX_PLANE_OFFSET_M) return false
+            val n = normals?.get(i) ?: continue
+            val len = n.length
+            if (!(len > 1e-9) || abs(p.normal dot n) / len < cosMax) return false
+        }
+        return true
+    }
+
     /** Relative 1σ of the factor. */
     val relSigma: Double get() = sigma / factor
 
@@ -201,9 +224,10 @@ object Calibrator {
                 return CalibrationResult.Rejected(CalibrationResult.Reason.INVALID_INPUT, Double.NaN)
             }
             val k = o.trueValue / m
-            // Endpoints without localisation get the tier floor, exactly as in UncertaintyModel (MAJOR-1).
-            val floor = model.tier.unlocalisedEndpointSigma
-            val measVar = o.measured.randomSigma * o.measured.randomSigma + o.measured.unlocalisedEndpoints * floor * floor
+            // Exactly the random error model readings use: localisation stand-ins and the tier's
+            // absolute floor (MAJOR-1, M2 review B1). A reference that is short compared with the
+            // floor cannot calibrate scale and is rejected as TOO_NOISY.
+            val measVar = model.randomVariance(o.measured)
             val rel2 = (o.trueSigma / o.trueValue).let { it * it } + measVar / (m * m)
             ks[i] = k
             // Guard against zero stated error so weights stay finite.

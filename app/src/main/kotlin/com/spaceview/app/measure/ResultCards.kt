@@ -30,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.spaceview.app.R
 import com.spaceview.app.common.AccuracyBadge
@@ -41,6 +42,7 @@ import com.spaceview.ar.ImprovementTip
 import com.spaceview.ar.MeasureMode
 import com.spaceview.ar.Reading
 import com.spaceview.engine.FormattedLength
+import com.spaceview.engine.LengthUnit
 import com.spaceview.engine.MeasureContext
 import com.spaceview.engine.Measurement
 import com.spaceview.engine.ReferenceObject
@@ -66,7 +68,8 @@ private fun ChromeCard(content: @Composable () -> Unit) {
 
 /**
  * Finished measurement: value ± (rounded by the engine formatter), Good/Fair/Rough badge with a
- * shape, one improvement tip, calibration note, and Save / New / Undo.
+ * shape, one improvement tip, calibration note, and Save / New / Undo. Save hands back exactly the
+ * [reading] shown here, so History stores what the user saw.
  */
 @Composable
 internal fun ResultCard(
@@ -74,11 +77,10 @@ internal fun ResultCard(
     tip: ImprovementTip?,
     units: UnitPreference,
     calibrationDateMillis: Long?,
-    calibratedThisVisit: Boolean,
-    onSave: (String?) -> Unit,
+    saveEnabled: Boolean,
+    onSave: (Reading, String?) -> Unit,
     onNew: () -> Unit,
     onUndo: () -> Unit,
-    finalReading: () -> Reading?,
 ) {
     var label by rememberSaveable { mutableStateOf("") }
     val ctx = MeasureFormatter.contextFor(reading)
@@ -134,7 +136,8 @@ internal fun ResultCard(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        if (tip != null && !(tip == ImprovementTip.CALIBRATE && calibratedThisVisit)) {
+        // tipFor() only suggests calibrating when this reading is not calibrated (minor 17).
+        if (tip != null) {
             Text(
                 "${stringResource(R.string.result_tip_title)}: ${stringResource(tip.messageRes())}",
                 style = MaterialTheme.typography.bodyMedium,
@@ -166,7 +169,8 @@ internal fun ResultCard(
             }
             Spacer(Modifier.weight(1f))
             Button(
-                onClick = { if (finalReading() != null) onSave(label.ifBlank { null }) },
+                onClick = { if (saveEnabled && !reading.isLive) onSave(reading, label.ifBlank { null }) },
+                enabled = saveEnabled && !reading.isLive,
                 modifier = Modifier.heightIn(min = 48.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = SpaceViewTheme.colors.signal, contentColor = SpaceViewTheme.colors.onSignal),
             ) { Text(stringResource(R.string.measure_save)) }
@@ -205,14 +209,125 @@ internal fun ImprovementTip.messageRes(): Int = when (this) {
     ImprovementTip.MEASURE_AGAIN -> R.string.tip_measure_again
 }
 
-/** Card / A4 choice before calibrating. */
+/**
+ * Calibration reference choice: a known (tape-measured) length; the card / A4 options only while
+ * [MeasureViewModel.CALIBRATION_SMALL_REFERENCES_ENABLED] (null = known length).
+ */
 @Composable
-internal fun ReferencePicker(onChoose: (ReferenceObject) -> Unit) {
+internal fun ReferencePicker(onChoose: (ReferenceObject?) -> Unit) {
     ChromeCard {
         Text(stringResource(R.string.calib_choose), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-        ReferenceOption(R.string.calib_card, R.string.calib_card_detail) { onChoose(ReferenceObject.ID1_CARD) }
-        ReferenceOption(R.string.calib_a4, R.string.calib_a4_detail) { onChoose(ReferenceObject.A4) }
-        Text(stringResource(R.string.calib_same_surface), style = MaterialTheme.typography.bodySmall)
+        ReferenceOption(R.string.calib_known_length, R.string.calib_known_length_detail) { onChoose(null) }
+        if (MeasureViewModel.CALIBRATION_SMALL_REFERENCES_ENABLED) {
+            ReferenceOption(R.string.calib_card, R.string.calib_card_detail) { onChoose(ReferenceObject.ID1_CARD) }
+            ReferenceOption(R.string.calib_a4, R.string.calib_a4_detail) { onChoose(ReferenceObject.A4) }
+            Text(stringResource(R.string.calib_same_surface), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+/**
+ * Known-length calibration, after both ends of the span are placed: the user types the length they
+ * measured with a tape (cm, or inches with the imperial preference; 1 to 5 m), then sees the factor or
+ * why it was refused. The AR value is deliberately not shown first, so it cannot be copied in.
+ */
+@Composable
+internal fun KnownLengthCard(
+    unit: LengthUnit,
+    check: (Double, Double) -> CalibrationCheck?,
+    onApply: (CalibrationOutcome.Accepted) -> Unit,
+    onRetry: () -> Unit,
+) {
+    var text by rememberSaveable { mutableStateOf("") }
+    var entryError by remember { mutableStateOf(false) }
+    var outcome by remember { mutableStateOf<CalibrationOutcome?>(null) }
+    val imperial = unit != LengthUnit.CM
+    val min = if (imperial) "39.4 in" else "100 cm"
+    val max = if (imperial) "196.8 in" else "500 cm"
+    ChromeCard {
+        Text(stringResource(R.string.calib_known_length_enter), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+        OutlinedTextField(
+            value = text,
+            onValueChange = {
+                if (it.length <= 8) {
+                    text = it
+                    entryError = false
+                    outcome = null
+                }
+            },
+            label = { Text(stringResource(R.string.calib_known_length_label, unit.symbol)) },
+            singleLine = true,
+            isError = entryError,
+            supportingText = if (entryError) {
+                { Text(stringResource(R.string.calib_known_length_range, min, max)) }
+            } else {
+                null
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = SpaceViewTheme.colors.onArChrome,
+                unfocusedTextColor = SpaceViewTheme.colors.onArChrome,
+                focusedLabelColor = SpaceViewTheme.colors.signal,
+                unfocusedLabelColor = SpaceViewTheme.colors.onArChrome,
+                focusedBorderColor = SpaceViewTheme.colors.signal,
+                cursorColor = SpaceViewTheme.colors.signal,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        outcome?.let { CalibrationOutcomeText(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.calib_retry), color = SpaceViewTheme.colors.onArChrome)
+            }
+            Spacer(Modifier.weight(1f))
+            val accepted = outcome as? CalibrationOutcome.Accepted
+            Button(
+                onClick = {
+                    if (accepted != null) {
+                        onApply(accepted)
+                    } else {
+                        when (val e = MeasureViewModel.parseKnownLength(text, unit)) {
+                            is KnownLengthEntry.Valid -> outcome = MeasureViewModel.evaluateCalibration(null, check(e.metres, e.sigmaMetres))
+                            KnownLengthEntry.Invalid, KnownLengthEntry.OutOfRange -> entryError = true
+                        }
+                    }
+                },
+                modifier = Modifier.heightIn(min = 48.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = SpaceViewTheme.colors.signal, contentColor = SpaceViewTheme.colors.onSignal),
+            ) { Text(stringResource(if (accepted != null) R.string.calib_apply else R.string.calib_check)) }
+        }
+    }
+}
+
+/** The factor with its plus-minus, or why the calibration was refused. */
+@Composable
+private fun CalibrationOutcomeText(outcome: CalibrationOutcome) {
+    when (outcome) {
+        is CalibrationOutcome.Accepted -> {
+            val c = outcome.calibration
+            val pm95 = Uncertainty.K95 * c.sigma / c.factor
+            Text(
+                stringResource(
+                    R.string.calib_result_body,
+                    MeasureFormatter.percent(c.factor - 1.0),
+                    String.format(Locale.ROOT, "%.1f%%", pm95 * 100),
+                ),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+        is CalibrationOutcome.Rejected -> Text(
+            stringResource(
+                when (outcome.reason) {
+                    CalibrationRejection.OUT_OF_RANGE -> R.string.calib_reject_out_of_range
+                    CalibrationRejection.INCONSISTENT -> R.string.calib_reject_inconsistent
+                    CalibrationRejection.TOO_NOISY -> R.string.calib_reject_noisy
+                    CalibrationRejection.SKEWED -> R.string.calib_reject_skewed
+                    CalibrationRejection.INVALID -> R.string.calib_reject_invalid
+                    CalibrationRejection.NOT_ONE_SURFACE -> R.string.calib_reject_not_one_surface
+                },
+            ),
+            style = MaterialTheme.typography.bodyLarge,
+        )
     }
 }
 
@@ -245,32 +360,7 @@ internal fun CalibrationResultCard(
     val outcome = remember(reference, reading) { MeasureViewModel.evaluateCalibration(reference, check(reference)) }
     ChromeCard {
         Text(stringResource(R.string.calib_result_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-        when (outcome) {
-            is CalibrationOutcome.Accepted -> {
-                val c = outcome.calibration
-                val pm95 = Uncertainty.K95 * c.sigma / c.factor
-                Text(
-                    stringResource(
-                        R.string.calib_result_body,
-                        MeasureFormatter.percent(c.factor - 1.0),
-                        String.format(Locale.ROOT, "%.1f%%", pm95 * 100),
-                    ),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-            }
-            is CalibrationOutcome.Rejected -> Text(
-                stringResource(
-                    when (outcome.reason) {
-                        CalibrationRejection.OUT_OF_RANGE -> R.string.calib_reject_out_of_range
-                        CalibrationRejection.INCONSISTENT -> R.string.calib_reject_inconsistent
-                        CalibrationRejection.TOO_NOISY -> R.string.calib_reject_noisy
-                        CalibrationRejection.SKEWED -> R.string.calib_reject_skewed
-                        CalibrationRejection.INVALID -> R.string.calib_reject_invalid
-                    },
-                ),
-                style = MaterialTheme.typography.bodyLarge,
-            )
-        }
+        CalibrationOutcomeText(outcome)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(stringResource(R.string.calib_retry), color = SpaceViewTheme.colors.onArChrome)

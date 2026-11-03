@@ -15,7 +15,7 @@
     <string name="home_rectangle">Rectangle</string>
     <string name="home_rectangle_detail">Width, height and area of a frame, door or TV</string>
     <string name="home_calibrate">Calibrate</string>
-    <string name="home_calibrate_detail">Boost accuracy with a bank card or an A4 sheet</string>
+    <string name="home_calibrate_detail">Boost accuracy with a length you measured with a tape</string>
     <string name="home_calibrated_on">Calibrated on %1$s</string>
     <string name="home_history">History</string>
     <string name="home_history_detail">Your saved measurements</string>
@@ -45,6 +45,7 @@
     <string name="measure_new">New measurement</string>
     <string name="measure_save">Save</string>
     <string name="measure_saved">Saved to History</string>
+    <string name="measure_storage_failed">Couldn\'t save. Free up some storage and try again.</string>
     <string name="measure_start_over">Start over</string>
     <string name="measure_coach_move">Move your phone slowly side to side.</string>
     <string name="measure_coach_title">Getting started</string>
@@ -92,7 +93,7 @@
     <string name="tip_hold_still">Hold the phone still for a second at each point.</string>
     <string name="tip_face_surface">Face the surface more directly.</string>
     <string name="tip_aim_at_texture">Aim at textured spots, like edges or corners.</string>
-    <string name="tip_calibrate">Calibrate with a card or an A4 sheet.</string>
+    <string name="tip_calibrate">Calibrate with a span you measured with a tape (2 m or more).</string>
     <string name="tip_measure_again">Measure again from a different angle to confirm.</string>
     <!-- Calibration -->
     <string name="calib_title">Calibrate</string>
@@ -106,12 +107,20 @@
     <string name="calib_result_body">Scale correction %1$s (± %2$s)</string>
     <string name="calib_apply">Use this calibration</string>
     <string name="calib_retry">Measure again</string>
-    <string name="calib_applied">Calibrated. Results now show Calibrated.</string>
+    <string name="calib_applied">Calibrated for this session. Results on that surface show Calibrated.</string>
     <string name="calib_reject_out_of_range">That result is far off. Move slowly until the dots appear, then try again.</string>
     <string name="calib_reject_inconsistent">The sides don\'t match the card or sheet. Check you aimed at its corners.</string>
-    <string name="calib_reject_noisy">Too uncertain to help. Move closer, or use an A4 sheet.</string>
+    <string name="calib_reject_noisy">Too uncertain to help. Use a longer span (2 m or more) and hold steady at each end.</string>
     <string name="calib_reject_skewed">The corners don\'t form a rectangle. Aim at the exact corners.</string>
     <string name="calib_reject_invalid">Couldn\'t measure the sides. Try again.</string>
+    <string name="calib_known_length">Known length</string>
+    <string name="calib_known_length_detail">A straight span you measured with a tape, 1 to 5 m (2 m or more works best), with both ends on one flat surface: a table edge, or a door\'s width along the wall.</string>
+    <string name="calib_known_span_hint">Aim at the two ends of the span you measured with the tape.</string>
+    <string name="calib_known_length_enter">Length on your tape</string>
+    <string name="calib_known_length_label">Tape length (%1$s)</string>
+    <string name="calib_known_length_range">Enter a length from %1$s to %2$s.</string>
+    <string name="calib_check">Check</string>
+    <string name="calib_reject_not_one_surface">Both ends must be on the same flat surface. Try again.</string>
     <!-- History -->
     <string name="history_title">History</string>
     <string name="history_empty">No saved measurements yet.</string>
@@ -155,7 +164,7 @@
     <string name="onboarding_how_body">Use good light. Move your phone slowly from side to side until you see dots on the surface. Stay about an arm\'s length away.</string>
     <string name="onboarding_accuracy_title">Honest about accuracy</string>
     <string name="onboarding_accuracy_body" formatted="false">Phone measurements are typically within ±2% (about ±1–2 cm at 1 m). Every result shows its own ± and a Good, Fair or Rough rating.</string>
-    <string name="onboarding_calibrate_prompt">Calibrate once with any bank card or an A4 sheet for better accuracy. It takes about 20 seconds.</string>
+    <string name="onboarding_calibrate_prompt">For better accuracy, calibrate with a straight span of 1 m or more that you have measured with a tape. It takes about a minute.</string>
     <string name="onboarding_calibrate_now">Calibrate now</string>
     <string name="onboarding_calibrate_later">Later</string>
     <!-- Settings -->
@@ -171,7 +180,7 @@
     <string name="settings_sounds">Sounds</string>
     <string name="settings_sounds_detail">Soft click when you add a point</string>
     <string name="settings_recalibrate">Recalibrate</string>
-    <string name="settings_recalibrate_detail">Use a bank card or an A4 sheet to improve accuracy</string>
+    <string name="settings_recalibrate_detail">Use a length you measured with a tape to improve accuracy</string>
     <string name="settings_section_privacy">Privacy</string>
     <string name="settings_privacy_options">Ad privacy options</string>
     <string name="settings_privacy_options_detail">Review or change your ad consent choices</string>
@@ -186,6 +195,17 @@
     <string name="settings_accuracy_note" formatted="false">Typically ±2% (about ±1–2 cm at 1 m). Each result shows its own ±. For exact work, check with a tape.</string>
     <string name="settings_licences">Open-source licences</string>
     <string name="settings_licences_apache">Apache License 2.0: www.apache.org/licenses/LICENSE-2.0</string>
+    <string name="settings_depth">Use depth (if supported)</string>
+    <string name="settings_depth_detail">Steadier points on plain walls and floors. Uses more battery.</string>
+    <string name="settings_calibration_none">No calibration saved</string>
+    <string name="settings_calibration_on">Calibrated on %1$s</string>
+    <string name="settings_calibration_stale">Calibrated on %1$s. Over 30 days old: recalibrate.</string>
+    <string name="settings_clear_calibration">Clear calibration</string>
+    <string name="settings_clear_calibration_detail">Stop using the saved scale correction</string>
+    <string name="settings_clear_calibration_title">Clear calibration?</string>
+    <string name="settings_clear_calibration_body">Results won\'t use your scale correction until you calibrate again.</string>
+    <string name="settings_clear_calibration_confirm">Clear</string>
+    <string name="settings_cancel">Cancel</string>
     <string name="settings_contact">Contact support</string>
     <!-- Ads -->
     <string name="ads_label">Ad</string>

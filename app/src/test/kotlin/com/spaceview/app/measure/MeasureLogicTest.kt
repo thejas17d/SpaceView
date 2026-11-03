@@ -51,10 +51,13 @@ class MeasureLogicTest {
         Vec3(0.0, 0.0, 1.0), HitKind.PLANE, 0.5, focalPx = 1500.0, pixelErrorPx = 1.0,
     )
 
-    private fun a4Check(scale: Double, skewX: Double = 0.0) = MeasurementComposer.calibrationCheck(
+    /** The calibrator's mapping logic, without the tier floor (which rejects every A4 on its own). */
+    private val noFloor = UncertaintyModel(absFloor95 = 0.0)
+
+    private fun a4Check(scale: Double, skewX: Double = 0.0, model: UncertaintyModel = noFloor) = MeasurementComposer.calibrationCheck(
         ReferenceObject.A4,
         listOf(corner(0.0, 0.210 / scale), corner(0.297 / scale, 0.210 / scale + skewX), corner(0.297 / scale, 0.0)),
-        UncertaintyModel(),
+        model,
     )
 
     @Test
@@ -64,6 +67,15 @@ class MeasureLogicTest {
         assertTrue(out.toString(), out is CalibrationOutcome.Accepted)
         assertEquals(1.01, (out as CalibrationOutcome.Accepted).calibration.factor, 2e-3)
         assertEquals(0.5, out.calibration.rangeM!!, 1e-9)
+    }
+
+    @Test
+    fun a4IsTooNoisyUnderTheShippedFloor() {
+        // M2 review B1: with the 1 cm tier floor in every side, an A4 sheet cannot beat the scale prior.
+        assertEquals(
+            CalibrationOutcome.Rejected(CalibrationRejection.TOO_NOISY),
+            MeasureViewModel.evaluateCalibration(ReferenceObject.A4, a4Check(1.01, model = UncertaintyModel())),
+        )
     }
 
     @Test
@@ -80,18 +92,25 @@ class MeasureLogicTest {
     }
 
     @Test
-    fun earlierSessionCalibrationDropsPlaneScopeAndGetsLargerFloor() {
+    fun calibrationAppliesOnlyInItsOwnArSessionAndExpires() {
         val accepted = MeasureViewModel.evaluateCalibration(ReferenceObject.A4, a4Check(1.01)) as CalibrationOutcome.Accepted
-        val rec = CalibrationRecord.from(accepted.calibration, ReferenceObject.A4, atMillis = 1_000, sessionId = 42)!!
-        val (cNow, floorNow) = MeasureViewModel.calibrationForSession(rec, sessionId = 42)
-        assertEquals(1.01, cNow!!.factor, 2e-3)
-        assertTrue(cNow.plane != null)
-        assertEquals(UncertaintyModel.DEFAULT_CALIBRATED_FLOOR_REL, floorNow, 0.0)
-        val (cOld, floorOld) = MeasureViewModel.calibrationForSession(rec, sessionId = 99)
-        assertNull(cOld!!.plane)
-        assertEquals(0.5, cOld.rangeM!!, 1e-9)
-        assertEquals(MeasureViewModel.PREVIOUS_SESSION_FLOOR_REL, floorOld, 0.0)
-        assertNull(MeasureViewModel.calibrationForSession(null, 0).first)
+        val rec = CalibrationRecord.from(accepted.calibration, ReferenceObject.A4, atMillis = 1_000, sessionId = "session-a")!!
+        // Same ARCore session: full plane + range scope.
+        val same = MeasureViewModel.calibrationFor(rec, "session-a", nowMillis = 2_000)!!
+        assertEquals(1.01, same.factor, 2e-3)
+        assertTrue(same.plane != null)
+        assertEquals(0.5, same.rangeM!!, 1e-9)
+        // Any other session (a retry, a new visit, activity recreation): not applied at all (M3).
+        assertNull(MeasureViewModel.calibrationFor(rec, "session-b", nowMillis = 2_000))
+        assertNull(MeasureViewModel.calibrationFor(rec, null, nowMillis = 2_000))
+        assertNull(MeasureViewModel.calibrationFor(null, "session-a", nowMillis = 2_000))
+        // Stale after 30 days, even in the same session; a clock set backwards also counts as stale.
+        val day = 24L * 60 * 60 * 1000
+        assertTrue(MeasureViewModel.calibrationFor(rec, "session-a", nowMillis = 1_000 + 30 * day) != null)
+        assertNull(MeasureViewModel.calibrationFor(rec, "session-a", nowMillis = 1_000 + 30 * day + 1))
+        assertTrue(rec.isStale(1_000 + 31 * day))
+        assertTrue(rec.isStale(0))
+        assertTrue(!rec.isStale(1_000))
     }
 
     @Test

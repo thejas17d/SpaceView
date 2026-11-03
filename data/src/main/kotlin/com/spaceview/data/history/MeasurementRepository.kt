@@ -3,7 +3,9 @@ package com.spaceview.data.history
 import com.spaceview.engine.MeasureContext
 import com.spaceview.engine.Measurement
 import com.spaceview.engine.Quality
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
 /** What was measured. Stored by name; never rename an entry (add new ones instead). */
@@ -30,14 +32,24 @@ data class SavedMeasurement(
     val thumbnailPath: String?,
 )
 
-/** History storage. Thin mapping over [MeasurementDao]; all calls are main-safe. */
+/**
+ * History storage. Thin mapping over [MeasurementDao]; all calls are main-safe. Storage errors
+ * (disk full, corrupt file) never escape as crashes from the UI-facing calls: [observeHistory] ends
+ * with an empty list, [rename] / [delete] / [clearAll] return false. [save] throws, so the caller can
+ * tell the user that nothing was saved (M2 review minor 9).
+ */
 class MeasurementRepository(private val dao: MeasurementDao) {
 
     /** Newest first. */
     fun observeHistory(limit: Int = HISTORY_LIMIT): Flow<List<SavedMeasurement>> =
-        dao.observeRecent(limit).map { rows -> rows.mapNotNull { it.toDomain() } }
+        dao.observeRecent(limit)
+            .map { rows -> rows.mapNotNull { it.toDomain() } }
+            .catch { e -> if (e is CancellationException) throw e else emit(emptyList()) }
 
-    /** Saves a measurement and returns its id. Older rows beyond [HISTORY_LIMIT] are dropped. */
+    /**
+     * Saves a measurement and returns its id. Older rows beyond [HISTORY_LIMIT] are dropped.
+     * Throws when the database cannot be written; the caller reports it.
+     */
     suspend fun save(
         kind: MeasurementKind,
         primary: Measurement,
@@ -71,11 +83,24 @@ class MeasurementRepository(private val dao: MeasurementDao) {
         return id
     }
 
-    suspend fun rename(id: Long, label: String?) = dao.setLabel(id, label?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_LABEL))
+    /** False when the database could not be written. */
+    suspend fun rename(id: Long, label: String?): Boolean =
+        guarded { dao.setLabel(id, label?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_LABEL)) }
 
-    suspend fun delete(id: Long) = dao.delete(id)
+    /** False when the database could not be written. */
+    suspend fun delete(id: Long): Boolean = guarded { dao.delete(id) }
 
-    suspend fun clearAll() = dao.deleteAll()
+    /** False when the database could not be written. */
+    suspend fun clearAll(): Boolean = guarded { dao.deleteAll() }
+
+    private suspend fun guarded(block: suspend () -> Unit): Boolean = try {
+        block()
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        false
+    }
 
     companion object {
         /**

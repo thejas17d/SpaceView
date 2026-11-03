@@ -112,14 +112,20 @@ fun HistoryScreen(viewModel: HistoryViewModel, onBack: () -> Unit) {
                 }
             } else {
                 LazyColumn(
+                    modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(state.rows, key = { it.id }) { row -> HistoryItem(row, onDelete = { viewModel.delete(row.id) }) }
-                    item(key = "banner") {
-                        BannerAd(adsManager = AdsManager.get(LocalContext.current), modifier = Modifier.padding(top = 16.dp))
-                    }
                 }
+                // Fixed bottom slot outside the lazy list: one AdView for the whole screen, never
+                // recycled (and re-requested) by scrolling. 16 dp top padding keeps it at least
+                // 16 dp from any row's Delete button, wherever the list is scrolled.
+                BannerAd(
+                    adsManager = AdsManager.get(LocalContext.current),
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+                    anchored = true,
+                )
             }
         }
     }

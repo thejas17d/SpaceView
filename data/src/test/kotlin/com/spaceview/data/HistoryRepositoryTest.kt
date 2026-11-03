@@ -81,4 +81,26 @@ class HistoryRepositoryTest {
         repo.delete(id)
         assertEquals(0, repo.observeHistory().first().size)
     }
+
+    /** M2 review minor 9: a failing database (disk full, corrupt file) never crashes the UI calls. */
+    @Test
+    fun storageFailuresAreReportedNotThrown() = runTest {
+        val broken = object : MeasurementDao by FakeDao() {
+            override suspend fun insert(entity: MeasurementEntity): Long = throw java.io.IOException("full")
+            override fun observeRecent(limit: Int): Flow<List<MeasurementEntity>> = kotlinx.coroutines.flow.flow { throw IllegalStateException("corrupt") }
+            override suspend fun setLabel(id: Long, label: String?) = throw IllegalStateException("io")
+            override suspend fun delete(id: Long) = throw IllegalStateException("io")
+            override suspend fun deleteAll() = throw IllegalStateException("io")
+        }
+        val repo = MeasurementRepository(broken)
+        assertEquals(emptyList<Any>(), repo.observeHistory().first())
+        assertEquals(false, repo.rename(1, "x"))
+        assertEquals(false, repo.delete(1))
+        assertEquals(false, repo.clearAll())
+        // save() throws so the caller can tell the user nothing was saved.
+        try {
+            repo.save(MeasurementKind.DISTANCE, Measurement(1.0, 0.01), quality = Quality.GOOD, context = MeasureContext.OBJECT, calibrated = false, timestampMillis = 1L)
+            throw AssertionError("expected an exception")
+        } catch (_: java.io.IOException) {}
+    }
 }

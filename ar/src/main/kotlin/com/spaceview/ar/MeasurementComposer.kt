@@ -2,6 +2,7 @@ package com.spaceview.ar
 
 import com.spaceview.engine.CalibrationResult
 import com.spaceview.engine.Calibrator
+import com.spaceview.engine.KnownLength
 import com.spaceview.engine.LocalisationInput
 import com.spaceview.engine.Measurement
 import com.spaceview.engine.Plane
@@ -53,9 +54,10 @@ enum class HitKind {
  * @property planeBiasRel relative length error from a fitted plane's offset (0 for ARCore planes).
  * @property spreadRms per-sample scatter of the estimate (m); large values mean a shaky hold.
  * @property incidenceCos |cos| between the view ray and the surface normal (1 = head-on), if known.
- * @property focalPx focal length (px) of the image the user aimed in (GPU texture), for the
- *   localisation term (range / focal × pixel error).
- * @property pixelErrorPx aiming / placement error in those pixels.
+ * @property focalPx focal length in **camera-image** pixels of the image the error is defined in
+ *   ([AimModel]: VGA-equivalent for live aim, the still's own for a freeze-frame adjustment), for the
+ *   localisation term (range / focal × pixel error). Never view pixels (M2 review B1).
+ * @property pixelErrorPx aiming / placement error in those same pixels.
  */
 class EndpointData(
     val point: UncertainPoint,
@@ -82,6 +84,8 @@ class CalibrationCheck(
     val result: CalibrationResult,
     val maxRightAngleDeviationDeg: Double,
     val geometricallyConsistent: Boolean,
+    /** False when a known-length span's two ends are not on one flat surface (no plane to scope it to). */
+    val onOneSurface: Boolean = true,
 )
 
 /**
@@ -164,6 +168,28 @@ object MeasurementComposer {
     }
 
     /**
+     * Calibration from a straight span the user measured with a tape: the first two [ends] are the
+     * span's endpoints, [trueValue] ± [trueSigma] (m) the typed tape length ([model] must be
+     * uncalibrated). Same acceptance rules as the card / A4 path ([Calibrator]); the result is scoped
+     * to the surface both ends lie on, at their mean camera range. Ends on different surfaces (no
+     * shared plane) cannot be scoped and are refused with [CalibrationCheck.onOneSurface] = false.
+     * Null until two ends are placed.
+     */
+    fun knownLengthCheck(trueValue: Double, trueSigma: Double, ends: List<EndpointData>, model: UncertaintyModel): CalibrationCheck? {
+        if (ends.size < 2) return null
+        val e = ends.take(2)
+        val plane = sharedPlane(e)
+            ?: return CalibrationCheck(CalibrationResult.Rejected(CalibrationResult.Reason.INVALID_INPUT, Double.NaN), 0.0, true, onOneSurface = false)
+        val raw = Uncertainty.rawDistance(model.localise(e[0].point, e[0].localisation), model.localise(e[1].point, e[1].localisation))
+        val anchor = (e[0].point.position + e[1].point.position) / 2.0
+        val range = e.map { it.rangeM }.average().takeIf { it > 0 && it.isFinite() && e.all { p -> p.rangeM > 0 } }
+        val result = runCatching {
+            Calibrator.calibrate(listOf(KnownLength(trueValue, trueSigma, raw)), null, model, plane, anchor, range)
+        }.getOrElse { CalibrationResult.Rejected(CalibrationResult.Reason.INVALID_INPUT, Double.NaN) }
+        return CalibrationCheck(result, 0.0, true)
+    }
+
+    /**
      * Corners for drawing the rectangle outline (3 given → 4th inferred as a parallelogram).
      */
     fun rectangleOutline(corners: List<Vec3>): List<Vec3> {
@@ -200,8 +226,9 @@ object MeasurementComposer {
     ): Reading {
         val locA = a.localisation
         val locB = b.localisation
-        // Calibration applies only on its own plane and range (engine scope rules).
-        val scoped = model.forScope(sharedPlane(listOf(a, b)), meanRange(a, b))
+        // Calibration applies only when *both* points lie on the calibrated plane, at a similar range
+        // (M2 review M2: points on different surfaces are not "plane unknown").
+        val scoped = scopedModel(model, listOf(a, b))
         val m = if (mode == MeasureMode.HEIGHT) {
             scoped.height(a.point, b.point, Vec3.UP, locA, locB, extra)
         } else {
@@ -229,11 +256,16 @@ object MeasurementComposer {
         isLive: Boolean,
     ): Reading {
         val plane = sharedPlane(corners)
+        // Calibration only when every corner lies on the calibrated plane (M2 review M2).
+        val scoped = scopedModel(model, corners)
         // Shapes.rectangle (not rectangleFromRays): corners are averaged surface hits already on the
         // plane, and their estimate covariance must be kept. It reorders Z-order input and forces ROUGH
         // on inconsistent geometry. Image-corner rays arrive with edge snapping (M3).
-        val rect = Shapes.rectangle(corners.map { it.point }, plane, model, extra, corners.map { it.localisation })
-        val calibrated = model.forScope(rect.plane, corners.map { it.rangeM }.average()).calibration != null
+        val rect = Shapes.rectangle(corners.map { it.point }, plane, scoped, extra, corners.map { it.localisation })
+        // Shapes applies its own plane/range scope on top; the flag says what was actually applied.
+        // Same range Shapes uses for its scope: mean over the corners that carry localisation.
+        val range = corners.mapNotNull { it.localisation?.rangeMeters }.takeIf { it.isNotEmpty() }?.average()
+        val calibrated = scoped.forScope(rect.plane, range).calibration != null
         return Reading(
             mode = MeasureMode.RECTANGLE,
             primary = rect.width.rounded(),
@@ -250,8 +282,12 @@ object MeasurementComposer {
         )
     }
 
-    private fun meanRange(a: EndpointData, b: EndpointData): Double? =
-        ((a.rangeM + b.rangeM) / 2).takeIf { a.rangeM > 0 && b.rangeM > 0 && it.isFinite() }
+    /** [model] if its calibration applies to all of [points] (positions, normals, mean range), else uncalibrated. */
+    internal fun scopedModel(model: UncertaintyModel, points: List<EndpointData>): UncertaintyModel {
+        if (model.calibration == null) return model
+        val range = points.map { it.rangeM }.average().takeIf { r -> r > 0 && r.isFinite() && points.all { it.rangeM > 0 } }
+        return model.forPoints(points.map { it.point.position }, points.map { it.normal }, range)
+    }
 
     /**
      * The surface shared by [points]: through their centroid with their mean normal, when every point

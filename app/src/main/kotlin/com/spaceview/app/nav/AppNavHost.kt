@@ -1,12 +1,12 @@
 package com.spaceview.app.nav
 
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
@@ -20,7 +20,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.spaceview.app.ads.AdsManager
-import com.spaceview.app.ads.NextAction
+import com.spaceview.app.ads.ArScreenAdGuard
+import com.spaceview.app.ads.NonArScreenAdEffect
 import com.spaceview.app.appContainer
 import com.spaceview.app.history.HistoryScreen
 import com.spaceview.app.history.HistoryViewModel
@@ -55,7 +56,9 @@ object Routes {
  */
 @Composable
 fun AppNavHost(navController: NavHostController = rememberNavController()) {
-    val container = LocalContext.current.appContainer
+    val context = LocalContext.current
+    val container = context.appContainer
+    val ads = AdsManager.get(context)
     // Wait for the first DataStore answer so we never flash the wrong start screen.
     val onboardingDone by produceState<Boolean?>(initialValue = null) {
         value = container.appSettings.onboardingCompleted.first()
@@ -77,6 +80,7 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
             )
         }
         composable(Routes.HOME) {
+            NonArScreenAdEffect(ads)
             val calibration by container.measureSettings.settings.collectAsStateWithLifecycle(initialValue = null)
             HomeScreen(
                 calibratedAtMillis = calibration?.calibration?.calibratedAtMillis,
@@ -91,12 +95,17 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
             arguments = listOf(navArgument(Routes.ARG_MODE) { type = NavType.StringType }),
         ) { entry ->
             val vm = viewModel { MeasureViewModel(container.measureSettings, container.appSettings, container.history, container.clock) }
-            val activity = LocalActivity.current
-            // Leave the AR screen first; a capped interstitial may then show over the next screen,
-            // never over the camera. AdPolicy decides whether one is due (saved results count).
-            val close = {
-                if (navController.popBackStack() && activity != null) {
-                    AdsManager.get(activity).maybeShowAfterSave(activity, NextAction.BACK) {}
+            ArScreenAdGuard(ads)
+            // One Measure visit per back-stack entry (the id survives activity recreation).
+            LaunchedEffect(entry.id) { ads.onMeasureEntered(entry.id) }
+            // Leaving arms an after-measure interstitial chance only if something was saved during
+            // this visit. The ad is never requested here: Home asks for it once it is RESUMED, i.e.
+            // after the transition, with the AR screen gone (AdsManager.onNonArScreenResumed).
+            val close: () -> Unit = {
+                // Ignore a second tap while the exit transition runs (it would pop Home too).
+                if (navController.currentBackStackEntry?.id == entry.id) {
+                    ads.onMeasureLeaving(entry.id)
+                    navController.popBackStack()
                 }
             }
             BackHandler(onBack = close)
@@ -109,6 +118,7 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
         }
         composable(Routes.CALIBRATE) {
             val vm = viewModel { MeasureViewModel(container.measureSettings, container.appSettings, container.history, container.clock) }
+            ArScreenAdGuard(ads)
             MeasureRoute(
                 initialMode = MeasureMode.DISTANCE,
                 startWithCalibration = true,
@@ -117,10 +127,12 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
             )
         }
         composable(Routes.HISTORY) {
+            NonArScreenAdEffect(ads)
             val vm = viewModel { HistoryViewModel(container.history, container.appSettings) }
             HistoryScreen(viewModel = vm, onBack = { navController.popBackStack() })
         }
         composable(Routes.SETTINGS) {
+            NonArScreenAdEffect(ads)
             SettingsRoute(
                 onRecalibrate = { navController.navigate(Routes.CALIBRATE) },
                 onBack = { navController.popBackStack() },

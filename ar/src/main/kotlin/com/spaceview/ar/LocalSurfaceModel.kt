@@ -33,7 +33,8 @@ class SurfaceIntersection(
 /**
  * Tunables for [LocalSurfaceModel]. Thresholds are placeholders for the bench test.
  *
- * @property maxPoints ring-buffer size.
+ * @property maxPoints ring-buffer size. Points far from the reticle are filtered out before buffering
+ *   (see [LocalSurfaceModel.addPoints]), so the buffer holds what the fit can use (M2 review minor 6).
  * @property maxAgeNanos points older than this are ignored (the map refines; old points drift).
  * @property coneRadiusMin / [coneRadiusRel] a point is "near the reticle" when its perpendicular
  *   distance from the reticle ray is below max(min, rel × distance along the ray).
@@ -43,9 +44,14 @@ class SurfaceIntersection(
  * @property minCosIncidence the reticle ray must hit the plane at least this steeply (cos of the
  *   angle to the normal; 0.26 ≈ 75°): grazing views amplify any plane error.
  * @property refitIntervalNanos at most one RANSAC fit per this interval.
+ * @property bufferConeFactor points are buffered only within this multiple of the cone radius around the
+ *   reticle ray of the frame they arrive with (the reticle moves, so the buffer cone is wider).
+ * @property depthBandMin / [depthBandRel] with a raw hit distance h, only points whose distance along the
+ *   ray is within max(min, rel × h) of h are fitted (M2 review M4: never fit a deeper layer, e.g. the floor
+ *   around a box, and let it replace the nearer hit).
  */
 class LocalSurfaceConfig(
-    val maxPoints: Int = 768,
+    val maxPoints: Int = 2048,
     val maxAgeNanos: Long = 3_000_000_000L,
     val coneRadiusMin: Double = 0.04,
     val coneRadiusRel: Double = 0.07,
@@ -55,6 +61,9 @@ class LocalSurfaceConfig(
     val minCosIncidence: Double = 0.26,
     val refitIntervalNanos: Long = 150_000_000L,
     val ransac: RansacConfig = RansacConfig(inlierThreshold = 0.01, maxIterations = 200, minInliers = 16),
+    val bufferConeFactor: Double = 3.0,
+    val depthBandMin: Double = 0.04,
+    val depthBandRel: Double = 0.05,
 )
 
 /**
@@ -70,6 +79,8 @@ class LocalSurfaceModel(private val config: LocalSurfaceConfig = LocalSurfaceCon
     private var size = 0
     private var lastFitNs = Long.MIN_VALUE
     private var current: LocalSurface? = null
+    private var lastHint: Double? = null
+    private val near = ArrayList<Vec3>(256)
 
     /** The latest accepted fit, if any. */
     val surface: LocalSurface? get() = current
@@ -79,15 +90,30 @@ class LocalSurfaceModel(private val config: LocalSurfaceConfig = LocalSurfaceCon
         size = 0
         current = null
         lastFitNs = Long.MIN_VALUE
+        lastHint = null
     }
 
-    /** Adds points given as packed x, y, z triplets (world, metres). */
-    fun addPoints(xyz: FloatArray, count: Int, timestampNs: Long) {
+    /**
+     * Adds points given as packed x, y, z triplets (world, metres). With [ray] (the reticle ray of the
+     * same frame) only points within [LocalSurfaceConfig.bufferConeFactor] × the cone radius are kept,
+     * so a large cloud does not flush the points near the reticle out of the buffer.
+     */
+    fun addPoints(xyz: FloatArray, count: Int, timestampNs: Long, ray: Ray? = null) {
+        val ox = ray?.origin?.x ?: 0.0; val oy = ray?.origin?.y ?: 0.0; val oz = ray?.origin?.z ?: 0.0
+        val dx = ray?.direction?.x ?: 0.0; val dy = ray?.direction?.y ?: 0.0; val dz = ray?.direction?.z ?: 0.0
         for (i in 0 until count) {
             val x = xyz[i * 3].toDouble()
             val y = xyz[i * 3 + 1].toDouble()
             val z = xyz[i * 3 + 2].toDouble()
             if (!x.isFinite() || !y.isFinite() || !z.isFinite()) continue
+            if (ray != null) {
+                val rx = x - ox; val ry = y - oy; val rz = z - oz
+                val t = rx * dx + ry * dy + rz * dz
+                if (t < MIN_RANGE) continue
+                val px = rx - dx * t; val py = ry - dy * t; val pz = rz - dz * t
+                val r = config.bufferConeFactor * max(config.coneRadiusMin, config.coneRadiusRel * t)
+                if (px * px + py * py + pz * pz > r * r) continue
+            }
             xs[next] = x; ys[next] = y; zs[next] = z; ts[next] = timestampNs
             next = (next + 1) % config.maxPoints
             if (size < config.maxPoints) size++
@@ -97,19 +123,32 @@ class LocalSurfaceModel(private val config: LocalSurfaceConfig = LocalSurfaceCon
     /**
      * Refits the plane around [ray] when the refit interval has passed. Returns the current surface
      * (possibly unchanged), or null when the points near the ray do not form a trustworthy plane.
+     *
+     * [rangeHint] is the distance of the raw (depth / feature) hit along the ray, when there is one:
+     * only points in a depth band around it are fitted, so a deeper layer inside the cone (the floor
+     * around a box top) cannot win the RANSAC vote (M2 review M4).
      */
-    fun update(ray: Ray, nowNs: Long): LocalSurface? {
-        if (lastFitNs != Long.MIN_VALUE && nowNs - lastFitNs < config.refitIntervalNanos) return current
+    fun update(ray: Ray, nowNs: Long, rangeHint: Double? = null): LocalSurface? {
+        val hint = rangeHint?.takeIf { it > 0 && it.isFinite() }
+        val band = hint?.let { max(config.depthBandMin, config.depthBandRel * it) }
+        val prev = lastHint
+        // A hint that jumped to another depth layer forces a refit even inside the refit interval.
+        val hintMoved = (hint == null) != (prev == null) || (hint != null && prev != null && kotlin.math.abs(hint - prev) > band!! / 2)
+        if (lastFitNs != Long.MIN_VALUE && nowNs - lastFitNs < config.refitIntervalNanos && !hintMoved) return current
         lastFitNs = nowNs
-        val near = ArrayList<Vec3>(128)
+        lastHint = hint
+        near.clear()
+        val o = ray.origin
+        val d = ray.direction
         for (i in 0 until size) {
             if (nowNs - ts[i] > config.maxAgeNanos) continue
-            val p = Vec3(xs[i], ys[i], zs[i])
-            val rel = p - ray.origin
-            val t = rel dot ray.direction
+            val rx = xs[i] - o.x; val ry = ys[i] - o.y; val rz = zs[i] - o.z
+            val t = rx * d.x + ry * d.y + rz * d.z
             if (t < MIN_RANGE) continue
-            val perp = (rel - ray.direction * t).length
-            if (perp <= max(config.coneRadiusMin, config.coneRadiusRel * t)) near += p
+            if (hint != null && kotlin.math.abs(t - hint) > band!!) continue
+            val px = rx - d.x * t; val py = ry - d.y * t; val pz = rz - d.z * t
+            val r = max(config.coneRadiusMin, config.coneRadiusRel * t)
+            if (px * px + py * py + pz * pz <= r * r) near += Vec3(xs[i], ys[i], zs[i])
         }
         if (near.size < config.minPoints) {
             current = null
