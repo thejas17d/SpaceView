@@ -3,4 +3,6 @@
      (database + GLB/JPEG files, which must be restored together) join them is decided in M3. -->
 <full-backup-content>
     <include domain="file" path="datastore/" />
+    <!-- Calibration is specific to this phone (its camera/IMU): never restore it onto another device. -->
+    <exclude domain="file" path="datastore/spaceview_measure.preferences_pb" />
 </full-backup-content>

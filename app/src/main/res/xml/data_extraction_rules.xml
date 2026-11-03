@@ -3,8 +3,12 @@
 <data-extraction-rules>
     <cloud-backup>
         <include domain="file" path="datastore/" />
+        <!-- Calibration is specific to this phone (its camera/IMU): never restore it onto another device. -->
+        <exclude domain="file" path="datastore/spaceview_measure.preferences_pb" />
     </cloud-backup>
     <device-transfer>
         <include domain="file" path="datastore/" />
+        <!-- Calibration is specific to this phone (its camera/IMU): never restore it onto another device. -->
+        <exclude domain="file" path="datastore/spaceview_measure.preferences_pb" />
     </device-transfer>
 </data-extraction-rules>

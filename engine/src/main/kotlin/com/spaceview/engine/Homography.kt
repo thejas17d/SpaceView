@@ -41,7 +41,10 @@ class Homography(m: DoubleArray) {
         val c21 = a[1] * a[6] - a[0] * a[7]
         val c22 = a[0] * a[4] - a[1] * a[3]
         val det = a[0] * c00 + a[1] * c10 + a[2] * c20
-        require(abs(det) > 1e-300) { "Homography is singular" }
+        // Scale-aware singularity test: det scales with the cube of the entries.
+        var norm = 0.0
+        for (v in a) norm = max(norm, abs(v))
+        require(norm > 0 && abs(det) > 1e-14 * norm * norm * norm) { "Homography is singular" }
         return Homography(doubleArrayOf(c00, c01, c02, c10, c11, c12, c20, c21, c22).normalisedBy(c22, det))
     }
 
@@ -55,6 +58,10 @@ class Homography(m: DoubleArray) {
          * Homography mapping the 4 [src] points exactly onto the 4 [dst] points (DLT with Hartley
          * normalisation, 8×8 linear solve with partial pivoting). Returns null if any 3 points of
          * either set are (nearly) collinear.
+         *
+         * The solve fixes h₃₃ = 1 in normalised coordinates, so it also returns null in the (rare) case
+         * where the source centroid maps to the line at infinity. That cannot happen for a convex quad
+         * mapped to a convex quad (e.g. [rectify]); for arbitrary correspondences a null may mean this.
          */
         fun fromCorrespondences(src: List<Vec2>, dst: List<Vec2>): Homography? {
             require(src.size == 4 && dst.size == 4) { "Need exactly 4 correspondences" }
@@ -81,12 +88,25 @@ class Homography(m: DoubleArray) {
          * Rectification homography from 4 image corners (top-left, top-right, bottom-right, bottom-left)
          * to an output image of [outWidth] × [outHeight] pixels. Null for a degenerate or non-convex quad.
          * The warp usually needs the [inverse] (output → source) for sampling.
+         *
+         * The corners must run clockwise on screen (image y grows downwards). Counter-clockwise input
+         * (TL, BL, BR, TR) would give a valid but **mirrored** texture, so it is reordered to
+         * TL, TR, BR, BL first (corner 0 stays the top-left).
          */
         fun rectify(imageCorners: List<Vec2>, outWidth: Double, outHeight: Double): Homography? {
             require(outWidth > 0 && outHeight > 0)
             if (imageCorners.size != 4 || !isConvexQuad(imageCorners)) return null
+            val src = if (isClockwiseOnScreen(imageCorners)) imageCorners
+            else listOf(imageCorners[0], imageCorners[3], imageCorners[2], imageCorners[1])
             val dst = listOf(Vec2(0.0, 0.0), Vec2(outWidth, 0.0), Vec2(outWidth, outHeight), Vec2(0.0, outHeight))
-            return fromCorrespondences(imageCorners, dst)
+            return fromCorrespondences(src, dst)
+        }
+
+        /** True if the polygon runs clockwise in image coordinates (y down), i.e. positive shoelace area. */
+        fun isClockwiseOnScreen(p: List<Vec2>): Boolean {
+            var area2 = 0.0
+            for (i in p.indices) area2 += p[i] cross p[(i + 1) % p.size]
+            return area2 > 0
         }
 
         /**

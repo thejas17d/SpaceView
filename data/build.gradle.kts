@@ -29,7 +29,8 @@ room {
 }
 
 dependencies {
-    implementation(project(":engine"))
+    // Repositories expose engine types (Measurement, Quality, UnitPreference, ScaleCalibration).
+    api(project(":engine"))
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

@@ -20,6 +20,10 @@ class Ray(@JvmField val origin: Vec3, direction: Vec3) {
         /**
          * Ray through image pixel ([u], [v]) for a pinhole camera at [cameraPose] (ARCore convention:
          * camera looks along local −Z, +Y up, image v grows downwards).
+         *
+         * [intrinsics] and ([u], [v]) must be in the **same** image orientation. ARCore's
+         * `getImageIntrinsics()` is in sensor (landscape) orientation while touch coordinates are in
+         * display orientation: convert the touch point with `Frame.transformCoordinates2d` first.
          */
         fun fromPixel(cameraPose: Pose, intrinsics: CameraIntrinsics, u: Double, v: Double): Ray {
             val local = Vec3((u - intrinsics.cx) / intrinsics.fx, -(v - intrinsics.cy) / intrinsics.fy, -1.0)
@@ -56,7 +60,7 @@ class Plane(normal: Vec3, @JvmField val d: Double) {
 
     /** Snaps an uncertain point onto the plane; the normal component of its covariance is removed. */
     fun project(p: UncertainPoint): UncertainPoint =
-        UncertainPoint(project(p.position), p.covariance.projectedOntoPlane(normal))
+        UncertainPoint(project(p.position), p.covariance.projectedOntoPlane(normal), p.includesLocalisation)
 
     /**
      * Ray–plane intersection. Returns null when the ray is (nearly) parallel to the plane
@@ -127,6 +131,9 @@ class Plane(normal: Vec3, @JvmField val d: Double) {
  * @property inlierCount points within the RANSAC threshold (all points for a plain least-squares fit).
  * @property inliers per-input-point inlier flags.
  * @property centroid mean of inliers (a good anchor point on the plane).
+ * @property eigenvalues ascending eigenvalues λ₀ ≤ λ₁ ≤ λ₂ of the inliers' covariance (m²), or null when
+ *   unknown. √λ₁ is the in-plane extent along the fit's weakest direction; it decides how well the
+ *   normal is constrained (a 2 cm strip on a wall cannot fix the tilt about its long axis).
  */
 class PlaneFit(
     val plane: Plane,
@@ -134,9 +141,43 @@ class PlaneFit(
     val inlierCount: Int,
     val inliers: BooleanArray,
     val centroid: Vec3,
+    val eigenvalues: DoubleArray? = null,
 ) {
     /** Inlier share of the input points. */
     val inlierRatio: Double get() = if (inliers.isEmpty()) 0.0 else inlierCount.toDouble() / inliers.size
+
+    /** In-plane RMS extent along the weakest in-plane direction, √λ₁ (m); +∞ when unknown. */
+    val minorExtent: Double get() = eigenvalues?.let { sqrt(max(it[1], 0.0)) } ?: Double.POSITIVE_INFINITY
+
+    /**
+     * False for near-collinear point sets (strips, edges): the minor in-plane extent is below
+     * [PlaneFitter.MIN_EXTENT_TO_RMS] × the RMS residual (equivalently λ₁/λ₀ < 25 for the default).
+     * Such fits can be tilted by several degrees while reporting a small residual.
+     */
+    val isWellConditioned: Boolean get() = minorExtent >= PlaneFitter.MIN_EXTENT_TO_RMS * rmsResidual
+
+    /**
+     * 1σ angle (rad) of the normal about the fit's long in-plane axis: rms / (√λ₁ · √n). 0 when unknown
+     * or exact. Propagates as an offset error proportional to the distance from [centroid].
+     */
+    val normalAngleSigma: Double
+        get() {
+            val e = minorExtent
+            if (!e.isFinite() || rmsResidual == 0.0) return 0.0
+            if (e <= 0.0) return Double.POSITIVE_INFINITY
+            return rmsResidual / (e * sqrt(max(1, inlierCount).toDouble()))
+        }
+
+    /**
+     * 1σ plane offset (m, along the normal) at [p]: the centroid offset SE combined with the tilt term
+     * [normalAngleSigma] × in-plane distance of [p] from [centroid].
+     */
+    fun offsetSigmaAt(p: Vec3): Double {
+        val d = plane.project(p) - plane.project(centroid)
+        val tilt = normalAngleSigma * d.length
+        val o = offsetStandardError
+        return sqrt(o * o + tilt * tilt)
+    }
 
     /**
      * Standard error of the plane offset along its normal (m): rms / √n. This is the random part only;
@@ -157,6 +198,8 @@ class RansacConfig(
     val minInliers: Int = 10,
     /** Seed for the deterministic RNG (fixed so results are reproducible). */
     val seed: Long = 0x5EED,
+    /** Return null instead of an ill-conditioned (strip-like) fit, see [PlaneFit.isWellConditioned]. */
+    val rejectIllConditioned: Boolean = true,
 ) {
     init {
         require(inlierThreshold > 0 && maxIterations > 0 && minInliers >= 3)
@@ -169,7 +212,8 @@ object PlaneFitter {
 
     /**
      * Total-least-squares plane through [points] (smallest-eigenvalue eigenvector of the covariance).
-     * Returns null for fewer than 3 points or a degenerate (collinear) set.
+     * Returns null for fewer than 3 points or a degenerate (collinear) set. Near-collinear sets are
+     * returned but flagged: check [PlaneFit.isWellConditioned].
      */
     fun leastSquares(points: List<Vec3>): PlaneFit? {
         val mask = BooleanArray(points.size) { true }
@@ -177,10 +221,26 @@ object PlaneFitter {
     }
 
     /**
+     * Minimum ratio of the in-plane minor extent √λ₁ to the RMS residual for a well-conditioned fit
+     * (5 ⇔ λ₁/λ₀ ≥ 25). Tunable from bench data.
+     */
+    const val MIN_EXTENT_TO_RMS = 5.0
+
+    /**
      * Robust fit: RANSAC with MSAC scoring, then least-squares refit on inliers, iterated until the
      * inlier set stops changing (max 3 rounds). Survives a large share of outliers (tested at 30%+).
+     * Ill-conditioned (strip-like) results are rejected when [RansacConfig.rejectIllConditioned].
+     *
+     * Cost is up to [RansacConfig.maxIterations] × N point tests plus small allocations: with 1–2k
+     * depth points that is several milliseconds, so run it off the GL/render thread (e.g.
+     * `Dispatchers.Default`), not per frame.
      */
     fun ransac(points: List<Vec3>, config: RansacConfig = RansacConfig()): PlaneFit? {
+        val fit = ransacUnchecked(points, config) ?: return null
+        return if (config.rejectIllConditioned && !fit.isWellConditioned) null else fit
+    }
+
+    private fun ransacUnchecked(points: List<Vec3>, config: RansacConfig): PlaneFit? {
         val n = points.size
         if (n < 3) return null
         val rng = java.util.Random(config.seed)
@@ -262,7 +322,7 @@ object PlaneFitter {
         val plane = Plane.fromPointNormal(c, normal)
         var ss = 0.0
         for (i in points.indices) if (mask[i]) { val r = plane.signedDistance(points[i]); ss += r * r }
-        return PlaneFit(plane, sqrt(ss / m), m, mask.copyOf(), c)
+        return PlaneFit(plane, sqrt(ss / m), m, mask.copyOf(), c, eig.values.copyOf())
     }
 }
 

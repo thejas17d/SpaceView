@@ -105,8 +105,8 @@ class UncertaintyTest {
     @Test fun distanceProjectsCovarianceOnTheLine() {
         val model = UncertaintyModel(scaleSigmaRel = 0.0)
         // Large error perpendicular to the segment must not count; along it, it must.
-        val a = UncertainPoint(Vec3.ZERO, Cov3(1e-6, 0.0, 0.0, 1e-2, 0.0, 1e-2))
-        val b = UncertainPoint(Vec3(1.0, 0.0, 0.0), Cov3(1e-6, 0.0, 0.0, 1e-2, 0.0, 1e-2))
+        val a = UncertainPoint(Vec3.ZERO, Cov3(1e-6, 0.0, 0.0, 1e-2, 0.0, 1e-2), includesLocalisation = true)
+        val b = UncertainPoint(Vec3(1.0, 0.0, 0.0), Cov3(1e-6, 0.0, 0.0, 1e-2, 0.0, 1e-2), includesLocalisation = true)
         val d = model.distance(a, b)
         assertEquals(1.0, d.value, 1e-12)
         assertEquals(sqrt(2e-6), d.sigma, 1e-12)
@@ -118,8 +118,8 @@ class UncertaintyTest {
 
     @Test fun heightAndHorizontal() {
         val model = UncertaintyModel(scaleSigmaRel = 0.0)
-        val floor = UncertainPoint.of(Vec3(0.3, 0.0, -1.0), 0.002)
-        val top = UncertainPoint.of(Vec3(0.8, 1.75, -1.4), 0.002)
+        val floor = UncertainPoint(Vec3(0.3, 0.0, -1.0)).withLocalisationSigma(0.002)
+        val top = UncertainPoint(Vec3(0.8, 1.75, -1.4)).withLocalisationSigma(0.002)
         val h = model.height(floor, top)
         assertEquals(1.75, h.value, 1e-12)
         assertEquals(sqrt(2.0) * 0.002, h.sigma, 1e-12)
@@ -159,7 +159,7 @@ class UncertaintyTest {
                 repeat(20) {
                     est.add(p * scale + tapErr + Vec3(rng.nextGaussian(), rng.nextGaussian(), rng.nextGaussian()) * 0.003)
                 }
-                return est.estimate()!!.point.withExtraSigma(tapSigma)
+                return est.estimate()!!.point.withLocalisationSigma(tapSigma)
             }
             val m = model.distance(endpoint(trueA), endpoint(trueB))
             if (abs(m.value - length) <= m.bound95) inside++

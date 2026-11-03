@@ -2,16 +2,192 @@
 <resources>
     <string name="app_name" translatable="false">SpaceView</string>
     <string name="home_tagline">Measure anything. Place it at true size.</string>
-    <string name="home_sample_label">Sample reading</string>
-    <string name="home_sample_value" translatable="false">1 248 mm</string>
-    <string name="home_sample_tolerance" translatable="false">± 12 mm</string>
     <string name="home_accuracy_good">Good</string>
-    <string name="home_mode_measure">Measure</string>
-    <string name="home_mode_measure_detail">Distance, height and area, each with its ±</string>
-    <string name="home_mode_scan">Scan object</string>
-    <string name="home_mode_scan_detail">Save an item with its exact dimensions</string>
-    <string name="home_mode_gallery">AR Gallery</string>
-    <string name="home_mode_gallery_detail">Place saved items in your room at true size</string>
-    <string name="home_coming_soon">Coming soon</string>
     <string name="home_start_measuring">Start measuring</string>
+
+    <!-- ===== Builder A (M2): home, measure, calibration, history. Append new A keys inside this block. ===== -->
+    <!-- Home -->
+    <string name="home_section_measure">Measure</string>
+    <string name="home_distance">Distance</string>
+    <string name="home_distance_detail">Point to point, with its ±</string>
+    <string name="home_height">Height</string>
+    <string name="home_height_detail">From the floor or a table up to a point</string>
+    <string name="home_rectangle">Rectangle</string>
+    <string name="home_rectangle_detail">Width, height and area of a frame, door or TV</string>
+    <string name="home_calibrate">Calibrate</string>
+    <string name="home_calibrate_detail">Boost accuracy with a bank card or an A4 sheet</string>
+    <string name="home_calibrated_on">Calibrated on %1$s</string>
+    <string name="home_history">History</string>
+    <string name="home_history_detail">Your saved measurements</string>
+    <string name="home_settings">Settings</string>
+    <!-- Camera permission and ARCore -->
+    <string name="perm_title">Camera access</string>
+    <string name="perm_body">SpaceView uses your camera only to measure. Nothing is uploaded unless you share it.</string>
+    <string name="perm_allow">Allow camera</string>
+    <string name="perm_denied_body">SpaceView can\'t measure without the camera. Allow camera access to continue.</string>
+    <string name="perm_open_settings">Open settings</string>
+    <string name="arcore_checking">Getting AR ready…</string>
+    <string name="arcore_install_title">One more step</string>
+    <string name="arcore_install_body">Measuring needs Google Play Services for AR, a free download of about 40 MB. Wi-Fi is best.</string>
+    <string name="arcore_install">Install</string>
+    <string name="arcore_declined">Measuring can\'t start without Google Play Services for AR.</string>
+    <string name="arcore_unsupported">This phone doesn\'t support AR measuring.</string>
+    <string name="arcore_unknown">Couldn\'t check AR support. Check your connection and try again.</string>
+    <string name="arcore_session_failed">AR couldn\'t start. Close other camera apps and try again.</string>
+    <string name="common_try_again">Try again</string>
+    <!-- Measure screen -->
+    <string name="measure_mode_distance">Distance</string>
+    <string name="measure_mode_height">Height</string>
+    <string name="measure_mode_rectangle">Rectangle</string>
+    <string name="measure_close">Close measuring</string>
+    <string name="measure_undo">Undo</string>
+    <string name="measure_freeze">Freeze and fine-tune</string>
+    <string name="measure_new">New measurement</string>
+    <string name="measure_save">Save</string>
+    <string name="measure_saved">Saved to History</string>
+    <string name="measure_start_over">Start over</string>
+    <string name="measure_coach_move">Move your phone slowly side to side.</string>
+    <string name="measure_coach_title">Getting started</string>
+    <string name="measure_too_fast">Move your phone more slowly.</string>
+    <string name="measure_too_dark">Too dark. Turn on a light or move closer to a window.</string>
+    <string name="measure_low_texture">Try pointing at something with texture, like a switchboard, the edge of a rug or a frame.</string>
+    <string name="measure_lost">Point back at where you were measuring.</string>
+    <string name="measure_camera_problem">The camera is busy. Close other camera apps and try again.</string>
+    <string name="measure_no_surface">Aim at a surface. Move slowly to find it.</string>
+    <string name="measure_hold_steady">Hold steady…</string>
+    <string name="measure_aim_first">Aim at the first point, then tap +</string>
+    <string name="measure_aim_end">Aim at the end point, then tap +</string>
+    <string name="measure_aim_base">Aim at the bottom (floor or table), then tap +</string>
+    <string name="measure_aim_top">Aim at the top point, then tap +</string>
+    <string name="measure_aim_corner_1">Aim at the top-left corner, then tap +</string>
+    <string name="measure_aim_corner_2">Aim at the top-right corner, then tap +</string>
+    <string name="measure_aim_corner_3">Aim at the bottom-right corner, then tap +</string>
+    <string name="measure_distance_to_target">%1$s away</string>
+    <string name="measure_reject_no_surface">Can\'t find a surface here. Aim at something with texture.</string>
+    <string name="measure_reject_not_steady">Hold the phone steady for a moment, then tap +.</string>
+    <string name="measure_reject_not_tracking">Move slowly until the dots appear, then tap +.</string>
+    <string name="measure_reject_same_spot">That\'s the same spot. Aim at the next point.</string>
+    <string name="measure_freeze_unavailable">Can\'t freeze right now. Place a point first and hold steady.</string>
+    <string name="measure_freeze_hint">Drag anywhere to move the last point. The loupe shows where it is.</string>
+    <string name="measure_freeze_done">Done</string>
+    <string name="measure_freeze_cancel">Cancel</string>
+    <string name="measure_safety_title">Watch your surroundings</string>
+    <string name="measure_safety_body">Look out for stairs, pets and traffic while you measure.</string>
+    <string name="measure_ok">OK</string>
+    <string name="measure_calibrated_chip">Calibrated</string>
+    <string name="measure_reticle">Crosshair</string>
+    <string name="measure_reticle_locked">Crosshair, steady</string>
+    <!-- Result card -->
+    <string name="result_distance">Distance</string>
+    <string name="result_height">Height</string>
+    <string name="result_width">Width</string>
+    <string name="result_rect_height">Height</string>
+    <string name="result_area">Area</string>
+    <string name="result_label_hint">Name (optional)</string>
+    <string name="result_calibrated">Calibrated on %1$s</string>
+    <string name="result_not_square">Corners are %1$s° off square. Check the corners.</string>
+    <string name="result_tip_title">Tip</string>
+    <string name="tip_move_closer">Move closer. Under 1 m away is best.</string>
+    <string name="tip_add_light">Add light. Turn on a lamp or move near a window.</string>
+    <string name="tip_hold_still">Hold the phone still for a second at each point.</string>
+    <string name="tip_face_surface">Face the surface more directly.</string>
+    <string name="tip_aim_at_texture">Aim at textured spots, like edges or corners.</string>
+    <string name="tip_calibrate">Calibrate with a card or an A4 sheet.</string>
+    <string name="tip_measure_again">Measure again from a different angle to confirm.</string>
+    <!-- Calibration -->
+    <string name="calib_title">Calibrate</string>
+    <string name="calib_choose">What will you measure?</string>
+    <string name="calib_card">Bank card</string>
+    <string name="calib_card_detail">Any bank, Aadhaar (PVC) or ID card. Hold the phone about 30 cm away.</string>
+    <string name="calib_a4">A4 sheet</string>
+    <string name="calib_a4_detail">Best for measuring from further away. Hold the phone about 50 cm away.</string>
+    <string name="calib_same_surface">Lay it flat on the surface you\'ll measure.</string>
+    <string name="calib_result_title">Calibration result</string>
+    <string name="calib_result_body">Scale correction %1$s (± %2$s)</string>
+    <string name="calib_apply">Use this calibration</string>
+    <string name="calib_retry">Measure again</string>
+    <string name="calib_applied">Calibrated. Results now show Calibrated.</string>
+    <string name="calib_reject_out_of_range">That result is far off. Move slowly until the dots appear, then try again.</string>
+    <string name="calib_reject_inconsistent">The sides don\'t match the card or sheet. Check you aimed at its corners.</string>
+    <string name="calib_reject_noisy">Too uncertain to help. Move closer, or use an A4 sheet.</string>
+    <string name="calib_reject_skewed">The corners don\'t form a rectangle. Aim at the exact corners.</string>
+    <string name="calib_reject_invalid">Couldn\'t measure the sides. Try again.</string>
+    <!-- History -->
+    <string name="history_title">History</string>
+    <string name="history_empty">No saved measurements yet.</string>
+    <string name="history_delete">Delete</string>
+    <string name="history_rect_value">%1$s × %2$s</string>
+    <string name="history_calibrated">Calibrated</string>
+    <string name="history_kind_distance">Distance</string>
+    <string name="history_kind_height">Height</string>
+    <string name="history_kind_rectangle">Rectangle</string>
+    <!-- ===== End of Builder A (M2) block ===== -->
+
+    <!-- ===== Builder B (M5): common components, onboarding, settings, ads. Append new B keys below. ===== -->
+    <!-- Common components -->
+    <string name="accuracy_good">Good</string>
+    <string name="accuracy_fair">Fair</string>
+    <string name="accuracy_rough">Rough</string>
+    <string name="accuracy_good_hint">Within about half a centimetre.</string>
+    <string name="accuracy_fair_hint">Fine for planning. Check before buying.</string>
+    <string name="accuracy_rough_hint">Rough estimate. Move closer or add light.</string>
+    <string name="a11y_accuracy_good">Good accuracy</string>
+    <string name="a11y_accuracy_fair">Fair accuracy</string>
+    <string name="a11y_accuracy_rough">Rough estimate</string>
+    <string name="a11y_badge_with_tolerance">%1$s, %2$s</string>
+    <string name="a11y_length_with_tolerance">%1$s, plus or minus %2$s</string>
+    <string name="a11y_unit_mm">millimetres</string>
+    <string name="a11y_unit_cm">centimetres</string>
+    <string name="a11y_unit_m">metres</string>
+    <string name="a11y_unit_inches">inches</string>
+    <string name="a11y_unit_feet">feet</string>
+    <string name="common_add_point">Add point</string>
+    <string name="common_dismiss">Dismiss</string>
+    <string name="common_back">Back</string>
+    <string name="common_close">Close</string>
+    <!-- Onboarding -->
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_step">Step %1$d of %2$d</string>
+    <string name="onboarding_what_title">Measure anything, save it, place it</string>
+    <string name="onboarding_what_body">Aim the crosshair and tap + to measure length, height and area. Save an object with its size, then see it in your room at true size.</string>
+    <string name="onboarding_how_title">How to measure accurately</string>
+    <string name="onboarding_how_body">Use good light. Move your phone slowly from side to side until you see dots on the surface. Stay about an arm\'s length away.</string>
+    <string name="onboarding_accuracy_title">Honest about accuracy</string>
+    <string name="onboarding_accuracy_body" formatted="false">Phone measurements are typically within ±2% (about ±1–2 cm at 1 m). Every result shows its own ± and a Good, Fair or Rough rating.</string>
+    <string name="onboarding_calibrate_prompt">Calibrate once with any bank card or an A4 sheet for better accuracy. It takes about 20 seconds.</string>
+    <string name="onboarding_calibrate_now">Calibrate now</string>
+    <string name="onboarding_calibrate_later">Later</string>
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_units">Units</string>
+    <string name="settings_units_auto">Auto</string>
+    <string name="settings_units_auto_detail">cm for objects, ft-in for rooms, inches for TVs</string>
+    <string name="settings_units_metric">Metric</string>
+    <string name="settings_units_metric_detail">mm, cm and m</string>
+    <string name="settings_units_imperial">Imperial</string>
+    <string name="settings_units_imperial_detail">Inches and feet</string>
+    <string name="settings_section_measuring">Measuring</string>
+    <string name="settings_sounds">Sounds</string>
+    <string name="settings_sounds_detail">Soft click when you add a point</string>
+    <string name="settings_recalibrate">Recalibrate</string>
+    <string name="settings_recalibrate_detail">Use a bank card or an A4 sheet to improve accuracy</string>
+    <string name="settings_section_privacy">Privacy</string>
+    <string name="settings_privacy_options">Ad privacy options</string>
+    <string name="settings_privacy_options_detail">Review or change your ad consent choices</string>
+    <string name="settings_privacy_options_not_needed">No ad privacy choices are needed in your region</string>
+    <string name="settings_privacy_policy">Privacy policy</string>
+    <string name="settings_section_ads">Ads</string>
+    <string name="settings_remove_ads">Remove ads</string>
+    <string name="settings_coming_soon">Coming soon</string>
+    <string name="settings_section_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_accuracy_note_title">Accuracy</string>
+    <string name="settings_accuracy_note" formatted="false">Typically ±2% (about ±1–2 cm at 1 m). Each result shows its own ±. For exact work, check with a tape.</string>
+    <string name="settings_licences">Open-source licences</string>
+    <string name="settings_licences_apache">Apache License 2.0: www.apache.org/licenses/LICENSE-2.0</string>
+    <string name="settings_contact">Contact support</string>
+    <!-- Ads -->
+    <string name="ads_label">Ad</string>
+    <string name="ads_advertisement">Advertisement</string>
 </resources>

@@ -11,6 +11,9 @@ import kotlin.math.sqrt
 class ShapesTest {
     private val exactModel = UncertaintyModel(scaleSigmaRel = 0.0)
 
+    /** Point whose covariance is complete (sigma includes localisation), so no tier floor is added. */
+    private fun loc(p: Vec3, sigma: Double) = UncertainPoint(p).withLocalisationSigma(sigma)
+
     /** 60 × 40 cm frame on the wall z = −1.5, top-left at (−0.3, 1.6). */
     private val frame = listOf(
         Vec3(-0.3, 1.6, -1.5), Vec3(0.3, 1.6, -1.5), Vec3(0.3, 1.2, -1.5), Vec3(-0.3, 1.2, -1.5),
@@ -18,7 +21,7 @@ class ShapesTest {
     private val wall = Plane.fromPointNormal(Vec3(0.0, 0.0, -1.5), Vec3.UNIT_Z)
 
     @Test fun exactRectangle() {
-        val r = Shapes.rectangle(frame.map { UncertainPoint.of(it, 0.0) }, wall, exactModel)
+        val r = Shapes.rectangle(frame.map { loc(it, 0.0) }, wall, exactModel)
         assertEquals(0.60, r.width.value, 1e-12)
         assertEquals(0.40, r.height.value, 1e-12)
         assertEquals(0.24, r.area.value, 1e-12)
@@ -31,6 +34,8 @@ class ShapesTest {
         assertEquals(0.0, r.planarityRms, 1e-12)
         assertEquals(Quality.GOOD, r.quality)
         assertEquals(4, r.corners.size)
+        assertFalse(r.cornersReordered)
+        assertTrue(r.isConvex && r.isGeometricallyConsistent)
     }
 
     @Test fun cornersAreSnappedToThePlane() {
@@ -51,7 +56,7 @@ class ShapesTest {
     }
 
     @Test fun threeCornerRectangle() {
-        val r = Shapes.rectangle(frame.take(3).map { UncertainPoint.of(it, 0.0) }, null, exactModel)
+        val r = Shapes.rectangle(frame.take(3).map { loc(it, 0.0) }, null, exactModel)
         assertEquals(0.60, r.width.value, 1e-12)
         assertEquals(0.40, r.height.value, 1e-12)
         assertTrue(frame[3].approxEquals(r.corners[3], 1e-12))
@@ -111,15 +116,22 @@ class ShapesTest {
         val f = Shapes.box(RawLength(0.6, 0.0), RawLength(0.4, 0.0), RawLength(0.02, 0.005, isMeasured = false), model)
         assertEquals(0.005, f.depth.sigma, 1e-15)
         assertEquals(Quality.ROUGH, f.depth.quality) // ±1 cm on 2 cm
-        assertEquals(Quality.ROUGH, f.quality)
+        // The preset depth is an estimate: labelled, and excluded from the box badge (MINOR-6).
+        assertTrue(f.depthIsEstimate && f.hasEstimates)
+        assertFalse(f.widthIsEstimate || f.heightIsEstimate)
+        assertEquals(Quality.FAIR, f.quality) // W, H at the 1.96% scale prior; the 2 cm preset does not count
+        // A sigma = 0 preset must not make a rough box look good either.
+        val rough = Shapes.box(RawLength(0.6, 0.02), RawLength(0.4, 0.0), RawLength(0.02, 0.0, isMeasured = false), model)
+        assertEquals(Quality.ROUGH, rough.quality)
+        assertFalse(Shapes.box(RawLength(0.6, 0.0), RawLength(0.4, 0.0), RawLength(0.3, 0.0), model).hasEstimates)
     }
 
     @Test fun boxFromPoints() {
         // Microwave 45 × 26 × 35 cm on a counter at y = 0.9.
-        val b0 = UncertainPoint.of(Vec3(0.0, 0.9, -1.0), 0.001)
-        val b1 = UncertainPoint.of(Vec3(0.45, 0.9, -1.0), 0.001)
-        val b2 = UncertainPoint.of(Vec3(0.45, 0.9, -1.35), 0.001)
-        val top = UncertainPoint.of(Vec3(0.2, 1.16, -1.2), 0.001)
+        val b0 = loc(Vec3(0.0, 0.9, -1.0), 0.001)
+        val b1 = loc(Vec3(0.45, 0.9, -1.0), 0.001)
+        val b2 = loc(Vec3(0.45, 0.9, -1.35), 0.001)
+        val top = loc(Vec3(0.2, 1.16, -1.2), 0.001)
         val b = Shapes.boxFromPoints(b0, b1, b2, top, exactModel)
         assertEquals(0.45, b.width.value, 1e-12)
         assertEquals(0.35, b.depth.value, 1e-12)

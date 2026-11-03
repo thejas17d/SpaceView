@@ -1,0 +1,114 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "f5f72715033cff365dfd95d5a604ae47",
+    "entities": [
+      {
+        "tableName": "measurements",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `kind` TEXT NOT NULL, `value_m` REAL NOT NULL, `sigma_m` REAL NOT NULL, `secondary_m` REAL, `secondary_sigma_m` REAL, `area_m2` REAL, `area_sigma_m2` REAL, `quality` TEXT NOT NULL, `unit_context` TEXT NOT NULL, `calibrated` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `label` TEXT, `thumbnail_path` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "valueMetres",
+            "columnName": "value_m",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sigmaMetres",
+            "columnName": "sigma_m",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "secondaryMetres",
+            "columnName": "secondary_m",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "secondarySigmaMetres",
+            "columnName": "secondary_sigma_m",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "areaSquareMetres",
+            "columnName": "area_m2",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "areaSigma",
+            "columnName": "area_sigma_m2",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "quality",
+            "columnName": "quality",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unitContext",
+            "columnName": "unit_context",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "calibrated",
+            "columnName": "calibrated",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampMillis",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "thumbnailPath",
+            "columnName": "thumbnail_path",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_measurements_timestamp",
+            "unique": false,
+            "columnNames": [
+              "timestamp"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_measurements_timestamp` ON `${TABLE_NAME}` (`timestamp`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f5f72715033cff365dfd95d5a604ae47')"
+    ]
+  }
+}

@@ -155,13 +155,21 @@ class UnitsTest {
                 val pmU = Units.fromMetres(pm, unit)
                 val shown = f.value.toDouble()
                 assertTrue("$unit $v $pm -> ${f.text}", abs(shown - Units.fromMetres(v, unit)) <= f.step / 2 + 1e-9)
+                // The step follows the ± as displayed (rounded to its significant figures, MINOR-9).
+                val shownPm = f.plusMinus!!.toDouble()
+                assertTrue("$unit ± $pmU shown as $shownPm", shownPm >= minOf(0.75 * pmU, pmU - Units.minStep(unit) / 2) - 1e-9 &&
+                    shownPm <= maxOf(1.25 * pmU, pmU + Units.minStep(unit) / 2, Units.minStep(unit)) + 1e-9)
                 val atMin = abs(f.step - Units.minStep(unit)) < 1e-12
-                assertTrue("step ${f.step} too fine for ±$pmU", atMin || f.step * 10 > pmU)
-                assertTrue("step ${f.step} coarser than ±$pmU", atMin || f.step <= pmU * (1 + 1e-9))
+                assertTrue("step ${f.step} too fine for ±$shownPm", atMin || f.step * 10 > shownPm)
+                assertTrue("step ${f.step} coarser than ±$shownPm", atMin || f.step <= shownPm * (1 + 1e-9))
+                // Never more decimals in the ± than one below the value's step.
+                val valueDecimals = f.value.substringAfter('.', "").length
+                val pmDecimals = f.plusMinus.substringAfter('.', "").length
+                assertTrue("${f.text}", pmDecimals <= valueDecimals + 1)
             }
             val fi = Units.format(m(v, pm), LengthUnit.INCH_FRACTION)
             val pmIn = pm / Units.METRES_PER_INCH
-            assertTrue(fi.step <= maxOf(pmIn, 1.0 / 16) + 1e-12)
+            assertTrue(fi.step <= maxOf(pmIn * 4 / 3, 1.0 / 16) + 1e-12) // step follows the rounded ±
         }
     }
 

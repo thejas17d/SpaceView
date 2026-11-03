@@ -56,12 +56,15 @@ class PointEstimatorConfig(
 /**
  * Robust estimate of one 3-D point.
  *
- * @property point mean of the inlier samples with the covariance **of the mean** (standard error², m²).
+ * @property point mean of the inlier samples with the covariance **of the mean** (standard error², m²),
+ *   inflated for autocorrelation and small-sample Student-t coverage, plus the localisation term when a
+ *   [LocalisationInput] was given (then [UncertainPoint.includesLocalisation] is true).
  * @property sampleCount samples in the window that were analysed.
  * @property inlierCount samples kept after median/MAD outlier rejection.
  * @property spreadRms 3-D RMS distance of inliers from their mean (m), i.e. per-sample scatter.
  * @property effectiveSampleSize independent-sample equivalent after the autocorrelation correction.
  * @property isStable false if too many outliers or too much scatter; the UI should ask the user to hold still.
+ * @property localisationSigma isotropic localisation σ (m) included in [point], 0 when none was given.
  */
 class PointEstimate(
     val point: UncertainPoint,
@@ -70,6 +73,7 @@ class PointEstimate(
     val spreadRms: Double,
     val effectiveSampleSize: Double,
     val isStable: Boolean,
+    val localisationSigma: Double = 0.0,
 ) {
     /** Estimated position (m). */
     val position: Vec3 get() = point.position
@@ -87,7 +91,7 @@ class PointEstimate(
  *
  * Pipeline: tracking gate → sliding window → per-axis median and MAD → reject samples whose robust
  * normalised radius exceeds [PointEstimatorConfig.outlierRadius] → mean and covariance of inliers →
- * covariance of the mean = S / n_eff, with n_eff from lag-1 autocorrelation.
+ * covariance of the mean = S / n_eff × (t/1.96)², with n_eff from the bias-corrected lag-1 autocorrelation.
  *
  * Not thread-safe; feed it from one thread. Storage is preallocated (no per-sample allocation).
  */
@@ -138,8 +142,14 @@ class PointEstimator(val config: PointEstimatorConfig = PointEstimatorConfig()) 
         count = 0
     }
 
-    /** Robust estimate, or null while fewer than [PointEstimatorConfig.minSamples] samples are buffered. */
-    fun estimate(): PointEstimate? {
+    /**
+     * Robust estimate, or null while fewer than [PointEstimatorConfig.minSamples] samples are buffered.
+     *
+     * Without [localisation] the covariance is the jitter standard error only and the point is not
+     * marked as localised ([UncertaintyModel] then adds the tier floor). With it, the isotropic
+     * aim/localisation σ ([LocalisationInput.sigmaMeters]) is added and the point is marked localised.
+     */
+    fun estimate(localisation: LocalisationInput? = null): PointEstimate? {
         if (count < config.minSamples) return null
         val n = count
 
@@ -156,7 +166,9 @@ class PointEstimator(val config: PointEstimatorConfig = PointEstimatorConfig()) 
             inlier[k] = ok
             if (ok) { m++; sx += xs[i]; sy += ys[i]; sz += zs[i] }
         }
-        // m >= 1 always: at least half the samples lie within 1 MAD of the median on each axis.
+        // Per-axis "within one MAD" does not hold jointly: with clustered/quantised samples no sample may
+        // pass all three axes. Fall back to the per-axis medians (SE of a median ≈ 1.2533·σ/√n), unstable.
+        if (m == 0) return medianFallback(n, medX, medY, medZ, sX, sY, sZ, localisation)
         val mx = sx / m; val my = sy / m; val mz = sz / m
 
         var cxx = 0.0; var cxy = 0.0; var cxz = 0.0; var cyy = 0.0; var cyz = 0.0; var czz = 0.0
@@ -172,19 +184,51 @@ class PointEstimator(val config: PointEstimatorConfig = PointEstimatorConfig()) 
             if (hasPrev) lagNum += dx * px + dy * py + dz * pz
             px = dx; py = dy; pz = dz; hasPrev = true
         }
-        val dof = max(1, m - 1).toDouble()
-        val sampleCov = Cov3(cxx / dof, cxy / dof, cxz / dof, cyy / dof, cyz / dof, czz / dof)
         val spreadRms = sqrt(lagDen / m)
 
         var nEff = m.toDouble()
+        var dof = max(1, m - 1).toDouble()
+        var tInflation = 1.0
         if (config.correctAutocorrelation && m >= 3 && lagDen > 0) {
-            val rho = (lagNum / lagDen).coerceIn(0.0, MAX_RHO)
-            nEff = max(1.0, m * (1 - rho) / (1 + rho))
+            // AR frames are strongly correlated (hand tremor, slow VIO wobble). Four corrections (MAJOR-2):
+            // 1. the lag-1 estimate from ~30 samples is biased low by ≈ (1 + 4ρ)/n: add it back;
+            // 2. cap at MAX_RHO = 0.97 (not 0.9);
+            // 3. the sample variance of a correlated series under-states the process variance:
+            //    E[Σ(x − x̄)²] ≈ σ²(m − m/n_eff), so divide by that (never by less than m/2);
+            // 4. use a Student-t coverage factor for n_eff − 1 degrees of freedom (never fewer than
+            //    MIN_T_DOF), folded into the covariance so the displayed K95·σ keeps ≈95% coverage.
+            val rhoRaw = lagNum / lagDen
+            val rho = (rhoRaw + (1 + 4 * rhoRaw) / m).coerceIn(0.0, MAX_RHO)
+            nEff = (m * (1 - rho) / (1 + rho)).coerceIn(1.0, m.toDouble())
+            dof = max(m - m / nEff, max(m / 2.0, 1.0))
+            val t = Stats.studentT975(max(nEff - 1, MIN_T_DOF))
+            tInflation = (t / Uncertainty.K95).let { it * it }
         }
-        val meanCov = sampleCov * (1.0 / nEff)
+        val sampleCov = Cov3(cxx / dof, cxy / dof, cxz / dof, cyy / dof, cyz / dof, czz / dof)
+        val meanCov = sampleCov * (tInflation / nEff)
 
         val stable = m >= config.minInlierFraction * n && spreadRms <= config.maxSpreadRms
-        return PointEstimate(UncertainPoint(Vec3(mx, my, mz), meanCov), n, m, spreadRms, nEff, stable)
+        return PointEstimate(withLocalisation(Vec3(mx, my, mz), meanCov, localisation), n, m, spreadRms, nEff, stable,
+            localisation?.sigmaMeters ?: 0.0)
+    }
+
+    private fun withLocalisation(p: Vec3, jitterCov: Cov3, loc: LocalisationInput?): UncertainPoint =
+        if (loc == null) UncertainPoint(p, jitterCov) else UncertainPoint(p, jitterCov).withLocalisation(loc)
+
+    private fun medianFallback(
+        n: Int, medX: Double, medY: Double, medZ: Double, sX: Double, sY: Double, sZ: Double,
+        loc: LocalisationInput?,
+    ): PointEstimate {
+        val f = MEDIAN_SE_FACTOR * MEDIAN_SE_FACTOR / n
+        val cov = Cov3(sX * sX * f, 0.0, 0.0, sY * sY * f, 0.0, sZ * sZ * f)
+        var ss = 0.0
+        for (k in 0 until n) {
+            val i = (start + k) % cap
+            val dx = xs[i] - medX; val dy = ys[i] - medY; val dz = zs[i] - medZ
+            ss += dx * dx + dy * dy + dz * dz
+        }
+        return PointEstimate(withLocalisation(Vec3(medX, medY, medZ), cov, loc), n, 0, sqrt(ss / n), n.toDouble(),
+            false, loc?.sigmaMeters ?: 0.0)
     }
 
     private fun medianOf(src: DoubleArray): Double {
@@ -202,8 +246,14 @@ class PointEstimator(val config: PointEstimatorConfig = PointEstimatorConfig()) 
         /** MAD → σ for a Gaussian. */
         const val MAD_TO_SIGMA = 1.4826
 
-        /** Cap on the lag-1 autocorrelation (n_eff ≥ n/19) to keep the correction bounded. */
-        const val MAX_RHO = 0.9
+        /** Cap on the bias-corrected lag-1 autocorrelation (n_eff ≥ n/66, then ≥ 1). */
+        const val MAX_RHO = 0.97
+
+        /** Fewest Student-t degrees of freedom used (t₀.₉₇₅ = 4.30), so n_eff ≈ 1 stays bounded. */
+        const val MIN_T_DOF = 2.0
+
+        /** SE of a Gaussian median relative to σ/√n (√(π/2)). */
+        const val MEDIAN_SE_FACTOR = 1.2533
     }
 }
 
@@ -222,6 +272,26 @@ object Stats {
         var lo = a[0]
         for (i in 1 until mid) if (a[i] > lo) lo = a[i]
         return (lo + hi) / 2
+    }
+
+    private val T_DOF = doubleArrayOf(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 15.0, 20.0, 25.0, 30.0, 40.0, 60.0, 120.0)
+    private val T_975 = doubleArrayOf(
+        12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.179, 2.131, 2.086, 2.060, 2.042,
+        2.021, 2.000, 1.980,
+    )
+
+    /**
+     * Two-sided 95% Student-t quantile t₀.₉₇₅(ν) for real ν ≥ 1 (table, interpolated linearly in 1/ν;
+     * error < 0.01). Tends to 1.96 as ν → ∞; ν < 1 is treated as 1.
+     */
+    fun studentT975(nu: Double): Double {
+        if (!(nu > 1.0)) return T_975[0]
+        if (nu >= 120.0) return Uncertainty.K95 + (T_975.last() - Uncertainty.K95) * 120.0 / nu
+        var i = 1
+        while (T_DOF[i] < nu) i++
+        val a = T_DOF[i - 1]; val b = T_DOF[i]
+        val f = (1 / nu - 1 / a) / (1 / b - 1 / a)
+        return T_975[i - 1] + f * (T_975[i] - T_975[i - 1])
     }
 
     /** Median of a list (does not modify it). */

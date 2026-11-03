@@ -38,6 +38,23 @@ class FitResult(val fit: Fit, val axes: List<AxisFit>, val limitingAxis: AxisFit
 }
 
 /**
+ * Which orientations of the item [FitVerdict] may try. Dimensions are ordered W, H[, D] with H vertical.
+ */
+enum class FitRotation {
+    /** As given. */
+    NONE,
+
+    /**
+     * Turn about the vertical axis only: W and D may swap, H stays vertical (a fridge or TV is never
+     * tipped over). For 1-D/2-D input there is no D, so nothing is permuted.
+     */
+    ABOUT_VERTICAL,
+
+    /** Any permutation, including tipping onto a side (e.g. a frame portrait vs landscape in 2-D). */
+    ANY,
+}
+
+/**
  * Fit verdict between an item and a space, accounting for uncertainty on both.
  *
  * For each axis, clearance c = space − item and σc = √(σs² + σi²) (treated as independent, which is the
@@ -51,8 +68,10 @@ class FitPolicy(
     val z: Double = Uncertainty.K95,
     /** Required gap (m), e.g. ventilation space around a TV or fridge. */
     val minClearance: Double = 0.0,
-    /** Let the item be rotated (dimension permutations) to find the best fit. */
+    /** Let the item be rotated to find the best fit; true means [FitRotation.ABOUT_VERTICAL]. */
     val allowRotation: Boolean = false,
+    /** Orientations tried. Defaults from [allowRotation] (false → NONE, true → ABOUT_VERTICAL). */
+    val rotation: FitRotation = if (allowRotation) FitRotation.ABOUT_VERTICAL else FitRotation.NONE,
 ) {
     init { require(z >= 0 && minClearance >= 0) }
 }
@@ -62,8 +81,9 @@ object FitVerdict {
 
     /**
      * Compares [item] dims with [space] dims (same order, e.g. W, H[, D]). Both lists must have the
-     * same size (1–3). With [FitPolicy.allowRotation], every permutation of the item dims is tried and
-     * the best one (best verdict, then largest normalised clearance) is returned.
+     * same size (1–3), ordered W, H[, D]. With [FitPolicy.rotation] the allowed permutations of the item
+     * dims are tried (ABOUT_VERTICAL: W↔D only; ANY: all) and the best one (best verdict, then largest
+     * normalised clearance) is returned.
      */
     fun evaluate(item: List<Measurement>, space: List<Measurement>, policy: FitPolicy = FitPolicy()): FitResult {
         require(item.size == space.size) { "Item has ${item.size} dims but space has ${space.size}" }
@@ -71,7 +91,11 @@ object FitVerdict {
         require(item.all { it.value >= 0 } && space.all { it.value >= 0 }) { "Dimensions must be non-negative" }
 
         val identity = item.indices.toList()
-        val perms = if (policy.allowRotation) permutations(identity) else listOf(identity)
+        val perms = when (policy.rotation) {
+            FitRotation.NONE -> listOf(identity)
+            FitRotation.ABOUT_VERTICAL -> if (item.size == 3) listOf(identity, listOf(2, 1, 0)) else listOf(identity)
+            FitRotation.ANY -> permutations(identity)
+        }
         var best: FitResult? = null
         var bestScore = Double.NEGATIVE_INFINITY
         for (perm in perms) {

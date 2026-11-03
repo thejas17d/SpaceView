@@ -228,19 +228,41 @@ class Cov3(
 
 /**
  * A 3D point with its covariance (uncertainty of the point estimate, not of individual samples).
+ *
+ * @property includesLocalisation true once the covariance contains the endpoint aim/localisation term
+ *   (set by [withLocalisation], [withLocalisationSigma], [PointEstimator.estimate] with a
+ *   [LocalisationInput], or [UncertaintyModel.localise]). When false, [UncertaintyModel] treats the
+ *   covariance as frame jitter only and adds the device tier's conservative floor.
  */
-class UncertainPoint(@JvmField val position: Vec3, @JvmField val covariance: Cov3 = Cov3.ZERO) {
+class UncertainPoint(
+    @JvmField val position: Vec3,
+    @JvmField val covariance: Cov3 = Cov3.ZERO,
+    @JvmField val includesLocalisation: Boolean = false,
+) {
 
     /** Standard deviation of this point along unit direction [u] (m). */
     fun sigmaAlong(u: Vec3): Double = sqrt(covariance.along(u).coerceAtLeast(0.0))
 
     /**
-     * Adds an independent isotropic error of [sigma] metres, e.g. tap/edge-snap localisation
-     * (≈ pixels × range / focalPx, see [Uncertainty.pixelLocalisationSigma]).
+     * Adds an independent isotropic error of [sigma] metres. This does **not** mark the point as
+     * localised; for the aim/tap term use [withLocalisation] (otherwise the tier floor is added on top).
      */
-    fun withExtraSigma(sigma: Double): UncertainPoint = UncertainPoint(position, covariance + Cov3.isotropic(sigma))
+    fun withExtraSigma(sigma: Double): UncertainPoint =
+        UncertainPoint(position, covariance + Cov3.isotropic(sigma), includesLocalisation)
 
-    override fun toString(): String = "UncertainPoint($position, $covariance)"
+    /** Adds the isotropic localisation σ of [loc] and marks the point as localised. */
+    fun withLocalisation(loc: LocalisationInput): UncertainPoint = withLocalisationSigma(loc.sigmaMeters)
+
+    /** Adds an isotropic localisation σ of [sigma] metres and marks the point as localised. */
+    fun withLocalisationSigma(sigma: Double): UncertainPoint {
+        require(sigma >= 0 && sigma.isFinite())
+        return UncertainPoint(position, covariance + Cov3.isotropic(sigma), true)
+    }
+
+    /** Same uncertainty (and localisation flag) at a new position, e.g. after anchor refinement. */
+    fun movedTo(newPosition: Vec3): UncertainPoint = UncertainPoint(newPosition, covariance, includesLocalisation)
+
+    override fun toString(): String = "UncertainPoint($position, $covariance, localised=$includesLocalisation)"
 
     companion object {
         /** Point with an isotropic standard deviation of [sigma] metres. */

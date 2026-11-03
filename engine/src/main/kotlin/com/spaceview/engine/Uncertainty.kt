@@ -86,25 +86,52 @@ enum class Quality {
     }
 }
 
+/** Per-endpoint aim/localisation error inputs from the AR layer. */
+data class LocalisationInput(
+    val rangeMeters: Double,       // camera-to-point distance
+    val focalLengthPx: Double,     // camera intrinsics focal length in pixels
+    val pixelErrorPx: Double = 2.0 // user aim/tap + edge error in pixels (tunable)
+) {
+    init {
+        require(rangeMeters.isFinite() && rangeMeters >= 0) { "rangeMeters must be finite and >= 0" }
+        require(focalLengthPx.isFinite() && focalLengthPx > 0) { "focalLengthPx must be finite and > 0" }
+        require(pixelErrorPx.isFinite() && pixelErrorPx >= 0) { "pixelErrorPx must be finite and >= 0" }
+    }
+
+    /** 1σ localisation error of the endpoint (m), isotropic: pixels × range / focal. */
+    val sigmaMeters: Double get() = pixelErrorPx * rangeMeters / focalLengthPx
+}
+
 /**
- * Device accuracy tier: sets the prior for the distance-proportional VIO / depth scale error.
+ * Device accuracy tier: sets the prior for the distance-proportional VIO / depth scale error, and the
+ * conservative absolute floor used when the AR layer supplies no [LocalisationInput].
  *
  * @property scale95 relative scale error at ≈95% (e.g. 0.02 = "±2% of the length").
+ * @property absFloor95 smallest ±95 a point-to-point length may show when neither endpoint carries
+ *   localisation information (research: "never better than ±1 cm" on non-LiDAR Android). It is applied
+ *   as an isotropic per-endpoint σ of [unlocalisedEndpointSigma], added in quadrature to the jitter
+ *   standard error, so the ± can never collapse to frame jitter alone.
  * Values are engineering estimates from docs/research/measurement-engine.md §1.2/§1.4 and **must be tuned**
  * from the bench-test protocol per device tier.
  */
-enum class DeviceTier(val scale95: Double) {
-    /** ARCore phone with Depth API (depth-from-motion): ≈ ±1.5% at 95%. */
-    DEPTH(0.015),
+enum class DeviceTier(val scale95: Double, val absFloor95: Double) {
+    /** ARCore phone with Depth API (depth-from-motion): ≈ ±1.5% at 95%, floor ±1 cm. */
+    DEPTH(0.015, 0.010),
 
-    /** ARCore VIO + plane hit-tests only: ≈ ±2% at 95% (the default). */
-    NO_DEPTH(0.02),
+    /** ARCore VIO + plane hit-tests only: ≈ ±2% at 95% (the default), floor ±1 cm. */
+    NO_DEPTH(0.02, 0.010),
 
-    /** Hardware depth (ToF / LiDAR): ≈ ±0.8% at 95%. */
-    DEPTH_SENSOR(0.008);
+    /** Hardware depth (ToF / LiDAR): ≈ ±0.8% at 95%, floor ±5 mm. */
+    DEPTH_SENSOR(0.008, 0.005);
 
     /** 1σ relative scale error. */
     val scaleSigmaRel: Double get() = scale95 / Uncertainty.K95
+
+    /**
+     * 1σ isotropic localisation error assumed for an endpoint that has no [LocalisationInput]
+     * (two such endpoints give a length σ of [absFloor95] / K95).
+     */
+    val unlocalisedEndpointSigma: Double get() = absFloor95 / (Uncertainty.K95 * sqrt(2.0))
 }
 
 /**
@@ -112,10 +139,20 @@ enum class DeviceTier(val scale95: Double) {
  * (endpoint standard errors, localisation). Systematic scale error is added by [UncertaintyModel].
  *
  * @property isMeasured false for user-entered / preset values: no scale correction or scale error applies.
+ * @property unlocalisedEndpoints how many of the endpoints behind this length carried no localisation
+ *   term (only frame jitter). [UncertaintyModel] adds the tier's [DeviceTier.unlocalisedEndpointSigma]
+ *   in quadrature for each. [Uncertainty.rawDistance] and friends set it from
+ *   [UncertainPoint.includesLocalisation]; a hand-made RawLength defaults to 0 (its σ is taken as complete).
  */
-class RawLength(val value: Double, val randomSigma: Double, val isMeasured: Boolean = true) {
-    init { require(value.isFinite() && randomSigma.isFinite() && randomSigma >= 0) }
-    override fun toString(): String = "RawLength($value, σr=$randomSigma, measured=$isMeasured)"
+class RawLength(
+    val value: Double,
+    val randomSigma: Double,
+    val isMeasured: Boolean = true,
+    val unlocalisedEndpoints: Int = 0,
+) {
+    init { require(value.isFinite() && randomSigma.isFinite() && randomSigma >= 0 && unlocalisedEndpoints >= 0) }
+    override fun toString(): String =
+        "RawLength($value, σr=$randomSigma, measured=$isMeasured, unlocalised=$unlocalisedEndpoints)"
 }
 
 /**
@@ -126,6 +163,10 @@ class RawLength(val value: Double, val randomSigma: Double, val isMeasured: Bool
  * where k is the calibration scale factor (1 when uncalibrated) and σ_scale,rel is the device-tier VIO
  * scale error, or — once calibrated — the calibration's own relative uncertainty (which includes its
  * residual) combined with [calibratedScaleFloorRel] for what calibration cannot fix (drift, other planes).
+ *
+ * σ_random always contains endpoint localisation (MAJOR-1): from a [LocalisationInput] when the caller
+ * supplies one, otherwise the tier's conservative [DeviceTier.unlocalisedEndpointSigma] per endpoint
+ * (see [RawLength.unlocalisedEndpoints], [localise]). A jitter-only standard error is never the whole ±.
  *
  * Immutable; use [withCalibration] to derive a calibrated model.
  */
@@ -152,6 +193,27 @@ class UncertaintyModel(
     /** Same model with [c] applied (null removes calibration). */
     fun withCalibration(c: ScaleCalibration?) = UncertaintyModel(tier, c, scaleSigmaRel, calibratedScaleFloorRel)
 
+    /**
+     * This model if its calibration (if any) is valid for a measurement on [plane] at [rangeM], otherwise
+     * the same model without calibration (research §2.9: the factor corrects scale "for that plane and
+     * session"; depth bias depends on plane and distance). Unknown plane/range (null) does not exclude.
+     */
+    fun forScope(plane: Plane?, rangeM: Double?): UncertaintyModel {
+        val c = calibration ?: return this
+        return if (c.appliesTo(plane, rangeM)) this else withCalibration(null)
+    }
+
+    /**
+     * Adds the endpoint localisation term to [p]: [localisation]'s σ when given, otherwise the tier's
+     * conservative [DeviceTier.unlocalisedEndpointSigma]. Points that already include localisation are
+     * returned unchanged (no double counting).
+     */
+    fun localise(p: UncertainPoint, localisation: LocalisationInput? = null): UncertainPoint = when {
+        p.includesLocalisation -> p
+        localisation != null -> p.withLocalisation(localisation)
+        else -> p.withLocalisationSigma(tier.unlocalisedEndpointSigma)
+    }
+
     /** Converts a raw length to a calibrated [Measurement]. [extraRelSigma] adds e.g. a plane-bias term. */
     fun length(raw: RawLength, extraRelSigma: Double = 0.0): Measurement = combine(listOf(raw), extraRelSigma)
 
@@ -168,10 +230,13 @@ class UncertaintyModel(
         var absRandVar = 0.0 // only used for single lengths (keeps σ meaningful at value = 0)
         var measuredDims = 0
         val k = scaleFactor
+        val floorVar = tier.unlocalisedEndpointSigma * tier.unlocalisedEndpointSigma
         for (r in raws) {
             val kk = if (r.isMeasured) k else 1.0
             val v = kk * r.value
-            val s = kk * r.randomSigma
+            // Endpoints with jitter only get the tier's conservative localisation floor (MAJOR-1).
+            val rs2 = r.randomSigma * r.randomSigma + if (r.isMeasured) r.unlocalisedEndpoints * floorVar else 0.0
+            val s = kk * sqrt(rs2)
             value *= v
             if (r.isMeasured) measuredDims++
             if (raws.size == 1) absRandVar = s * s
@@ -185,20 +250,51 @@ class UncertaintyModel(
         return Measurement(value, sqrt(variance))
     }
 
-    /** Point-to-point distance. */
-    fun distance(a: UncertainPoint, b: UncertainPoint): Measurement = length(Uncertainty.rawDistance(a, b))
+    /**
+     * Point-to-point distance. Each endpoint gets its localisation term ([localise]): from
+     * [localisationA]/[localisationB] when given, else the tier floor. With both ranges known, a
+     * calibration outside its range scope is not applied ([forScope]).
+     */
+    fun distance(
+        a: UncertainPoint,
+        b: UncertainPoint,
+        localisationA: LocalisationInput? = null,
+        localisationB: LocalisationInput? = null,
+        extraRelSigma: Double = 0.0,
+    ): Measurement = forScope(null, meanRange(localisationA, localisationB))
+        .length(Uncertainty.rawDistance(localise(a, localisationA), localise(b, localisationB)), extraRelSigma)
 
-    /** Vertical component of b − a (height), along [up]. */
-    fun height(a: UncertainPoint, b: UncertainPoint, up: Vec3 = Vec3.UP): Measurement =
-        length(Uncertainty.rawHeight(a, b, up))
+    /** Vertical component of b − a (height), along [up]. Localisation as in [distance]. */
+    fun height(
+        a: UncertainPoint,
+        b: UncertainPoint,
+        up: Vec3 = Vec3.UP,
+        localisationA: LocalisationInput? = null,
+        localisationB: LocalisationInput? = null,
+        extraRelSigma: Double = 0.0,
+    ): Measurement = forScope(null, meanRange(localisationA, localisationB))
+        .length(Uncertainty.rawHeight(localise(a, localisationA), localise(b, localisationB), up), extraRelSigma)
 
-    /** Horizontal component of b − a (floor distance), perpendicular to [up]. */
-    fun horizontalDistance(a: UncertainPoint, b: UncertainPoint, up: Vec3 = Vec3.UP): Measurement =
-        length(Uncertainty.rawHorizontal(a, b, up))
+    /** Horizontal component of b − a (floor distance), perpendicular to [up]. Localisation as in [distance]. */
+    fun horizontalDistance(
+        a: UncertainPoint,
+        b: UncertainPoint,
+        up: Vec3 = Vec3.UP,
+        localisationA: LocalisationInput? = null,
+        localisationB: LocalisationInput? = null,
+        extraRelSigma: Double = 0.0,
+    ): Measurement = forScope(null, meanRange(localisationA, localisationB))
+        .length(Uncertainty.rawHorizontal(localise(a, localisationA), localise(b, localisationB), up), extraRelSigma)
 
     companion object {
         /** Default residual relative scale σ after calibration (0.3%). */
         const val DEFAULT_CALIBRATED_FLOOR_REL = 0.003
+
+        /** Mean camera range of the given localisations, or null if none carries one. */
+        internal fun meanRange(vararg locs: LocalisationInput?): Double? {
+            val r = locs.filterNotNull().map { it.rangeMeters }
+            return if (r.isEmpty()) null else r.average()
+        }
     }
 }
 
@@ -217,7 +313,7 @@ object Uncertainty {
         } else {
             (a.covariance.trace + b.covariance.trace) / 3.0
         }
-        return RawLength(d, sqrt(variance.coerceAtLeast(0.0)))
+        return RawLength(d, sqrt(variance.coerceAtLeast(0.0)), unlocalisedEndpoints = unlocalised(a, b))
     }
 
     /** Raw |(b − a)·up| (height). */
@@ -225,8 +321,11 @@ object Uncertainty {
         val u = up.normalized()
         val h = abs((b.position - a.position) dot u)
         val variance = a.covariance.along(u) + b.covariance.along(u)
-        return RawLength(h, sqrt(variance.coerceAtLeast(0.0)))
+        return RawLength(h, sqrt(variance.coerceAtLeast(0.0)), unlocalisedEndpoints = unlocalised(a, b))
     }
+
+    private fun unlocalised(a: UncertainPoint, b: UncertainPoint): Int =
+        (if (a.includesLocalisation) 0 else 1) + (if (b.includesLocalisation) 0 else 1)
 
     /** Raw length of the horizontal (perpendicular to [up]) component of b − a. */
     fun rawHorizontal(a: UncertainPoint, b: UncertainPoint, up: Vec3 = Vec3.UP): RawLength {
@@ -240,7 +339,7 @@ object Uncertainty {
         } else {
             (a.covariance.trace + b.covariance.trace) / 3.0
         }
-        return RawLength(d, sqrt(variance.coerceAtLeast(0.0)))
+        return RawLength(d, sqrt(variance.coerceAtLeast(0.0)), unlocalisedEndpoints = unlocalised(a, b))
     }
 
     /**
@@ -254,10 +353,27 @@ object Uncertainty {
 
     /**
      * Relative length error caused by plane-offset uncertainty when points are found by ray–plane
-     * intersection at [viewingDistanceM]: a plane δ too far scales lengths by (1 + δ/Z).
+     * intersection: a plane δ too far scales lengths by (1 + δ/h).
+     *
+     * [viewingDistanceM] must be the **perpendicular** camera-to-plane distance h, not the range along
+     * the ray (h = range·cos θ); passing the range under-states the term by cos θ. Prefer the overload
+     * taking the camera position, which computes h itself.
      */
     fun planeBiasRel(fit: PlaneFit, viewingDistanceM: Double): Double {
         require(viewingDistanceM > 0)
         return fit.offsetStandardError / viewingDistanceM
+    }
+
+    /**
+     * Relative length error from the fitted plane's offset uncertainty for a camera at [cameraPosition]:
+     * σ_offset / h with h = |signed distance of the camera from the plane| (perpendicular). When [at] is
+     * given, the offset σ there includes the normal-tilt term ([PlaneFit.offsetSigmaAt]), which grows
+     * with the distance from the fit's centroid.
+     */
+    fun planeBiasRel(fit: PlaneFit, cameraPosition: Vec3, at: Vec3? = null): Double {
+        val h = abs(fit.plane.signedDistance(cameraPosition))
+        require(h > 1e-6) { "Camera lies on the plane" }
+        val offset = if (at == null) fit.offsetStandardError else fit.offsetSigmaAt(at)
+        return offset / h
     }
 }

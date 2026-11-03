@@ -90,11 +90,13 @@ class ContextFormatted(val primary: FormattedLength, val secondary: String?) {
  * Unit conversion and **precision-honest** formatting. All functions are pure.
  *
  * Rounding rule ("never show more precision than the ±"):
- * - Decimal units: the value is rounded to the decimal place of the leading digit of the ±95
- *   (±1.4 cm → whole cm; ±0.5 cm → 0.1 cm; ±12 cm → 10 cm), never finer than the unit's minimum
- *   (1 mm). The ± itself keeps one significant figure, two when it starts with 1 ("± 1.4").
- * - Fractional inches / feet-inches: the value is rounded to the largest of 1/16, 1/8, 1/4, 1/2, 1 inch
- *   not exceeding the ±; the ± is rounded to that same step (never shown as 0).
+ * - Decimal units: the ±95 is first rounded to its displayed significant figures — one, two when it
+ *   starts with 1 ("± 1.4") — and the value is then rounded to the decimal place of the leading digit
+ *   of that **rounded** ± (±1.4 cm → whole cm; ±0.5 cm → 0.1 cm; ±12 cm → 10 cm; ±0.999 cm shows as
+ *   "± 1.0" with a whole-cm value), never finer than the unit's minimum (1 mm).
+ * - Fractional inches / feet-inches: the ± is rounded to the largest of 1/16, 1/8, 1/4, 1/2, 1 inch
+ *   not exceeding it, then the value step is the largest of those not exceeding the rounded ±; the ±
+ *   is shown on that step (never as 0).
  * Output always uses '.' as decimal separator and Western digits (Locale.ROOT).
  */
 object Units {
@@ -136,13 +138,34 @@ object Units {
         val min = minStep(unit)
         if (!(plusMinus > 0)) return min
         return when (unit) {
-            LengthUnit.INCH_FRACTION, LengthUnit.FEET_INCHES -> {
-                var s = FRACTION_STEPS[0]
-                for (c in FRACTION_STEPS) if (c <= plusMinus + 1e-9) s = c
-                s
-            }
-            else -> maxOf(min, decimalLeadingPlace(plusMinus))
+            LengthUnit.INCH_FRACTION, LengthUnit.FEET_INCHES -> fractionStep(roundTo(plusMinus, fractionStep(plusMinus)))
+            else -> decimalSteps(plusMinus, min).valueStep
         }
+    }
+
+    /** Largest of 1/16 … 1 inch not exceeding [x] (1/16 when x is smaller). */
+    private fun fractionStep(x: Double): Double {
+        var s = FRACTION_STEPS[0]
+        for (c in FRACTION_STEPS) if (c <= x + 1e-9) s = c
+        return s
+    }
+
+    /** Rounded ± (as displayed), the step it is shown with, and the value step derived from it. */
+    private class DecimalSteps(val plusMinus: Double, val plusMinusStep: Double, val valueStep: Double)
+
+    /** One significant figure, two when the leading digit is 1. */
+    private fun sigFigStep(x: Double): Double {
+        val lead = decimalLeadingPlace(x)
+        return if (x / lead < 2.0 - 1e-9) lead / 10 else lead
+    }
+
+    /** MINOR-9: round the ± to its displayed figures first, then derive both steps from the rounded ±. */
+    private fun decimalSteps(pm: Double, min: Double): DecimalSteps {
+        if (!(pm > 0)) return DecimalSteps(0.0, min, min)
+        val r1 = maxOf(roundTo(pm, maxOf(min, sigFigStep(pm))), min)
+        val pmStep = maxOf(min, sigFigStep(r1))
+        val r2 = maxOf(roundTo(r1, pmStep), pmStep)
+        return DecimalSteps(r2, pmStep, maxOf(min, decimalLeadingPlace(r2)))
     }
 
     /** Formats a length measurement in [unit] with its ±95 (see the object docs for the rounding rule). */
@@ -200,9 +223,9 @@ object Units {
     fun formatArea(m: Measurement, unit: AreaUnit): String {
         val v = m.value / unit.squareMetres
         val pm = m.bound95 / unit.squareMetres
-        val step = if (pm > 0) maxOf(unit.minStep, decimalLeadingPlace(pm)) else unit.minStep
-        val vt = decimalText(v, step)
-        return if (m.sigma > 0) "$vt ${unit.symbol} ± ${decimalPlusMinus(pm, step, unit.minStep)}" else "$vt ${unit.symbol}"
+        val steps = decimalSteps(pm, unit.minStep)
+        val vt = decimalText(v, steps.valueStep)
+        return if (m.sigma > 0) "$vt ${unit.symbol} ± ${decimalPlusMinus(pm, unit.minStep)}" else "$vt ${unit.symbol}"
     }
 
     /** Default area unit: sq ft for rooms unless metric is forced; m² otherwise (cm² for small things). */
@@ -231,11 +254,9 @@ object Units {
     }
 
     /** ± with 1 significant figure (2 when the leading digit is 1), never finer than [min], never 0. */
-    private fun decimalPlusMinus(pm: Double, step: Double, min: Double): String {
-        val lead = pm / step
-        val s = if (lead < 2.0 - 1e-9) maxOf(min, step / 10) else step
-        val r = maxOf(roundTo(pm, s), s)
-        return String.format(Locale.ROOT, "%.${decimalsFor(s)}f", r)
+    private fun decimalPlusMinus(pm: Double, min: Double): String {
+        val st = decimalSteps(pm, min)
+        return String.format(Locale.ROOT, "%.${decimalsFor(st.plusMinusStep)}f", st.plusMinus)
     }
 
     private fun formatValue(v: Double, unit: LengthUnit, step: Double): String = when (unit) {
@@ -247,7 +268,7 @@ object Units {
     private fun formatPlusMinus(pm: Double, unit: LengthUnit, step: Double): String = when (unit) {
         LengthUnit.INCH_FRACTION -> fractionText(maxOf(roundTo(pm, step), step))
         LengthUnit.FEET_INCHES -> fractionText(maxOf(roundTo(pm, step), step)) + "″"
-        else -> decimalPlusMinus(pm, step, minStep(unit))
+        else -> decimalPlusMinus(pm, minStep(unit))
     }
 
     /** Inches (already a multiple of 1/16) → "23 5/8", "5/8", "-1 1/2", "24". */

@@ -66,3 +66,5 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }
+# Kover 0.9.11 (Sep 2026): JVM coverage for :engine (M1 gate >= 90% lines). Inline version so this is append-only.
+kover = { id = "org.jetbrains.kotlinx.kover", version = "0.9.11" }

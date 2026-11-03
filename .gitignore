@@ -13,3 +13,4 @@ keystore.properties
 .build.lock/
 .build.lock
 .m0-ready
+builds/

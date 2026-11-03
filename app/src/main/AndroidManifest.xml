@@ -9,12 +9,12 @@
         android:name="android.permission.CAMERA"
         tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
 
-    <!-- Merged in by SceneView (remote glTF loading, haptics). SpaceView loads models from
-         app-private files only and needs no vibrator, so both are stripped. INTERNET returns
-         with AdMob in M5; update ci/allowed-permissions.txt at the same time. -->
-    <uses-permission
-        android:name="android.permission.INTERNET"
-        tools:node="remove" />
+    <!-- AdMob + UMP consent (M5). Keep ci/allowed-permissions.txt in sync with the merged manifest. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Merged in by SceneView (haptics). SpaceView avoids vibration during AR (it disturbs
+         tracking), so it is stripped. -->
     <uses-permission
         android:name="android.permission.VIBRATE"
         tools:node="remove" />
@@ -26,6 +26,7 @@
         android:required="true" />
 
     <application
+        android:name=".SpaceViewApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -43,9 +44,22 @@
             android:value="required"
             tools:replace="android:value" />
 
+        <!-- AdMob app ID: Google's test ID in debug, ADMOB_APP_ID in release (app/build.gradle.kts). -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="${admobAppId}" />
+        <!-- Defaults since 24.0.0; stated explicitly so a downgrade cannot slow start-up. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.flag.OPTIMIZE_INITIALIZATION"
+            android:value="true" />
+        <meta-data
+            android:name="com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING"
+            android:value="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

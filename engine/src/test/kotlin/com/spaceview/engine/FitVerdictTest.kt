@@ -75,12 +75,15 @@ class FitVerdictTest {
         val item = listOf(m(0.90, 0.01), m(0.50, 0.01))
         val space = listOf(m(0.60, 0.01), m(1.00, 0.01))
         assertEquals(Fit.TOO_BIG, FitVerdict.evaluate(item, space).fit)
-        val r = FitVerdict.evaluate(item, space, FitPolicy(allowRotation = true))
+        // allowRotation means "about the vertical": a 2-D W x H item is never turned on its side ...
+        assertEquals(Fit.TOO_BIG, FitVerdict.evaluate(item, space, FitPolicy(allowRotation = true)).fit)
+        // ... only ANY (e.g. a frame, portrait vs landscape) may swap W and H.
+        val r = FitVerdict.evaluate(item, space, FitPolicy(rotation = FitRotation.ANY))
         assertEquals(Fit.FITS, r.fit)
         assertTrue(r.rotated)
         assertEquals(1, r.axes[0].itemAxis)
         assertEquals(0, r.axes[1].itemAxis)
-        // 3-D: 6 permutations considered.
+        // 3-D: turning about the vertical swaps W and D.
         val r3 = FitVerdict.evaluate(
             listOf(m(0.3, 0.005), m(0.2, 0.005), m(0.1, 0.005)),
             listOf(m(0.15, 0.005), m(0.25, 0.005), m(0.35, 0.005)),

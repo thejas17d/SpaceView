@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hindi. Natural, everyday Hindi (not literal). Numbers, units (cm, m, ft-in) and ± stay as in English. -->
+<resources>
+    <string name="home_tagline">कुछ भी नापें। उसे असली साइज़ में अपने कमरे में रखकर देखें।</string>
+    <string name="home_accuracy_good">अच्छा</string>
+    <string name="home_start_measuring">नापना शुरू करें</string>
+
+    <!-- ===== Builder A (M2) keys, translated by Builder B ===== -->
+    <!-- Home -->
+    <string name="home_section_measure">नापें</string>
+    <string name="home_distance">दूरी</string>
+    <string name="home_distance_detail">एक पॉइंट से दूसरे पॉइंट तक, उसके ± के साथ</string>
+    <string name="home_height">ऊँचाई</string>
+    <string name="home_height_detail">फ़र्श या टेबल से किसी पॉइंट तक</string>
+    <string name="home_rectangle">आयत</string>
+    <string name="home_rectangle_detail">फ़्रेम, दरवाज़े या टीवी की चौड़ाई, ऊँचाई और क्षेत्रफल</string>
+    <string name="home_calibrate">कैलिब्रेट करें</string>
+    <string name="home_calibrate_detail">बैंक कार्ड या A4 कागज़ से सटीकता बढ़ाएँ</string>
+    <string name="home_calibrated_on">%1$s को कैलिब्रेट किया गया</string>
+    <string name="home_history">हिस्ट्री</string>
+    <string name="home_history_detail">आपके सेव किए गए नाप</string>
+    <string name="home_settings">सेटिंग्स</string>
+    <!-- Camera permission and ARCore -->
+    <string name="perm_title">कैमरे की अनुमति</string>
+    <string name="perm_body">SpaceView कैमरे का इस्तेमाल सिर्फ़ नापने के लिए करता है। जब तक आप ख़ुद शेयर न करें, कुछ भी अपलोड नहीं होता।</string>
+    <string name="perm_allow">कैमरे की अनुमति दें</string>
+    <string name="perm_denied_body">कैमरे के बिना SpaceView नाप नहीं सकता। आगे बढ़ने के लिए कैमरे की अनुमति दें।</string>
+    <string name="perm_open_settings">सेटिंग्स खोलें</string>
+    <string name="arcore_checking">AR तैयार हो रहा है…</string>
+    <string name="arcore_install_title">बस एक कदम और</string>
+    <string name="arcore_install_body">नापने के लिए Google Play Services for AR चाहिए। यह मुफ़्त है और लगभग 40 MB का है। Wi-Fi पर डाउनलोड करना बेहतर है।</string>
+    <string name="arcore_install">इंस्टॉल करें</string>
+    <string name="arcore_declined">Google Play Services for AR के बिना नापना शुरू नहीं हो सकता।</string>
+    <string name="arcore_unsupported">यह फ़ोन AR से नापने की सुविधा नहीं देता।</string>
+    <string name="arcore_unknown">AR सपोर्ट की जाँच नहीं हो पाई। अपना इंटरनेट कनेक्शन देखें और फिर कोशिश करें।</string>
+    <string name="arcore_session_failed">AR शुरू नहीं हो पाया। कैमरा इस्तेमाल कर रहे दूसरे ऐप बंद करें और फिर कोशिश करें।</string>
+    <string name="common_try_again">फिर कोशिश करें</string>
+    <!-- Measure screen -->
+    <string name="measure_mode_distance">दूरी</string>
+    <string name="measure_mode_height">ऊँचाई</string>
+    <string name="measure_mode_rectangle">आयत</string>
+    <string name="measure_close">नापना बंद करें</string>
+    <string name="measure_undo">पहले जैसा करें</string>
+    <string name="measure_freeze">रोकें और बारीकी से ठीक करें</string>
+    <string name="measure_new">नया नाप</string>
+    <string name="measure_save">सेव करें</string>
+    <string name="measure_saved">हिस्ट्री में सेव हो गया</string>
+    <string name="measure_start_over">फिर से शुरू करें</string>
+    <string name="measure_coach_move">फ़ोन को धीरे-धीरे दाएँ-बाएँ घुमाएँ।</string>
+    <string name="measure_coach_title">शुरुआत</string>
+    <string name="measure_too_fast">फ़ोन को थोड़ा और धीरे घुमाएँ।</string>
+    <string name="measure_too_dark">बहुत अँधेरा है। लाइट जलाएँ या खिड़की के पास जाएँ।</string>
+    <string name="measure_low_texture">किसी ऐसी चीज़ पर निशाना लगाएँ जिस पर कुछ डिज़ाइन या किनारा हो, जैसे स्विचबोर्ड, दरी का किनारा या कोई फ़्रेम।</string>
+    <string name="measure_lost">फ़ोन को वापस वहीं घुमाएँ जहाँ आप नाप रहे थे।</string>
+    <string name="measure_camera_problem">कैमरा किसी और काम में लगा है। कैमरा इस्तेमाल कर रहे दूसरे ऐप बंद करें और फिर कोशिश करें।</string>
+    <string name="measure_no_surface">किसी सतह पर निशाना लगाएँ। उसे ढूँढने के लिए फ़ोन धीरे घुमाएँ।</string>
+    <string name="measure_hold_steady">फ़ोन स्थिर रखें…</string>
+    <string name="measure_aim_first">पहले पॉइंट पर निशाना लगाएँ, फिर + दबाएँ</string>
+    <string name="measure_aim_end">आख़िरी पॉइंट पर निशाना लगाएँ, फिर + दबाएँ</string>
+    <string name="measure_aim_base">नीचे (फ़र्श या टेबल) पर निशाना लगाएँ, फिर + दबाएँ</string>
+    <string name="measure_aim_top">सबसे ऊपर वाले पॉइंट पर निशाना लगाएँ, फिर + दबाएँ</string>
+    <string name="measure_aim_corner_1">ऊपर बाएँ कोने पर निशाना लगाएँ, फिर + दबाएँ</string>
+    <string name="measure_aim_corner_2">ऊपर दाएँ कोने पर निशाना लगाएँ, फिर + दबाएँ</string>
+    <string name="measure_aim_corner_3">नीचे दाएँ कोने पर निशाना लगाएँ, फिर + दबाएँ</string>
+    <string name="measure_distance_to_target">%1$s दूर</string>
+    <string name="measure_reject_no_surface">यहाँ कोई सतह नहीं मिल रही। किसी डिज़ाइन या किनारे वाली चीज़ पर निशाना लगाएँ।</string>
+    <string name="measure_reject_not_steady">फ़ोन को एक पल के लिए स्थिर रखें, फिर + दबाएँ।</string>
+    <string name="measure_reject_not_tracking">बिंदु दिखने तक फ़ोन धीरे घुमाएँ, फिर + दबाएँ।</string>
+    <string name="measure_reject_same_spot">यह वही जगह है। अगले पॉइंट पर निशाना लगाएँ।</string>
+    <string name="measure_freeze_unavailable">अभी रोका नहीं जा सकता। पहले एक पॉइंट लगाएँ और फ़ोन स्थिर रखें।</string>
+    <string name="measure_freeze_hint">आख़िरी पॉइंट खिसकाने के लिए कहीं भी उँगली से खींचें। लेंस में दिखेगा कि पॉइंट कहाँ है।</string>
+    <string name="measure_freeze_done">हो गया</string>
+    <string name="measure_freeze_cancel">रद्द करें</string>
+    <string name="measure_safety_title">आस-पास ध्यान रखें</string>
+    <string name="measure_safety_body">नापते समय सीढ़ियों, पालतू जानवरों और गाड़ियों का ध्यान रखें।</string>
+    <string name="measure_ok">ठीक है</string>
+    <string name="measure_calibrated_chip">कैलिब्रेटेड</string>
+    <string name="measure_reticle">क्रॉसहेयर</string>
+    <string name="measure_reticle_locked">क्रॉसहेयर, स्थिर</string>
+    <!-- Result card -->
+    <string name="result_distance">दूरी</string>
+    <string name="result_height">ऊँचाई</string>
+    <string name="result_width">चौड़ाई</string>
+    <string name="result_rect_height">ऊँचाई</string>
+    <string name="result_area">क्षेत्रफल</string>
+    <string name="result_label_hint">नाम (ज़रूरी नहीं)</string>
+    <string name="result_calibrated">%1$s को कैलिब्रेट किया गया</string>
+    <string name="result_not_square">कोने %1$s° टेढ़े हैं। कोने एक बार जाँच लें।</string>
+    <string name="result_tip_title">सुझाव</string>
+    <string name="tip_move_closer">पास जाएँ। 1 m से कम दूरी सबसे अच्छी है।</string>
+    <string name="tip_add_light">रोशनी बढ़ाएँ। लैंप जलाएँ या खिड़की के पास जाएँ।</string>
+    <string name="tip_hold_still">हर पॉइंट पर फ़ोन को एक सेकंड स्थिर रखें।</string>
+    <string name="tip_face_surface">सतह के ठीक सामने से नापें।</string>
+    <string name="tip_aim_at_texture">किनारों या कोनों जैसी साफ़ दिखने वाली जगहों पर निशाना लगाएँ।</string>
+    <string name="tip_calibrate">कार्ड या A4 कागज़ से कैलिब्रेट करें।</string>
+    <string name="tip_measure_again">पक्का करने के लिए किसी दूसरे कोण से फिर नापें।</string>
+    <!-- Calibration -->
+    <string name="calib_title">कैलिब्रेट करें</string>
+    <string name="calib_choose">आप किससे कैलिब्रेट करेंगे?</string>
+    <string name="calib_card">बैंक कार्ड</string>
+    <string name="calib_card_detail">कोई भी बैंक कार्ड, आधार (PVC) या ID कार्ड। फ़ोन को लगभग 30 cm दूर रखें।</string>
+    <string name="calib_a4">A4 कागज़</string>
+    <string name="calib_a4_detail">दूर से नापने के लिए सबसे अच्छा। फ़ोन को लगभग 50 cm दूर रखें।</string>
+    <string name="calib_same_surface">इसे उसी सतह पर सपाट रखें जिसे आप नापेंगे।</string>
+    <string name="calib_result_title">कैलिब्रेशन का नतीजा</string>
+    <string name="calib_result_body">स्केल सुधार %1$s (± %2$s)</string>
+    <string name="calib_apply">यह कैलिब्रेशन इस्तेमाल करें</string>
+    <string name="calib_retry">फिर से नापें</string>
+    <string name="calib_applied">कैलिब्रेट हो गया। अब नतीजों पर कैलिब्रेटेड लिखा दिखेगा।</string>
+    <string name="calib_reject_out_of_range">यह नतीजा बहुत अलग है। बिंदु दिखने तक फ़ोन धीरे घुमाएँ, फिर कोशिश करें।</string>
+    <string name="calib_reject_inconsistent">भुजाएँ कार्ड या कागज़ से मेल नहीं खातीं। देख लें कि आपने उसके कोनों पर ही निशाना लगाया था।</string>
+    <string name="calib_reject_noisy">नाप इतना पक्का नहीं कि काम आए। पास जाएँ या A4 कागज़ इस्तेमाल करें।</string>
+    <string name="calib_reject_skewed">कोनों से आयत नहीं बन रहा। ठीक कोनों पर निशाना लगाएँ।</string>
+    <string name="calib_reject_invalid">भुजाएँ नापी नहीं जा सकीं। फिर कोशिश करें।</string>
+    <!-- History -->
+    <string name="history_title">हिस्ट्री</string>
+    <string name="history_empty">अभी तक कोई नाप सेव नहीं किया गया।</string>
+    <string name="history_delete">हटाएँ</string>
+    <string name="history_rect_value">%1$s × %2$s</string>
+    <string name="history_calibrated">कैलिब्रेटेड</string>
+    <string name="history_kind_distance">दूरी</string>
+    <string name="history_kind_height">ऊँचाई</string>
+    <string name="history_kind_rectangle">आयत</string>
+    <!-- ===== End of Builder A (M2) keys ===== -->
+
+    <!-- ===== Builder B (M5) ===== -->
+    <!-- Common components -->
+    <string name="accuracy_good">अच्छा</string>
+    <string name="accuracy_fair">ठीक-ठाक</string>
+    <string name="accuracy_rough">अंदाज़न</string>
+    <string name="accuracy_good_hint">लगभग आधे सेंटीमीटर तक सही।</string>
+    <string name="accuracy_fair_hint">प्लान करने के लिए ठीक है। ख़रीदने से पहले एक बार जाँच लें।</string>
+    <string name="accuracy_rough_hint">मोटा अंदाज़ा। पास जाएँ या रोशनी बढ़ाएँ।</string>
+    <string name="a11y_accuracy_good">अच्छी सटीकता</string>
+    <string name="a11y_accuracy_fair">ठीक-ठाक सटीकता</string>
+    <string name="a11y_accuracy_rough">मोटा अंदाज़ा</string>
+    <string name="a11y_badge_with_tolerance">%1$s, %2$s</string>
+    <string name="a11y_length_with_tolerance">%1$s, कम या ज़्यादा %2$s</string>
+    <string name="a11y_unit_mm">मिलीमीटर</string>
+    <string name="a11y_unit_cm">सेंटीमीटर</string>
+    <string name="a11y_unit_m">मीटर</string>
+    <string name="a11y_unit_inches">इंच</string>
+    <string name="a11y_unit_feet">फ़ुट</string>
+    <string name="common_add_point">पॉइंट जोड़ें</string>
+    <string name="common_dismiss">हटाएँ</string>
+    <string name="common_back">वापस</string>
+    <string name="common_close">बंद करें</string>
+    <!-- Onboarding -->
+    <string name="onboarding_skip">छोड़ें</string>
+    <string name="onboarding_next">आगे</string>
+    <string name="onboarding_step">%2$d में से चरण %1$d</string>
+    <string name="onboarding_what_title">नापें, सेव करें, कमरे में रखकर देखें</string>
+    <string name="onboarding_what_body">क्रॉसहेयर को निशाने पर रखें और लंबाई, ऊँचाई या क्षेत्रफल नापने के लिए + दबाएँ। किसी चीज़ को उसके नाप के साथ सेव करें, फिर उसे असली साइज़ में अपने कमरे में देखें।</string>
+    <string name="onboarding_how_title">सही नाप कैसे लें</string>
+    <string name="onboarding_how_body">अच्छी रोशनी रखें। फ़ोन को धीरे-धीरे दाएँ-बाएँ घुमाएँ, जब तक सतह पर बिंदु न दिखें। लगभग एक हाथ की दूरी पर रहें।</string>
+    <string name="onboarding_accuracy_title">सटीकता के बारे में साफ़ बात</string>
+    <string name="onboarding_accuracy_body" formatted="false">फ़ोन से लिया गया नाप आम तौर पर ±2% तक सही होता है (1 m पर लगभग ±1–2 cm)। हर नतीजे के साथ उसका अपना ± और अच्छा, ठीक-ठाक या अंदाज़न रेटिंग दिखती है।</string>
+    <string name="onboarding_calibrate_prompt">बेहतर सटीकता के लिए किसी भी बैंक कार्ड या A4 कागज़ से एक बार कैलिब्रेट कर लें। इसमें लगभग 20 सेकंड लगते हैं।</string>
+    <string name="onboarding_calibrate_now">अभी कैलिब्रेट करें</string>
+    <string name="onboarding_calibrate_later">बाद में</string>
+    <!-- Settings -->
+    <string name="settings_title">सेटिंग्स</string>
+    <string name="settings_section_units">इकाइयाँ</string>
+    <string name="settings_units_auto">अपने-आप</string>
+    <string name="settings_units_auto_detail">चीज़ों के लिए cm, कमरों के लिए ft-in, टीवी के लिए इंच</string>
+    <string name="settings_units_metric">मीट्रिक</string>
+    <string name="settings_units_metric_detail">mm, cm और m</string>
+    <string name="settings_units_imperial">इंच-फ़ुट</string>
+    <string name="settings_units_imperial_detail">इंच और फ़ुट</string>
+    <string name="settings_section_measuring">नापना</string>
+    <string name="settings_sounds">आवाज़</string>
+    <string name="settings_sounds_detail">पॉइंट जोड़ने पर हल्की क्लिक की आवाज़</string>
+    <string name="settings_recalibrate">फिर से कैलिब्रेट करें</string>
+    <string name="settings_recalibrate_detail">सटीकता बढ़ाने के लिए बैंक कार्ड या A4 कागज़ इस्तेमाल करें</string>
+    <string name="settings_section_privacy">निजता</string>
+    <string name="settings_privacy_options">विज्ञापन निजता विकल्प</string>
+    <string name="settings_privacy_options_detail">विज्ञापन से जुड़ी अपनी सहमति देखें या बदलें</string>
+    <string name="settings_privacy_options_not_needed">आपके इलाके में विज्ञापन निजता के कोई विकल्प ज़रूरी नहीं हैं</string>
+    <string name="settings_privacy_policy">निजता नीति</string>
+    <string name="settings_section_ads">विज्ञापन</string>
+    <string name="settings_remove_ads">विज्ञापन हटाएँ</string>
+    <string name="settings_coming_soon">जल्द आ रहा है</string>
+    <string name="settings_section_about">ऐप के बारे में</string>
+    <string name="settings_version">वर्शन</string>
+    <string name="settings_accuracy_note_title">सटीकता</string>
+    <string name="settings_accuracy_note" formatted="false">आम तौर पर ±2% (1 m पर लगभग ±1–2 cm)। हर नतीजे के साथ उसका अपना ± दिखता है। बिल्कुल सही नाप चाहिए तो फ़ीते से जाँच लें।</string>
+    <string name="settings_licences">ओपन-सोर्स लाइसेंस</string>
+    <string name="settings_licences_apache">Apache License 2.0: www.apache.org/licenses/LICENSE-2.0</string>
+    <string name="settings_contact">सहायता से संपर्क करें</string>
+    <!-- Ads -->
+    <string name="ads_label">विज्ञापन</string>
+    <string name="ads_advertisement">विज्ञापन</string>
+</resources>

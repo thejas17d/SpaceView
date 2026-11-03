@@ -17,6 +17,9 @@ permissions:
 env:
   # Play download-size budget for an arm64 phone (docs/PLAN.md section 4: target 15 MB, fail above 18 MB).
   SIZE_BUDGET_BYTES: '18874368' # 18 MiB
+  # Installed arm64 splits are ~1.5x the download (native libs are stored uncompressed), so they get
+  # their own, larger budget.
+  INSTALLED_BUDGET_BYTES: '31457280' # 30 MiB
   BUNDLETOOL_VERSION: '1.18.3'
   BUNDLETOOL_SHA256: 'a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29'
 
@@ -47,10 +50,16 @@ jobs:
       - name: Unit tests, lint and debug build
         run: >-
           ./gradlew --stacktrace
-          :engine:test
+          :engine:test :engine:koverVerify
           :ar:testDebugUnitTest :data:testDebugUnitTest :app:testDebugUnitTest
           :ar:lintDebug :data:lintDebug :app:lintDebug
           :app:assembleDebug
+
+      # Catches unreviewed SDKs (e.g. ad mediation adapters) reaching the release APK.
+      - name: Dependency guard (release runtime classpath)
+        run: |
+          ./gradlew -q :app:dependencies --configuration releaseRuntimeClasspath > "$RUNNER_TEMP/deps.txt"
+          python3 ci/dependency_guard.py check "$RUNNER_TEMP/deps.txt" ci/release-dependencies.txt
 
       - name: Decode release keystore (if configured)
         if: github.event_name != 'pull_request'
@@ -71,12 +80,29 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
+          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID }}
+          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID }}
           PRIVACY_POLICY_URL: ${{ secrets.PRIVACY_POLICY_URL }}
           SUPPORT_EMAIL: ${{ secrets.SUPPORT_EMAIL }}
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: 0.1.${{ github.run_number }}
           REQUIRE_RELEASE_CONFIG: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        run: ./gradlew --stacktrace :app:assembleRelease :app:bundleRelease
+        run: |
+          if [ -z "$ADMOB_APP_ID" ]; then echo "::warning::AdMob secrets not set: the release build uses Google test ads."; fi
+          ./gradlew --stacktrace :app:lintRelease :app:assembleRelease :app:bundleRelease
+
+      - name: R8 metadata (r8.json from the AAB)
+        run: |
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          mkdir -p "$RUNNER_TEMP/r8"
+          ENTRIES=$(unzip -Z1 "$AAB" | grep -iE '(^|/)r8[^/]*\.json$' || true)
+          if [ -z "$ENTRIES" ]; then
+            echo "::warning::No r8*.json found in the AAB (AGP may have moved it)."
+          else
+            for e in $ENTRIES; do unzip -o -j -q "$AAB" "$e" -d "$RUNNER_TEMP/r8"; echo "Extracted $e"; done
+            ls -l "$RUNNER_TEMP/r8"
+          fi
 
       - name: Locate build tools
         run: |
@@ -136,11 +162,20 @@ jobs:
             echo "| Play download (bundletool get-size, max) | $(mib "$DOWNLOAD") |"
             echo "| Installed arm64 APK splits | $(mib "$INSTALLED") |"
             echo "| Universal release APK (arm64 + armeabi-v7a) | $(mib "$UNIVERSAL") |"
-            echo "| Budget | $(mib "$SIZE_BUDGET_BYTES") |"
+            echo "| Download budget | $(mib "$SIZE_BUDGET_BYTES") |"
+            echo "| Installed budget | $(mib "$INSTALLED_BUDGET_BYTES") |"
             echo ""
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          if [ "$DOWNLOAD" -gt "$SIZE_BUDGET_BYTES" ] || [ "$INSTALLED" -gt "$SIZE_BUDGET_BYTES" ]; then
-            echo "::error::arm64 release is over the size budget ($(mib "$SIZE_BUDGET_BYTES"))."
+          FAIL=0
+          if [ "$DOWNLOAD" -gt "$SIZE_BUDGET_BYTES" ]; then
+            echo "::error::arm64 Play download is over the budget ($(mib "$SIZE_BUDGET_BYTES"))."
+            FAIL=1
+          fi
+          if [ "$INSTALLED" -gt "$INSTALLED_BUDGET_BYTES" ]; then
+            echo "::error::arm64 installed size is over the budget ($(mib "$INSTALLED_BUDGET_BYTES"))."
+            FAIL=1
+          fi
+          if [ "$FAIL" -ne 0 ]; then
             exit 1
           fi
 
@@ -160,6 +195,13 @@ jobs:
             app/build/outputs/bundle/release/*.aab
             app/build/outputs/mapping/release/mapping.txt
           if-no-files-found: error
+
+      - name: Upload R8 metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: r8-metadata
+          path: ${{ runner.temp }}/r8/
+          if-no-files-found: warn
 
       - name: Upload reports
         if: always()

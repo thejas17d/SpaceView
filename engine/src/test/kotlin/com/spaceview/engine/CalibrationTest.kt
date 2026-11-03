@@ -49,22 +49,22 @@ class CalibrationTest {
         val noise = 0.0005
         // The wall as AR sees it (also scaled).
         val wall = Plane.fromPointNormal(Vec3(0.0, 0.0, -1.0 * scale), Vec3.UNIT_Z)
-        fun corner(p: Vec3) = UncertainPoint.of(
-            p * scale + Vec3(rng.nextGaussian(), rng.nextGaussian(), 0.0) * noise, noise,
-        )
+        // Localisation: 1.5 px at 0.5 m on a 1500 px focal length = 0.5 mm, matching the injected noise.
+        val local = LocalisationInput(0.5, 1500.0, 1.5)
+        fun corner(p: Vec3) = UncertainPoint(p * scale + Vec3(rng.nextGaussian(), rng.nextGaussian(), 0.0) * noise)
         // A4 in landscape on the wall.
         val a4 = listOf(Vec3(0.0, 1.0, -1.0), Vec3(0.297, 1.0, -1.0), Vec3(0.297, 0.79, -1.0), Vec3(0.0, 0.79, -1.0))
-        val rect = Shapes.rectangle(a4.map { corner(it) }, wall)
+        val rect = Shapes.rectangle(a4.map { corner(it) }, wall, localisation = List(4) { local })
         val cal = accepted(Calibrator.fromReference(ReferenceObject.A4, rect))
         assertEquals(1 / scale, cal.factor, 0.006) // ~3σ
         assertTrue(cal.relSigma < 0.005)
 
         val uncal = UncertaintyModel(DeviceTier.NO_DEPTH)
         val calibrated = uncal.withCalibration(cal)
-        val a = UncertainPoint.of(Vec3(-0.5, 1.2, -1.0) * scale, noise)
-        val b = UncertainPoint.of(Vec3(0.7, 1.2, -1.0) * scale, noise)
-        val before = uncal.distance(a, b)
-        val after = calibrated.distance(a, b)
+        val a = UncertainPoint(Vec3(-0.5, 1.2, -1.0) * scale)
+        val b = UncertainPoint(Vec3(0.7, 1.2, -1.0) * scale)
+        val before = uncal.distance(a, b, local, local)
+        val after = calibrated.distance(a, b, local, local)
         assertEquals(1.2 * 1.03, before.value, 1e-9) // 3.6 cm too long
         assertTrue("after=${after.value}", abs(after.value - 1.2) < 0.008) // was 36 mm off, now < 8 mm
         assertTrue(abs(after.value - 1.2) <= after.bound95)
@@ -88,9 +88,18 @@ class CalibrationTest {
         assertEquals(0.297 / 0.36, (low as CalibrationResult.Rejected).factor, 0.01)
         val high = Calibrator.fromReference(ReferenceObject.A4, RawLength(0.25, 0.001), RawLength(0.177, 0.001))
         assertEquals(CalibrationResult.Reason.FACTOR_OUT_OF_RANGE, rejected(high))
-        // Just inside the band is accepted.
-        accepted(Calibrator.fromReference(ReferenceObject.A4, RawLength(0.297 / 1.14, 0.0005), RawLength(0.210 / 1.14, 0.0005)))
-        accepted(Calibrator.fromReference(ReferenceObject.A4, RawLength(0.297 / 0.86, 0.0005), RawLength(0.210 / 0.86, 0.0005)))
+        // Just inside the 0.9-1.1 band is accepted (research 2.9) ...
+        accepted(Calibrator.fromReference(ReferenceObject.A4, RawLength(0.297 / 1.09, 0.0005), RawLength(0.210 / 1.09, 0.0005)))
+        accepted(Calibrator.fromReference(ReferenceObject.A4, RawLength(0.297 / 0.91, 0.0005), RawLength(0.210 / 0.91, 0.0005)))
+        // ... but 1.12 (accepted by the old 0.85-1.15 band) means broken tracking (MINOR-5).
+        val k112 = Calibrator.fromReference(ReferenceObject.A4, RawLength(0.297 / 1.12, 0.0005), RawLength(0.210 / 1.12, 0.0005))
+        assertEquals(CalibrationResult.Reason.FACTOR_OUT_OF_RANGE, rejected(k112))
+        assertEquals(1.12, (k112 as CalibrationResult.Rejected).factor, 1e-9)
+        // The band edges themselves are excluded.
+        assertEquals(
+            CalibrationResult.Reason.FACTOR_OUT_OF_RANGE,
+            rejected(Calibrator.calibrate(listOf(KnownLength(1.1, 0.0, RawLength(1.0, 0.0005))))),
+        )
     }
 
     @Test fun rejectsInconsistentSides() {

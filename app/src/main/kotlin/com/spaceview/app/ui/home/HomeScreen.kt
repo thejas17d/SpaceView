@@ -2,11 +2,8 @@ package com.spaceview.app.ui.home
 
 import android.content.res.Configuration
 import androidx.annotation.StringRes
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -27,6 +23,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,16 +36,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.spaceview.app.R
+import com.spaceview.app.common.InstrumentCard
 import com.spaceview.app.ui.theme.SpaceViewTheme
+import com.spaceview.ar.MeasureMode
+import java.text.DateFormat
+import java.util.Date
 
 /**
- * M0 placeholder home screen: shows the "precision instrument" theme (readout with tolerance and
- * accuracy badge, hairline cards, signal-yellow primary action). Replaced by the real home and
- * navigation in M2.
+ * Measure home (S2): the measuring modes, calibration status and History. AR starts only when a
+ * mode is chosen (saves battery, and the camera permission is asked in that context).
  */
 @Composable
 fun HomeScreen(
-    onStartMeasuring: () -> Unit,
+    calibratedAtMillis: Long?,
+    onMeasure: (MeasureMode) -> Unit,
+    onCalibrate: () -> Unit,
+    onHistory: () -> Unit,
+    onSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -57,25 +61,31 @@ fun HomeScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Header()
-            RulerTicks(
-                color = SpaceViewTheme.colors.hairline,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(12.dp),
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Header(Modifier.weight(1f))
+                TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(stringResource(R.string.home_settings))
+                }
+            }
+            RulerTicks(color = SpaceViewTheme.colors.hairline, modifier = Modifier.fillMaxWidth().height(12.dp))
+            Text(
+                stringResource(R.string.home_section_measure).uppercase(),
+                style = SpaceViewTheme.typography.caption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.semantics { heading() },
             )
-            SampleReadout()
-            ModeRow(R.string.home_mode_measure, R.string.home_mode_measure_detail)
-            ModeRow(R.string.home_mode_scan, R.string.home_mode_scan_detail)
-            ModeRow(R.string.home_mode_gallery, R.string.home_mode_gallery_detail)
+            ModeRow(R.string.home_distance, R.string.home_distance_detail) { onMeasure(MeasureMode.DISTANCE) }
+            ModeRow(R.string.home_height, R.string.home_height_detail) { onMeasure(MeasureMode.HEIGHT) }
+            ModeRow(R.string.home_rectangle, R.string.home_rectangle_detail) { onMeasure(MeasureMode.RECTANGLE) }
+            Spacer(Modifier.height(4.dp))
+            CalibrationRow(calibratedAtMillis, onCalibrate)
+            ModeRow(R.string.home_history, R.string.home_history_detail, onClick = onHistory)
             Spacer(Modifier.height(8.dp))
             Button(
-                onClick = onStartMeasuring,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 56.dp),
+                onClick = { onMeasure(MeasureMode.DISTANCE) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                 shape = MaterialTheme.shapes.medium,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = SpaceViewTheme.colors.signal,
@@ -89,8 +99,8 @@ fun HomeScreen(
 }
 
 @Composable
-private fun Header() {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+private fun Header(modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             text = stringResource(R.string.app_name),
             style = MaterialTheme.typography.headlineMedium,
@@ -128,90 +138,34 @@ private fun RulerTicks(color: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SampleReadout() {
-    InstrumentCard {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.home_sample_label).uppercase(),
-                style = SpaceViewTheme.typography.caption,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    text = stringResource(R.string.home_sample_value),
-                    style = SpaceViewTheme.typography.readout,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.home_sample_tolerance),
-                    style = SpaceViewTheme.typography.tolerance,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-            }
-            AccuracyBadge(label = stringResource(R.string.home_accuracy_good), color = SpaceViewTheme.colors.accuracyGood)
-        }
-    }
+private fun ModeRow(@StringRes title: Int, @StringRes detail: Int, onClick: () -> Unit) {
+    RowCard(stringResource(title), stringResource(detail), onClick)
 }
 
 @Composable
-private fun AccuracyBadge(label: String, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier
-                .size(8.dp)
-                .background(color, MaterialTheme.shapes.extraSmall),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(text = label, style = MaterialTheme.typography.labelLarge, color = color)
+private fun CalibrationRow(calibratedAtMillis: Long?, onClick: () -> Unit) {
+    val detail = if (calibratedAtMillis != null) {
+        stringResource(R.string.home_calibrated_on, DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(calibratedAtMillis)))
+    } else {
+        stringResource(R.string.home_calibrate_detail)
     }
+    RowCard(stringResource(R.string.home_calibrate), detail, onClick)
 }
 
 @Composable
-private fun ModeRow(@StringRes title: Int, @StringRes detail: Int) {
-    InstrumentCard {
+private fun RowCard(title: String, detail: String, onClick: () -> Unit) {
+    InstrumentCard(onClick = onClick) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = stringResource(title),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = stringResource(detail),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text(text = title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                Text(text = detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.width(12.dp))
-            Text(
-                text = stringResource(R.string.home_coming_soon),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
-}
-
-/** Flat card with a 1 dp hairline border: the base surface of every non-AR screen. */
-@Composable
-private fun InstrumentCard(content: @Composable () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLowest,
-        border = BorderStroke(1.dp, SpaceViewTheme.colors.hairline),
-        content = content,
-    )
 }
 
 @Preview(name = "Light", showBackground = true)
@@ -219,6 +173,6 @@ private fun InstrumentCard(content: @Composable () -> Unit) {
 @Composable
 private fun HomeScreenPreview() {
     SpaceViewTheme {
-        HomeScreen(onStartMeasuring = {})
+        HomeScreen(calibratedAtMillis = null, onMeasure = {}, onCalibrate = {}, onHistory = {}, onSettings = {})
     }
 }

@@ -25,7 +25,8 @@ android {
 }
 
 dependencies {
-    implementation(project(":engine"))
+    // MeasureSession's API exposes engine types (Measurement, ScaleCalibration, DeviceTier...).
+    api(project(":engine"))
 
     // Exposed as api: :app hosts the ARSceneView composable and talks to ARCore types (Frame, Pose, Anchor).
     api(libs.arcore)
