@@ -55,6 +55,8 @@ import com.spaceview.engine.UnitPreference
 internal fun FreezeOverlay(
     frame: FrozenFrame,
     units: UnitPreference,
+    /** False while measuring a known-length calibration span: its AR value must not be shown (M2 gate R2). */
+    showReading: Boolean,
     onAdjust: (Float, Float) -> FrozenAdjustment?,
     onDone: () -> Unit,
     onCancel: () -> Unit,
@@ -126,7 +128,7 @@ internal fun FreezeOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            adjustment?.reading?.let { reading ->
+            adjustment?.reading?.takeIf { showReading }?.let { reading ->
                 val ctx = MeasureFormatter.contextFor(reading)
                 val primary = MeasureFormatter.length(reading.primary, ctx, units).primary
                 val secondary = reading.secondary

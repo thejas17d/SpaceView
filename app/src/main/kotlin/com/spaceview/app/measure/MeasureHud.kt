@@ -108,7 +108,9 @@ internal fun MeasureHud(
                 Spacer(Modifier.height(64.dp))
                 Reticle(state)
                 Spacer(Modifier.height(8.dp))
-                LiveReadout(state, settings.units)
+                // Known-length calibration: no live length at all, only the target distance (gate R2).
+                val knownLength = calibration is CalibrationStep.Measuring && calibration.reference == null
+                LiveReadout(state, settings.units, showLength = !knownLength)
             }
         }
 
@@ -284,13 +286,13 @@ private fun DrawScope.crosshair(c: Offset, r: Float, outline: Color, fill: Color
 }
 
 @Composable
-private fun LiveReadout(state: MeasureState, units: UnitPreference) {
+private fun LiveReadout(state: MeasureState, units: UnitPreference, showLength: Boolean) {
     val reading = state.reading
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
     ) {
-        if (reading != null && !state.isComplete) {
+        if (showLength && reading != null && !state.isComplete) {
             val ctx = MeasureFormatter.contextFor(reading)
             val primary = MeasureFormatter.length(reading.primary, ctx, units).primary
             val secondary = reading.secondary

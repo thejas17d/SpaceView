@@ -16,7 +16,6 @@
     <string name="home_rectangle_detail">फ़्रेम, दरवाज़े या टीवी की चौड़ाई, ऊँचाई और क्षेत्रफल</string>
     <string name="home_calibrate">कैलिब्रेट करें</string>
     <string name="home_calibrate_detail">टेप से नापी गई किसी लंबाई से सटीकता बढ़ाएँ</string>
-    <string name="home_calibrated_on">%1$s को कैलिब्रेट किया गया</string>
     <string name="home_history">हिस्ट्री</string>
     <string name="home_history_detail">आपके सेव किए गए नाप</string>
     <string name="home_settings">सेटिंग्स</string>
@@ -198,12 +197,12 @@
     <string name="settings_depth">डेप्थ इस्तेमाल करें (अगर फ़ोन में हो)</string>
     <string name="settings_depth_detail">सादी दीवारों और फ़र्श पर पॉइंट ज़्यादा स्थिर रहते हैं। बैटरी ज़्यादा खर्च होती है।</string>
     <string name="settings_calibration_none">कोई कैलिब्रेशन सेव नहीं है</string>
-    <string name="settings_calibration_on">%1$s को कैलिब्रेट किया गया</string>
-    <string name="settings_calibration_stale">%1$s को कैलिब्रेट किया गया। 30 दिन से पुराना है: फिर से कैलिब्रेट करें।</string>
+    <string name="settings_calibration_on">पिछली बार %1$s को कैलिब्रेट किया गया। यह सिर्फ़ तब तक लागू होता है जब तक वह नापने का सेशन खुला रहे।</string>
+    <string name="settings_calibration_stale">पिछली बार %1$s को कैलिब्रेट किया गया। 30 दिन से पुराना है: फिर से कैलिब्रेट करें।</string>
     <string name="settings_clear_calibration">कैलिब्रेशन हटाएँ</string>
-    <string name="settings_clear_calibration_detail">सेव किया गया स्केल सुधार इस्तेमाल न करें</string>
+    <string name="settings_clear_calibration_detail">सेव किया गया कैलिब्रेशन रिकॉर्ड हटाएँ</string>
     <string name="settings_clear_calibration_title">कैलिब्रेशन हटाएँ?</string>
-    <string name="settings_clear_calibration_body">जब तक आप फिर से कैलिब्रेट नहीं करते, नतीजों में स्केल सुधार इस्तेमाल नहीं होगा।</string>
+    <string name="settings_clear_calibration_body">इससे सेव किया गया कैलिब्रेशन रिकॉर्ड हट जाएगा। पहले से सेव किए गए नाप नहीं बदलेंगे।</string>
     <string name="settings_clear_calibration_confirm">हटाएँ</string>
     <string name="settings_cancel">रद्द करें</string>
     <string name="settings_contact">सहायता से संपर्क करें</string>

@@ -89,6 +89,8 @@ private fun MeasureArScreen(
         val calibrationMode = (calibration as? CalibrationStep.Measuring)?.let {
             if (it.reference == null) MeasureMode.DISTANCE else MeasureMode.RECTANGLE
         }
+        // While aiming at a known-length span its AR value stays hidden, so it cannot be typed back in (gate R2).
+        val measuringKnownLength = calibration.let { it is CalibrationStep.Measuring && it.reference == null }
         val arSessionId by session.sessionId.collectAsStateWithLifecycle()
         LaunchedEffect(calibrationMode, measureMode) {
             session.setMode(calibrationMode ?: measureMode)
@@ -184,6 +186,7 @@ private fun MeasureArScreen(
                 FreezeOverlay(
                     frame = f,
                     units = settings.units,
+                    showReading = !measuringKnownLength,
                     onAdjust = session::adjustFrozen,
                     onDone = { session.endFreeze(apply = true) },
                     onCancel = { session.endFreeze(apply = false) },

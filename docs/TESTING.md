@@ -1,6 +1,6 @@
 # SpaceView — Real-device test checklist (M2: Measure mode)
 
-AR cannot run on an emulator, so these must be checked on a real ARCore phone. Install the debug APK from the GitHub Actions run (Artifacts), or the release APK for item 13.
+AR cannot run on an emulator, so these must be checked on a real ARCore phone. Until the GitHub repo exists, APKs are built locally and placed in `C:\Users\Kanishk\Desktop\Dev\SpaceView\builds\` (newest file = current build; a `-release` APK is there for item 13). **Discard any results from `SpaceView-M2-debug.apk` (commit fbe1479): its ± was too small.**
 
 Report each item as ✅ / ❌ + a note (and a screenshot or screen recording if something looks wrong).
 
@@ -14,6 +14,7 @@ Report each item as ✅ / ❌ + a note (and a screenshot or screen recording if 
 - Leaving the measure screen turns the camera indicator off.
 - Enter/leave AR 10 times — app stays smooth (optional: `adb shell dumpsys meminfo com.spaceview.app.debug` before/after).
 - Rotating the phone does not restart the session.
+- Place 2–3 points, then leave the measure screen — repeat **20 times**. The app must never crash or freeze (this checks anchor clean-up on exit).
 
 ## 3. Coaching and tracking states
 - "Move slowly" coaching until tracking starts.
@@ -57,11 +58,12 @@ Check: the true value is usually inside the shown ±; the Good/Fair/Rough badge 
 Calibration is a **known length**: a straight span you measured with a tape, 1–5 m, both ends on one flat surface. Card / A4 are hidden (`MeasureViewModel.CALIBRATION_SMALL_REFERENCES_ENABLED = false`): with the 1 cm tier floor the engine rejects them every time. Re-enable them only after the bench test justifies a smaller floor.
 - Picker shows only "Known length". Measure a tape-measured 2–3 m span (table edge, or a door's width along the wall), type the tape value: cm, or inches with the Imperial unit setting.
 - Typed values outside 1–5 m (100–500 cm, 39.4–196.8 in) and non-numbers show the range error; nothing is calibrated.
-- The measured AR value is **not** shown before you type (so it cannot be copied in).
+- The span's AR length is **never** shown during calibration: no live length under the reticle while aiming (only the camera-to-target distance pill), none on the freeze-frame loupe, none on the entry card (so it cannot be typed back in).
 - A 2 m+ span held steady: usually accepted with a factor near 0% and ± under about 1%. A 1 m span: usually "Too uncertain" (expected on non-LiDAR phones).
 - Ends on two different surfaces (e.g. door jamb to jamb across the opening): "Both ends must be on the same flat surface".
 - After applying: the "Calibrated" chip shows only on readings whose points are all on that same surface; a floor → table height or floor → wall reading is **not** calibrated.
-- Calibration applies only in the AR session that made it. Leave Measure and come back, press "Try again", rotate or change font size: readings are no longer calibrated (the date still shows on Home / Settings).
+- Calibration applies only in the AR session that made it. Leave Measure and come back, or press "Try again": readings are no longer calibrated. Rotating the phone or changing font size does **not** restart the session, so the calibration stays active.
+- Home / Settings must not present an old calibration as active.
 - Settings → Clear calibration removes it; after 30 days Settings marks it as stale.
 
 ## 12. Save and History
@@ -71,6 +73,7 @@ Calibration is a **known length**: a straight span you measured with a tape, 1�
   - Leaving Measure **without saving** never shows an interstitial.
   - After 4+ saved measurements in total, leaving Measure after a save may show a test interstitial — only once the Home screen has fully appeared, **never over the camera**.
   - The History screen shows a test banner fixed at the bottom, at least a finger-width from any button.
+  - If a test interstitial is a **video** ad, it plays to the end without freezing (the WAKE_LOCK permission was removed — this confirms it isn't needed).
   - Settings: depth toggle, calibration date (and "over 30 days old" warning), Clear calibration with confirm.
 
 ## 13. Release build

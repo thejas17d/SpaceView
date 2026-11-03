@@ -39,8 +39,6 @@ import com.spaceview.app.R
 import com.spaceview.app.common.InstrumentCard
 import com.spaceview.app.ui.theme.SpaceViewTheme
 import com.spaceview.ar.MeasureMode
-import java.text.DateFormat
-import java.util.Date
 
 /**
  * Measure home (S2): the measuring modes, calibration status and History. AR starts only when a
@@ -48,7 +46,6 @@ import java.util.Date
  */
 @Composable
 fun HomeScreen(
-    calibratedAtMillis: Long?,
     onMeasure: (MeasureMode) -> Unit,
     onCalibrate: () -> Unit,
     onHistory: () -> Unit,
@@ -80,7 +77,7 @@ fun HomeScreen(
             ModeRow(R.string.home_height, R.string.home_height_detail) { onMeasure(MeasureMode.HEIGHT) }
             ModeRow(R.string.home_rectangle, R.string.home_rectangle_detail) { onMeasure(MeasureMode.RECTANGLE) }
             Spacer(Modifier.height(4.dp))
-            CalibrationRow(calibratedAtMillis, onCalibrate)
+            CalibrationRow(onCalibrate)
             ModeRow(R.string.home_history, R.string.home_history_detail, onClick = onHistory)
             Spacer(Modifier.height(8.dp))
             Button(
@@ -142,14 +139,14 @@ private fun ModeRow(@StringRes title: Int, @StringRes detail: Int, onClick: () -
     RowCard(stringResource(title), stringResource(detail), onClick)
 }
 
+/**
+ * Calibrate entry. Never shows a saved calibration as active: a calibration applies only inside the
+ * AR session that made it, so from Home none is ever in effect (M2 gate R3). Settings shows the
+ * last calibration date as history.
+ */
 @Composable
-private fun CalibrationRow(calibratedAtMillis: Long?, onClick: () -> Unit) {
-    val detail = if (calibratedAtMillis != null) {
-        stringResource(R.string.home_calibrated_on, DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(calibratedAtMillis)))
-    } else {
-        stringResource(R.string.home_calibrate_detail)
-    }
-    RowCard(stringResource(R.string.home_calibrate), detail, onClick)
+private fun CalibrationRow(onClick: () -> Unit) {
+    RowCard(stringResource(R.string.home_calibrate), stringResource(R.string.home_calibrate_detail), onClick)
 }
 
 @Composable
@@ -173,6 +170,6 @@ private fun RowCard(title: String, detail: String, onClick: () -> Unit) {
 @Composable
 private fun HomeScreenPreview() {
     SpaceViewTheme {
-        HomeScreen(calibratedAtMillis = null, onMeasure = {}, onCalibrate = {}, onHistory = {}, onSettings = {})
+        HomeScreen(onMeasure = {}, onCalibrate = {}, onHistory = {}, onSettings = {})
     }
 }

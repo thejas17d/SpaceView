@@ -11,7 +11,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -81,9 +80,7 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
         }
         composable(Routes.HOME) {
             NonArScreenAdEffect(ads)
-            val calibration by container.measureSettings.settings.collectAsStateWithLifecycle(initialValue = null)
             HomeScreen(
-                calibratedAtMillis = calibration?.calibration?.calibratedAtMillis,
                 onMeasure = { navController.navigate(Routes.measure(it)) },
                 onCalibrate = { navController.navigate(Routes.CALIBRATE) },
                 onHistory = { navController.navigate(Routes.HISTORY) },

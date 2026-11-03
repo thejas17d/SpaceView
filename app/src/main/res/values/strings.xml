@@ -16,7 +16,6 @@
     <string name="home_rectangle_detail">Width, height and area of a frame, door or TV</string>
     <string name="home_calibrate">Calibrate</string>
     <string name="home_calibrate_detail">Boost accuracy with a length you measured with a tape</string>
-    <string name="home_calibrated_on">Calibrated on %1$s</string>
     <string name="home_history">History</string>
     <string name="home_history_detail">Your saved measurements</string>
     <string name="home_settings">Settings</string>
@@ -198,12 +197,12 @@
     <string name="settings_depth">Use depth (if supported)</string>
     <string name="settings_depth_detail">Steadier points on plain walls and floors. Uses more battery.</string>
     <string name="settings_calibration_none">No calibration saved</string>
-    <string name="settings_calibration_on">Calibrated on %1$s</string>
-    <string name="settings_calibration_stale">Calibrated on %1$s. Over 30 days old: recalibrate.</string>
+    <string name="settings_calibration_on">Last calibrated %1$s. It applies only while that measuring session is open.</string>
+    <string name="settings_calibration_stale">Last calibrated %1$s. Over 30 days old: recalibrate.</string>
     <string name="settings_clear_calibration">Clear calibration</string>
-    <string name="settings_clear_calibration_detail">Stop using the saved scale correction</string>
+    <string name="settings_clear_calibration_detail">Delete the saved calibration record</string>
     <string name="settings_clear_calibration_title">Clear calibration?</string>
-    <string name="settings_clear_calibration_body">Results won\'t use your scale correction until you calibrate again.</string>
+    <string name="settings_clear_calibration_body">This deletes the saved calibration record. Measurements you already saved don\'t change.</string>
     <string name="settings_clear_calibration_confirm">Clear</string>
     <string name="settings_cancel">Cancel</string>
     <string name="settings_contact">Contact support</string>

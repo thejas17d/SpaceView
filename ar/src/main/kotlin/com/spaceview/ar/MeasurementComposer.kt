@@ -133,20 +133,32 @@ object MeasurementComposer {
         points: List<EndpointData>,
         live: EndpointData?,
         model: UncertaintyModel,
+    ): Reading? = compose(mode, points, live, model, rounding = true)
+
+    /**
+     * As [compose]; with [rounding] false the engine's measurements are returned exactly (tests use it
+     * to check that rounding never shrinks a ±, M2 gate R1).
+     */
+    internal fun compose(
+        mode: MeasureMode,
+        points: List<EndpointData>,
+        live: EndpointData?,
+        model: UncertaintyModel,
+        rounding: Boolean,
     ): Reading? {
         val all = if (live != null && points.size < mode.requiredPoints) points + live else points
         val isLive = live != null && points.size < mode.requiredPoints
         if (all.size < 2) return null
         val extra = all.maxOf { it.planeBiasRel }
         return when (mode) {
-            MeasureMode.DISTANCE -> lengthReading(mode, all[0], all[1], model, extra, isLive)
-            MeasureMode.HEIGHT -> lengthReading(mode, all[0], all[1], model, extra, isLive)
+            MeasureMode.DISTANCE -> lengthReading(mode, all[0], all[1], model, extra, isLive, rounding)
+            MeasureMode.HEIGHT -> lengthReading(mode, all[0], all[1], model, extra, isLive, rounding)
             MeasureMode.RECTANGLE -> {
                 if (all.size == 2) {
                     // Only the first edge so far: show it as the width.
-                    lengthReading(mode, all[0], all[1], model, extra, isLive)
+                    lengthReading(mode, all[0], all[1], model, extra, isLive, rounding)
                 } else {
-                    rectangleReading(all.take(3), model, extra, isLive)
+                    rectangleReading(all.take(3), model, extra, isLive, rounding)
                 }
             }
         }
@@ -223,6 +235,7 @@ object MeasurementComposer {
         model: UncertaintyModel,
         extra: Double,
         isLive: Boolean,
+        rounding: Boolean,
     ): Reading {
         val locA = a.localisation
         val locB = b.localisation
@@ -233,7 +246,7 @@ object MeasurementComposer {
             scoped.height(a.point, b.point, Vec3.UP, locA, locB, extra)
         } else {
             scoped.distance(a.point, b.point, locA, locB, extra)
-        }.rounded()
+        }.rounded(rounding)
         val raw = if (mode == MeasureMode.HEIGHT) {
             Uncertainty.rawHeight(scoped.localise(a.point, locA), scoped.localise(b.point, locB))
         } else {
@@ -245,7 +258,7 @@ object MeasurementComposer {
             quality = m.quality,
             isLive = isLive,
             calibrated = scoped.calibration != null,
-            rawPrimary = Measurement(raw.value, raw.randomSigma).rounded(),
+            rawPrimary = Measurement(raw.value, raw.randomSigma).rounded(rounding),
         )
     }
 
@@ -254,6 +267,7 @@ object MeasurementComposer {
         model: UncertaintyModel,
         extra: Double,
         isLive: Boolean,
+        rounding: Boolean,
     ): Reading {
         val plane = sharedPlane(corners)
         // Calibration only when every corner lies on the calibrated plane (M2 review M2).
@@ -268,15 +282,15 @@ object MeasurementComposer {
         val calibrated = scoped.forScope(rect.plane, range).calibration != null
         return Reading(
             mode = MeasureMode.RECTANGLE,
-            primary = rect.width.rounded(),
-            secondary = rect.height.rounded(),
-            area = rect.area.rounded(),
-            diagonal = rect.diagonal.rounded(),
+            primary = rect.width.rounded(rounding),
+            secondary = rect.height.rounded(rounding),
+            area = rect.area.rounded(rounding),
+            diagonal = rect.diagonal.rounded(rounding),
             quality = rect.quality,
             isLive = isLive,
             calibrated = calibrated,
-            rawPrimary = Measurement(rect.rawWidth.value, rect.rawWidth.randomSigma).rounded(),
-            rawSecondary = Measurement(rect.rawHeight.value, rect.rawHeight.randomSigma).rounded(),
+            rawPrimary = Measurement(rect.rawWidth.value, rect.rawWidth.randomSigma).rounded(rounding),
+            rawSecondary = Measurement(rect.rawHeight.value, rect.rawHeight.randomSigma).rounded(rounding),
             maxRightAngleDeviationDeg = rect.maxRightAngleDeviationDeg,
             geometryConsistent = rect.isGeometricallyConsistent,
         )
@@ -310,9 +324,17 @@ object MeasurementComposer {
         return plane
     }
 
-    /** Rounds to 0.1 mm / 0.01 mm so equal-looking readings are value-equal (fewer UI updates). */
-    private fun Measurement.rounded(): Measurement =
-        Measurement(round(value, 1e-4), round(sigma, 1e-5).let { if (sigma > 0 && it == 0.0) 1e-5 else it })
+    /**
+     * Value to the nearest 0.1 mm and σ **up** to the next 0.01 mm, so equal-looking readings are
+     * value-equal (fewer UI updates) and the ± shown is never below the engine's (M2 gate R1).
+     */
+    private fun Measurement.rounded(on: Boolean): Measurement {
+        if (!on) return this
+        val s = if (sigma > 0) kotlin.math.ceil(sigma / SIGMA_STEP).coerceAtLeast(1.0) * SIGMA_STEP else 0.0
+        return Measurement(round(value, 1e-4), s)
+    }
+
+    private const val SIGMA_STEP = 1e-5
 
     private fun round(v: Double, step: Double) = (v / step).roundToLong() * step
 
