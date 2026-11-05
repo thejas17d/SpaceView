@@ -149,10 +149,10 @@ jobs:
           $BT build-apks --bundle=app/build/outputs/bundle/release/app-release.aab \
             --output="$RUNNER_TEMP/app.apks" --device-spec="$SPEC"
           # Compressed download size Play would serve to an arm64 phone (MIN,MAX in bytes).
-          DOWNLOAD=$($BT get-size total --apks="$RUNNER_TEMP/app.apks" --device-spec="$SPEC" | tail -n 1 | cut -d, -f2)
+          DOWNLOAD=$($BT get-size total --apks="$RUNNER_TEMP/app.apks" --device-spec="$SPEC" | tail -n 1 | cut -d, -f2 | tr -dc 0-9)
           # Size of the APK splits actually installed on that phone.
           $BT extract-apks --apks="$RUNNER_TEMP/app.apks" --device-spec="$SPEC" --output-dir="$RUNNER_TEMP/arm64"
-          INSTALLED=$(cat "$RUNNER_TEMP"/arm64/*.apk | wc -c)
+          INSTALLED=$(cat "$RUNNER_TEMP"/arm64/*.apk | wc -c | tr -dc 0-9)
           UNIVERSAL=$(stat -c %s app/build/outputs/apk/release/app-release.apk)
           for n in "$DOWNLOAD" "$INSTALLED"; do
             [[ "$n" =~ ^[0-9]+$ ]] || { echo "::error::Could not measure the arm64 size (got '$n')."; exit 1; }

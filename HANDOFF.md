@@ -12,13 +12,14 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
 - Development approved by the user on 2026-11-02; follow `docs/PLAN.md`.
 - Everything lives in `C:\Users\Kanishk\Desktop\Dev\SpaceView`.
 - Keep this HANDOFF.md updated frequently (user asked: every ~5 min of work).
+- All docs stay Markdown (.md). **`SpaceView.html`** (project root) is the consolidated Build Book of every doc, section by section; regenerate it with `python docs/build_html.py` after any doc change (and update the `MILESTONES` list in that script when a milestone changes state). Never hand-edit the HTML.
 - 9 agents total: UI/UX research, Measurement research, Business research, Android perf/Play research, 2× Builders, Reviewer, Final Reviewer + Judge (merged), Documentation.
 
 ## Environment constraints
 - Windows PC, no Mac, no Unity, no Android Studio, low RAM (no emulator + parallel builds).
 - Build locally: `~/.android-toolchain/g.sh <gradle tasks>` (JDK 21, SDK 36/37, Gradle 9.6.1). `./gradlew` fails locally (no access to services.gradle.org) but works on GitHub Actions.
 - Sibling projects to copy setup from: `Desktop/Dev/Gridlark` (CI workflow `.github/workflows/android.yml`), `Desktop/Dev/Tashlark`.
-- GitHub pushes go through account `melinnsystems`; commit author `Kanishk <kanishkyoganand78@gmail.com>`. No SpaceView repo yet.
+- GitHub pushes go through account `melinnsystems`; commit author `Kanishk <kanishkyoganand78@gmail.com>`. Repo: thejas17d/SpaceView (public).
 
 ## Research status (docs/research/)
 | File | Status | Key takeaways |
@@ -75,6 +76,9 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
 - **Scan review fixes DONE (Builder A, uncommitted):** B1 (FrontCaptureController skips repeated timestamps; gate ignores dt≤1e-4), M1 (FaceChoice decided once, stored in ScanOutline; face camera is most squarely in front of), M2 (no capture while any point unanchored → REMEASURE hint) + 14 minors fixed; m9/m10 partial (live box label unlabelled; gallery says "Diagonal" for TV outer diagonal). ScanViewModel now SavedStateHandle-backed; History fields populated. Tests engine 163 / ar 83 / data 48 / app 97. Orchestrator full build+release+lint running; **Judge running M3 gate** → `docs/reviews/M3-gate.md`. Then: commit → clean worktree build → `builds/SpaceView-M3-*.apk`.
 - 2026-11-05 ~16:40 IST: usage limit hit during the Judge gate; the Judge was resumed after reset. The full build was GREEN, but it took 54 min under memory pressure: tests engine 163 / ar 83 / data 48 / app 97, lint clean, release universal 19.65 MB. The shell was killed after the build finished, which left a stale `.build.lock`; the orchestrator removed it.
 - **M3 GATE: PASS WITH CONDITIONS** (`docs/reviews/M3-gate.md`): every BLOCKER and MAJOR from both reviews verified fixed, with tests. R1 is closed: the TV diagonal is labelled "Outer diagonal (incl. bezel)" in the gallery, EN+HI. R2 is closed: the M3 device checklist is now `docs/TESTING.md` §16, and its first item is upgrading M2→M3 over existing History rows, since the migration has never run on a device. New MINORs N1–N8 are listed in the gate report and are not gating. The gate's §7 has the M4 recommendations. Committed as the M3 commit (see git log).
+- **M3 APKs DONE** (clean worktree at 683eaf8, lint clean): `builds/SpaceView-M3-debug.apk` (37.7 MB) + `builds/SpaceView-M3-release.apk` (19.6 MB universal, debug-key signed). Install OVER M2-final to test the v1→v2 migration (TESTING.md §16 item 1). **GitHub:** `thejas17d/SpaceView` still not found (not created or melinnsystems not invited) — user asked about building on CI; waiting for repo, then add remote + push main (first CI run, may need fixes). Next milestone: M4 (place in room) — see M3-gate §7.
+- **GitHub:** `origin` = https://github.com/thejas17d/SpaceView (public; melinnsystems has write access). main pushed at 683eaf8 on 2026-11-05. First CI run: https://github.com/thejas17d/SpaceView/actions/runs/42051294140
+- **First CI run (683eaf8): FAILED only at "Size budget"**: every build, test, lint and 16 KB step before it passed. The cause was bundletool's `get-size` output ending in CR, so the numeric check rejected `10557749`. The measured arm64 Play download is **10.07 MiB** (budget 18). Fixed by stripping non-digits (`tr -dc 0-9`) in android.yml. The same push adds `SpaceView.html` + `docs/build_html.py`.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
 ## Log
