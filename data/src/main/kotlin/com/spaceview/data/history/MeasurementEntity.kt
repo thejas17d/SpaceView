@@ -18,6 +18,7 @@ import androidx.room.PrimaryKey
  * @property unitContext engine `MeasureContext` name used to pick display units.
  * @property calibrated a scale calibration was applied.
  * @property timestampMillis wall-clock save time (epoch ms).
+ * @property deviceTier / [arcoreVersion] / [calibrationFactor] / [rawValueMetres] canonical-record fields (v2).
  */
 @Entity(tableName = "measurements", indices = [Index("timestamp")])
 data class MeasurementEntity(
@@ -35,4 +36,13 @@ data class MeasurementEntity(
     @ColumnInfo(name = "timestamp") val timestampMillis: Long,
     val label: String? = null,
     @ColumnInfo(name = "thumbnail_path") val thumbnailPath: String? = null,
+    // ---- Canonical record (DB v2, M2 gate §6.3). Null for rows saved before v2. ----
+    /** Engine `DeviceTier` name of the phone that measured it. */
+    @ColumnInfo(name = "device_tier") val deviceTier: String? = null,
+    /** ARCore (Google Play Services for AR) version name. */
+    @ColumnInfo(name = "arcore_version") val arcoreVersion: String? = null,
+    /** Scale factor applied to the raw length (1.0 = uncalibrated; NULL = unknown, e.g. rows saved before v2). */
+    @ColumnInfo(name = "calibration_factor") val calibrationFactor: Double? = null,
+    /** Primary length before calibration (m), so a later re-tune can recompute it. */
+    @ColumnInfo(name = "raw_value_m") val rawValueMetres: Double? = null,
 )

@@ -27,6 +27,37 @@ class MeasureVisitTrackerTest {
     }
 
     @Test
+    fun `scan saved then Place in my room never arms an interstitial`() {
+        tracker.enterMeasure("scan-1")
+        tracker.onScanSaved()
+        tracker.leaveWithoutAd("scan-1")
+        assertFalse(tracker.hasSavedThisVisit)
+        assertFalse("the gallery item screen finds no chance", tracker.consumePending())
+        // A later leave of the closed visit does not arm one either.
+        assertFalse(tracker.leaveMeasure("scan-1"))
+        assertFalse(tracker.consumePending())
+    }
+
+    @Test
+    fun `scan saved then Share then Done arms exactly one chance`() {
+        tracker.enterMeasure("scan-1")
+        tracker.onScanSaved()
+        // Share opens the system sheet and comes back: nothing is consumed or armed.
+        assertFalse(tracker.consumePending())
+        assertTrue(tracker.leaveMeasure("scan-1"))
+        assertTrue(tracker.consumePending())
+    }
+
+    @Test
+    fun `leaving without an ad also drops an already armed chance`() {
+        tracker.enterMeasure("scan-1")
+        tracker.onScanSaved()
+        assertTrue(tracker.leaveMeasure("scan-1"))
+        tracker.leaveWithoutAd("scan-1")
+        assertFalse(tracker.consumePending())
+    }
+
+    @Test
     fun `a save in an earlier visit does not count for the next one`() {
         tracker.enterMeasure("visit-1")
         tracker.onScanSaved()

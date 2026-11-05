@@ -190,6 +190,36 @@ internal object FrameReaders {
     }
 
     /**
+     * Full intrinsics and size of the CPU camera image (sensor orientation), for projecting the scanned
+     * face into the front photo. Null when ARCore cannot provide them.
+     */
+    fun cpuImageCamera(frame: Frame): CpuImageCamera? = try {
+        val intr = frame.camera.imageIntrinsics
+        val f = intr.focalLength
+        val pp = intr.principalPoint
+        val dims = intr.imageDimensions
+        if (f[0] > 0 && f[1] > 0 && dims[0] > 0 && dims[1] > 0) {
+            CpuImageCamera(
+                com.spaceview.engine.CameraIntrinsics(f[0].toDouble(), f[1].toDouble(), pp[0].toDouble(), pp[1].toDouble()),
+                dims[0], dims[1],
+            )
+        } else {
+            null
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Copies the CPU camera image as NV21 (closed before returning); null on any failure. */
+    fun cpuImage(frame: Frame): Nv21Image? = try {
+        frame.acquireCameraImage().use { img ->
+            if (img.format != ImageFormat.YUV_420_888) null else Nv21Image(toNv21(img), img.width, img.height)
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
      * Copies the CPU camera image as NV21 and the mapping from image pixels to view pixels
      * (3 view corners → image), for the freeze-frame. The image is closed before returning. Any
      * failure (conversion, coordinate transform) returns null and never escapes into SceneView's
@@ -217,31 +247,15 @@ internal object FrameReaders {
     }
 
     private fun toNv21(image: Image): ByteArray {
-        val w = image.width
-        val h = image.height
-        val out = ByteArray(w * h * 3 / 2)
         val y = image.planes[0]
-        val yBuf = y.buffer
-        var o = 0
-        for (r in 0 until h) {
-            val rowStart = r * y.rowStride
-            if (y.pixelStride == 1) {
-                yBuf.position(rowStart)
-                yBuf.get(out, o, w)
-                o += w
-            } else {
-                for (c in 0 until w) out[o++] = yBuf.get(rowStart + c * y.pixelStride)
-            }
-        }
         val u = image.planes[1]
         val v = image.planes[2]
-        val uBuf = u.buffer
-        val vBuf = v.buffer
-        for (r in 0 until h / 2) for (c in 0 until w / 2) {
-            out[o++] = vBuf.get(r * v.rowStride + c * v.pixelStride)
-            out[o++] = uBuf.get(r * u.rowStride + c * u.pixelStride)
-        }
-        return out
+        return Nv21.fromPlanes(
+            image.width, image.height,
+            y.buffer, y.rowStride, y.pixelStride,
+            u.buffer, u.rowStride, u.pixelStride,
+            v.buffer, v.rowStride, v.pixelStride,
+        )
     }
 
     /** A depth / feature hit this much nearer than a plane hit wins over it. */

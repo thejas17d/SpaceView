@@ -1,5 +1,6 @@
 package com.spaceview.data.history
 
+import com.spaceview.engine.DeviceTier
 import com.spaceview.engine.MeasureContext
 import com.spaceview.engine.Measurement
 import com.spaceview.engine.Quality
@@ -61,6 +62,10 @@ class MeasurementRepository(private val dao: MeasurementDao) {
         timestampMillis: Long,
         label: String? = null,
         thumbnailPath: String? = null,
+        deviceTier: DeviceTier? = null,
+        arcoreVersion: String? = null,
+        calibrationFactor: Double? = null,
+        rawPrimaryMetres: Double? = null,
     ): Long {
         val id = dao.insert(
             MeasurementEntity(
@@ -77,6 +82,10 @@ class MeasurementRepository(private val dao: MeasurementDao) {
                 timestampMillis = timestampMillis,
                 label = label?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_LABEL),
                 thumbnailPath = thumbnailPath,
+                deviceTier = deviceTier?.name,
+                arcoreVersion = arcoreVersion?.take(40),
+                calibrationFactor = calibrationFactor?.takeIf { it.isFinite() && it > 0 },
+                rawValueMetres = rawPrimaryMetres?.takeIf { it.isFinite() },
             ),
         )
         dao.trimTo(HISTORY_LIMIT)
@@ -108,7 +117,7 @@ class MeasurementRepository(private val dao: MeasurementDao) {
          * process (AppContainer); Room types stay internal to `:data`.
          */
         fun create(context: android.content.Context): MeasurementRepository =
-            MeasurementRepository(com.spaceview.data.SpaceViewDatabase.create(context).measurementDao())
+            MeasurementRepository(com.spaceview.data.SpaceViewDatabase.get(context).measurementDao())
 
         /** History keeps the newest 200 measurements. */
         const val HISTORY_LIMIT = 200

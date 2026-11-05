@@ -91,6 +91,7 @@ internal fun ResultCard(
                     MeasureMode.DISTANCE -> R.string.result_distance
                     MeasureMode.HEIGHT -> R.string.result_height
                     MeasureMode.RECTANGLE -> R.string.home_rectangle
+                    MeasureMode.BOX -> R.string.scan_type_box
                 },
             ).uppercase(),
             style = SpaceViewTheme.typography.caption,

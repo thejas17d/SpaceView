@@ -1,0 +1,320 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "3968e687c77c299e502ed39431dab461",
+    "entities": [
+      {
+        "tableName": "measurements",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `kind` TEXT NOT NULL, `value_m` REAL NOT NULL, `sigma_m` REAL NOT NULL, `secondary_m` REAL, `secondary_sigma_m` REAL, `area_m2` REAL, `area_sigma_m2` REAL, `quality` TEXT NOT NULL, `unit_context` TEXT NOT NULL, `calibrated` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `label` TEXT, `thumbnail_path` TEXT, `device_tier` TEXT, `arcore_version` TEXT, `calibration_factor` REAL, `raw_value_m` REAL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "valueMetres",
+            "columnName": "value_m",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sigmaMetres",
+            "columnName": "sigma_m",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "secondaryMetres",
+            "columnName": "secondary_m",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "secondarySigmaMetres",
+            "columnName": "secondary_sigma_m",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "areaSquareMetres",
+            "columnName": "area_m2",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "areaSigma",
+            "columnName": "area_sigma_m2",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "quality",
+            "columnName": "quality",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unitContext",
+            "columnName": "unit_context",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "calibrated",
+            "columnName": "calibrated",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampMillis",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "thumbnailPath",
+            "columnName": "thumbnail_path",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "deviceTier",
+            "columnName": "device_tier",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "arcoreVersion",
+            "columnName": "arcore_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "calibrationFactor",
+            "columnName": "calibration_factor",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "rawValueMetres",
+            "columnName": "raw_value_m",
+            "affinity": "REAL"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_measurements_timestamp",
+            "unique": false,
+            "columnNames": [
+              "timestamp"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_measurements_timestamp` ON `${TABLE_NAME}` (`timestamp`)"
+          }
+        ]
+      },
+      {
+        "tableName": "gallery_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `kind` TEXT NOT NULL, `width_m` REAL NOT NULL, `width_bound95_m` REAL NOT NULL, `width_source` TEXT NOT NULL, `height_m` REAL NOT NULL, `height_bound95_m` REAL NOT NULL, `height_source` TEXT NOT NULL, `depth_m` REAL NOT NULL, `depth_bound95_m` REAL NOT NULL, `depth_source` TEXT NOT NULL, `measured_width_m` REAL, `measured_width_bound95_m` REAL, `measured_height_m` REAL, `measured_height_bound95_m` REAL, `measured_depth_m` REAL, `measured_depth_bound95_m` REAL, `quality` TEXT NOT NULL, `calibrated` INTEGER NOT NULL, `calibration_factor` REAL, `device_tier` TEXT NOT NULL, `arcore_version` TEXT, `label` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `model_path` TEXT NOT NULL, `photo_path` TEXT, `thumbnail_path` TEXT, `total_bytes` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "widthMeters",
+            "columnName": "width_m",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "widthBound95",
+            "columnName": "width_bound95_m",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "widthSource",
+            "columnName": "width_source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "heightMeters",
+            "columnName": "height_m",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "heightBound95",
+            "columnName": "height_bound95_m",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "heightSource",
+            "columnName": "height_source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "depthMeters",
+            "columnName": "depth_m",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "depthBound95",
+            "columnName": "depth_bound95_m",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "depthSource",
+            "columnName": "depth_source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "measuredWidthMeters",
+            "columnName": "measured_width_m",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "measuredWidthBound95",
+            "columnName": "measured_width_bound95_m",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "measuredHeightMeters",
+            "columnName": "measured_height_m",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "measuredHeightBound95",
+            "columnName": "measured_height_bound95_m",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "measuredDepthMeters",
+            "columnName": "measured_depth_m",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "measuredDepthBound95",
+            "columnName": "measured_depth_bound95_m",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "quality",
+            "columnName": "quality",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "calibrated",
+            "columnName": "calibrated",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "calibrationFactor",
+            "columnName": "calibration_factor",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "deviceTier",
+            "columnName": "device_tier",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "arcoreVersion",
+            "columnName": "arcore_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "modelPath",
+            "columnName": "model_path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "photoPath",
+            "columnName": "photo_path",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "thumbnailPath",
+            "columnName": "thumbnail_path",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "total_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_gallery_items_created_at",
+            "unique": false,
+            "columnNames": [
+              "created_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_gallery_items_created_at` ON `${TABLE_NAME}` (`created_at`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '3968e687c77c299e502ed39431dab461')"
+    ]
+  }
+}

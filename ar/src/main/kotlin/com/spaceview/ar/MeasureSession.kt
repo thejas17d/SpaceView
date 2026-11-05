@@ -24,6 +24,7 @@ import com.spaceview.engine.Vec3
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
@@ -77,7 +78,12 @@ data class MeasureState(
 }
 
 /** Why "+" did not place a point. */
-enum class CommitFailure { NOT_TRACKING, NO_SURFACE, NOT_STEADY, SAME_SPOT }
+enum class CommitFailure {
+    NOT_TRACKING, NO_SURFACE, NOT_STEADY, SAME_SPOT,
+
+    /** [MeasureMode.BOX]: the top point is not above the base (aim at the top of the object). */
+    BOX_TOP_TOO_LOW,
+}
 
 /** One-off events (sounds, snackbars). */
 sealed class MeasureEvent {
@@ -100,6 +106,13 @@ class FrozenFrame(
     val points: List<Vec3>,
     val mode: MeasureMode,
 )
+
+/**
+ * The front photo of a scan: the CPU camera image (sensor orientation, ARGB) and the four face corners
+ * in its pixels, top-left, top-right, bottom-right, bottom-left as seen from the front (x, y pairs).
+ * The receiver owns [bitmap] (rectify it, then recycle it).
+ */
+class FrontPhoto(val bitmap: Bitmap, val cornersPx: FloatArray)
 
 /** Result of dragging the last point on a frozen frame. */
 class FrozenAdjustment(val screen: ScreenPoint, val position: Vec3, val reading: Reading?)
@@ -176,6 +189,14 @@ class MeasureSession(
      */
     val sessionId: StateFlow<String?> = _sessionId.asStateFlow()
 
+    private val _frontCapture = MutableStateFlow<FrontCaptureStatus?>(null)
+    /** Front-photo guidance while a capture is armed ([startFrontCapture]); null when not armed. */
+    val frontCapture: StateFlow<FrontCaptureStatus?> = _frontCapture.asStateFlow()
+
+    private val _frontPhoto = MutableStateFlow<FrontPhoto?>(null)
+    /** The captured front photo, until [takeFrontPhoto] hands it over. */
+    val frontPhoto: StateFlow<FrontPhoto?> = _frontPhoto.asStateFlow()
+
     // ---- main-thread state ------------------------------------------------------------------
     private var session: Session? = null
     @Volatile private var capabilities: ArCapabilities? = null
@@ -198,6 +219,15 @@ class MeasureSession(
     private var closed = false
     /** True between resume and pause: only then may anchors be created or detached. */
     private var live = false
+
+    // ---- front photo (scan), main thread ----
+    private val capture = FrontCaptureController()
+    private var captureJob: Job? = null
+    private var scanChoice: FaceChoice? = null
+    private var scanChoiceGeneration = -1
+    private val cornerPx = FloatArray(8)
+    private var cpuCamera: CpuImageCamera? = null
+    private var lastCameraPose: com.spaceview.engine.Pose? = null
 
     /** Bumped (main thread) on every change to [endpoints]; the worker drops older results. */
     @Volatile private var generation = 0
@@ -268,6 +298,8 @@ class MeasureSession(
         lastPlaneHit = null
         lastPointCloudTs = -1L
         intrinsics = null
+        cpuCamera = null
+        cancelFrontCapture()
         updateViewScale()
         _sessionId.value = UUID.randomUUID().toString()
     }
@@ -290,6 +322,8 @@ class MeasureSession(
         commitRequestedAtMs = -1L
         freezeRequested = false
         if (frozenCapture != null) endFreeze(apply = false)
+        // The photo needs live tracking; the screen re-arms it once the session runs again.
+        cancelFrontCapture()
         for (e in endpoints) {
             e.anchor?.let { a -> runCatching { a.detach() } }
             e.anchor = null
@@ -321,6 +355,8 @@ class MeasureSession(
         val tracking = FrameReaders.tracking(camera.trackingState)
         lastTracking = tracking
         val reason = FrameReaders.reason(camera.trackingFailureReason)
+        val cameraPose = camera.pose.toEngine()
+        lastCameraPose = cameraPose
         camera.getViewMatrix(viewMatrix, 0)
         camera.getProjectionMatrix(projMatrix, 0, NEAR_M, FAR_M)
         val vp = ViewProjection(viewMatrix, projMatrix, viewW, viewH)
@@ -366,6 +402,7 @@ class MeasureSession(
 
         processCommitRequest(session, tracking)
         if (freezeRequested) captureFreeze(frame, vp, tracking)
+        if (capture.isArmed) processFrontCapture(frame, cameraPose, tracking == CameraTracking.TRACKING && allTracking, !anyUnanchored)
 
         val snapshot = if (endpoints.isEmpty()) emptyList() else ArrayList<EndpointData>(endpoints.size).also { l -> for (e in endpoints) l += e.data }
         val sample = FrameSample(
@@ -373,7 +410,7 @@ class MeasureSession(
             generation = generation,
             tracking = tracking,
             reason = reason,
-            cameraPose = camera.pose.toEngine(),
+            cameraPose = cameraPose,
             light = light,
             centreRay = vp.centreRay(),
             hit = hit?.let { HitSample(it.position, it.normal, it.kind, it.distance) },
@@ -430,6 +467,7 @@ class MeasureSession(
             return
         }
         commitRequestedAtMs = -1L
+        cancelFrontCapture()
         endpoints.removeLastOrNull()?.let { detach(it) }
         bumpGeneration()
         _state.update { it.copy(pointCount = endpoints.size, isComplete = false, tip = null, reading = null, pendingCommit = false) }
@@ -440,6 +478,7 @@ class MeasureSession(
     fun clear() {
         if (closed) return
         commitRequestedAtMs = -1L
+        cancelFrontCapture()
         for (e in endpoints) detach(e)
         endpoints.clear()
         bumpGeneration()
@@ -471,6 +510,57 @@ class MeasureSession(
         val uncalibrated = UncertaintyModel(capabilities?.tier ?: DeviceTier.NO_DEPTH)
         return MeasurementComposer.knownLengthCheck(trueValue, trueSigma, endpoints.map { it.data }, uncalibrated)
     }
+
+    /**
+     * The finished scan [reading] (what the user saw) as a [ScanOutline]. The front face is decided
+     * **once** per set of points (the first call after the points last changed) and reused by later
+     * calls, so W / D never swap while the Outline card is on screen (M3 review M1). Null unless the
+     * points complete [shape]'s mode.
+     */
+    @MainThread
+    fun scanOutline(shape: ScanShape, reading: Reading): ScanOutline? {
+        val pose = lastCameraPose ?: return null
+        if (mode != shape.mode || endpoints.size < shape.mode.requiredPoints) return null
+        val points = endpoints.map { it.data.point.position }
+        if (scanChoice == null || scanChoiceGeneration != generation) {
+            scanChoice = ScanComposer.chooseFace(shape, points, pose.translation, pose.forward) ?: return null
+            scanChoiceGeneration = generation
+        }
+        return ScanComposer.outline(shape, reading, points, scanChoice ?: return null)
+    }
+
+    /**
+     * Arms the front-photo auto-capture for the confirmed [outline] (its front face, never re-decided):
+     * once tracking is good, the phone is roughly parallel to the face and steady, and the whole face is
+     * in the picture, the CPU image is taken and published on [frontPhoto]. Guidance is on
+     * [frontCapture]. Refused with [CaptureHint.REMEASURE] while any point lost its anchor in a pause
+     * (M3 review M2). False when not armed.
+     */
+    @MainThread
+    fun startFrontCapture(outline: ScanOutline): Boolean {
+        if (closed || !live || mode != outline.shape.mode || endpoints.size < outline.shape.mode.requiredPoints) return false
+        cancelConversion()
+        val armed = capture.arm(outline, pointsAnchored = endpoints.all { it.anchor != null })
+        _frontCapture.value = capture.status
+        return armed
+    }
+
+    /** Disarms the front-photo capture and drops a photo still being converted (keeps one already published). */
+    @MainThread
+    fun cancelFrontCapture() {
+        cancelConversion()
+        capture.disarm()
+        _frontCapture.value = null
+    }
+
+    private fun cancelConversion() {
+        captureJob?.cancel()
+        captureJob = null
+    }
+
+    /** Hands over the captured photo (the caller owns its bitmap) and clears it. */
+    @MainThread
+    fun takeFrontPhoto(): FrontPhoto? = _frontPhoto.value.also { _frontPhoto.value = null }
 
     /** Freezes the current camera frame so the last point can be adjusted with the magnifier. */
     @MainThread
@@ -540,6 +630,11 @@ class MeasureSession(
         lastPlaneHit = null
         frozenCapture = null
         _frozen.value = null
+        cancelConversion()
+        capture.disarm()
+        // A photo nobody took is released here, not left to the GC (M3 review m6).
+        _frontPhoto.value?.bitmap?.recycle()
+        _frontPhoto.value = null
         onOverlayChanged = null
         frames.close()
         scope.cancel()
@@ -557,6 +652,12 @@ class MeasureSession(
             val data = c.data
             if (endpoints.any { it.data.point.position.distanceTo(data.point.position) < MeasurementComposer.MIN_LENGTH_M }) {
                 finishCommit(CommitFailure.SAME_SPOT)
+                return
+            }
+            if (mode == MeasureMode.BOX && endpoints.size == 3 &&
+                MeasurementComposer.boxTopTooLow(endpoints.map { it.data.point.position }, data.point.position)
+            ) {
+                finishCommit(CommitFailure.BOX_TOP_TOO_LOW)
                 return
             }
             val anchor = createAnchor(session, data) ?: run { finishCommit(CommitFailure.NOT_TRACKING); return }
@@ -650,6 +751,65 @@ class MeasureSession(
             }
             val matrix = Matrix().apply { setPolyToPoly(still.imagePoints, 0, still.viewPoints, 0, 3) }
             _frozen.value = FrozenFrame(bitmap, matrix, vp, points, m)
+        }
+    }
+
+    /**
+     * One `onSessionUpdated` call while the front-photo capture is armed (main thread). The controller
+     * skips repeated camera frames, refuses unanchored points and rebuilds the face from the anchors
+     * every few frames; the face is rebuilt once more at the moment of capture.
+     */
+    private fun processFrontCapture(frame: Frame, pose: com.spaceview.engine.Pose, trackingOk: Boolean, anchored: Boolean) {
+        val cam = cpuCamera ?: FrameReaders.cpuImageCamera(frame)?.also { cpuCamera = it } ?: return
+        val take = capture.onFrame(frame.timestamp, trackingOk, anchored, pose, ::currentPoints, cam, cornerPx)
+        val status = capture.status
+        if (_frontCapture.value != status) _frontCapture.value = status
+        if (take) captureFrontPhoto(frame, pose, cam)
+    }
+
+    private fun currentPoints(): List<Vec3> = endpoints.map { it.data.point.position }
+
+    private fun captureFrontPhoto(frame: Frame, pose: com.spaceview.engine.Pose, cam: CpuImageCamera) {
+        val outline = capture.armedOutline ?: return
+        val face = capture.faceNow(currentPoints())
+        val image = FrameReaders.cpuImage(frame)
+        if (face == null || image == null) {
+            capture.onCaptureFailed()
+            return
+        }
+        val imageCam = cam.scaledTo(image.width, image.height)
+        val corners = FloatArray(8)
+        if (ImageProjection.fitCorners(face.corners, pose, imageCam, corners) != CornerFit.INSIDE) {
+            capture.onCaptureFailed()
+            return
+        }
+        val gen = capture.onCaptured()
+        _frontCapture.value = capture.status
+        cancelConversion()
+        captureJob = scope.launch {
+            var bitmap: Bitmap? = null
+            try {
+                bitmap = withContext(worker) {
+                    runCatching {
+                        Bitmap.createBitmap(Nv21.toArgb(image), image.width, image.height, Bitmap.Config.ARGB_8888)
+                    }.getOrNull()
+                }
+                if (closed || capture.generation != gen) return@launch // cancelled, re-armed or closed meanwhile
+                val b = bitmap
+                if (b == null) {
+                    // Conversion failed (out of memory): clear the "Got it." state first, so the screen
+                    // re-arms after a pause even if this attempt is refused (M3 review m1).
+                    capture.disarm()
+                    _frontCapture.value = null
+                    startFrontCapture(outline)
+                    return@launch
+                }
+                _frontPhoto.value?.bitmap?.recycle()
+                _frontPhoto.value = FrontPhoto(b, corners)
+                bitmap = null // published: the receiver owns it now
+            } finally {
+                bitmap?.recycle()
+            }
         }
     }
 

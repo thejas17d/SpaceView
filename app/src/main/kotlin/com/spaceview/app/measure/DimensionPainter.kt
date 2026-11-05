@@ -53,6 +53,23 @@ class DimensionPainter(density: Float) {
                     segment(canvas, vp, outlinePts[3], outlinePts[0], ticks = false, dashedLine = true)
                 }
             }
+            MeasureMode.BOX -> {
+                // Base outline (W along the first edge, D along the second), then a vertical to the top point.
+                val base = MeasurementComposer.rectangleOutline(all.take(3))
+                for (i in 0 until base.size - 1) segment(canvas, vp, base[i], base[i + 1], ticks = true, dashedLine = false)
+                if (base.size == 4) {
+                    segment(canvas, vp, base[2], base[3], ticks = false, dashedLine = true)
+                    segment(canvas, vp, base[3], base[0], ticks = false, dashedLine = true)
+                }
+                if (all.size >= 4) {
+                    val top = all[3]
+                    // The same tapped base corner H is measured from (M3 review m8).
+                    val foot = all[MeasurementComposer.boxFoot(all.take(3), top)]
+                    val lifted = Vec3(foot.x, top.y, foot.z)
+                    segment(canvas, vp, foot, lifted, ticks = true, dashedLine = false)
+                    segment(canvas, vp, lifted, top, ticks = false, dashedLine = true)
+                }
+            }
         }
         for (p in points) vp.project(p)?.let { dot(canvas, it) }
     }

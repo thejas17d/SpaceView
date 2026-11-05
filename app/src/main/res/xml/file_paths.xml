@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider roots for the share sheet. Only the share cache (copies of front photos made by
+     GalleryRepository.shareCopy) is reachable; nothing else in app-private storage can be turned into a
+     content:// URI. Add a narrow entry here only when a later milestone really shares another file (e.g. a GLB). -->
+<paths>
+    <cache-path name="share" path="share/" />
+</paths>

@@ -60,6 +60,19 @@ class MeasureVisitTracker(
         return eligible
     }
 
+    /**
+     * The user is leaving visit [key] towards a screen that must never be preceded by an ad (the scan's
+     * Saved screen → **Place in my room**, ui-ux §5.2). Closes the visit and drops any pending chance,
+     * so the next non-AR screen (the gallery item) cannot use one.
+     */
+    fun leaveWithoutAd(key: String) {
+        if (key == visitKey) {
+            visitKey = null
+            savedThisVisit = false
+        }
+        pendingAtMillis = null
+    }
+
     /** Takes the pending chance (at most once). False when none, or when it has expired. */
     fun consumePending(): Boolean {
         val at = pendingAtMillis ?: return false

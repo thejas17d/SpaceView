@@ -25,6 +25,13 @@ enum class MeasureMode(val requiredPoints: Int) {
 
     /** Rectangle from three corners (top-left, top-right, bottom-right): W × H and area. */
     RECTANGLE(3),
+
+    /**
+     * Box-shaped object (scan only, not offered on the Measure screen): three base corners on the floor
+     * or table (front-left, front-right, back-right: W along the first edge, D along the second), then a
+     * point on the top (H, vertical, above the base). The front face is W × H.
+     */
+    BOX(4),
 }
 
 /** Where an endpoint's 3-D position came from (ordered roughly by trust). */
@@ -99,6 +106,8 @@ class CalibrationCheck(
  * @property isLive true while the last point is still the moving reticle (not committed).
  * @property geometryConsistent false when the engine found the rectangle's corners inconsistent
  *   (not convex, off-plane, or not square beyond noise); the badge is then ROUGH and the UI says so.
+ * @property boxHeight [MeasureMode.BOX] only, once the top point is there: the vertical height above
+ *   the base. [primary] is then the width (first base edge), [secondary] the depth (second base edge).
  */
 data class Reading(
     val mode: MeasureMode,
@@ -113,6 +122,7 @@ data class Reading(
     val rawSecondary: Measurement? = null,
     val maxRightAngleDeviationDeg: Double? = null,
     val geometryConsistent: Boolean = true,
+    val boxHeight: Measurement? = null,
 )
 
 /** One suggestion shown under a result (UI maps it to copy). Ordered by usual payoff. */
@@ -160,6 +170,11 @@ object MeasurementComposer {
                 } else {
                     rectangleReading(all.take(3), model, extra, isLive, rounding)
                 }
+            }
+            MeasureMode.BOX -> when (all.size) {
+                2 -> lengthReading(mode, all[0], all[1], model, extra, isLive, rounding)
+                3 -> rectangleReading(all, model, extra, isLive, rounding, mode)
+                else -> boxReading(all.take(4), model, extra, isLive, rounding)
             }
         }
     }
@@ -268,6 +283,7 @@ object MeasurementComposer {
         extra: Double,
         isLive: Boolean,
         rounding: Boolean,
+        mode: MeasureMode = MeasureMode.RECTANGLE,
     ): Reading {
         val plane = sharedPlane(corners)
         // Calibration only when every corner lies on the calibrated plane (M2 review M2).
@@ -281,7 +297,7 @@ object MeasurementComposer {
         val range = corners.mapNotNull { it.localisation?.rangeMeters }.takeIf { it.isNotEmpty() }?.average()
         val calibrated = scoped.forScope(rect.plane, range).calibration != null
         return Reading(
-            mode = MeasureMode.RECTANGLE,
+            mode = mode,
             primary = rect.width.rounded(rounding),
             secondary = rect.height.rounded(rounding),
             area = rect.area.rounded(rounding),
@@ -295,6 +311,66 @@ object MeasurementComposer {
             geometryConsistent = rect.isGeometricallyConsistent,
         )
     }
+
+    /**
+     * Box: W × D from the three base corners (the rectangle path, with its geometry checks), H from the
+     * top point to the base corner nearest to it horizontally (the height path, with its own scope: the
+     * top is never on the base plane, so a calibration of the base surface does not apply to H).
+     * The badge is the worse of the two; "calibrated" only if both are.
+     */
+    private fun boxReading(
+        points: List<EndpointData>,
+        model: UncertaintyModel,
+        extra: Double,
+        isLive: Boolean,
+        rounding: Boolean,
+    ): Reading {
+        val base = rectangleReading(points.take(3), model, extra, isLive, rounding, MeasureMode.BOX)
+        val top = points[3]
+        val foot = points[boxFoot(points.take(3).map { it.point.position }, top.point.position)]
+        val h = lengthReading(MeasureMode.HEIGHT, foot, top, model, extra, isLive, rounding)
+        return base.copy(
+            area = null,
+            diagonal = null,
+            boxHeight = h.primary,
+            quality = Quality.worst(base.quality, h.quality),
+            calibrated = base.calibrated && h.calibrated,
+        )
+    }
+
+    private fun horizontalDistance(a: Vec3, b: Vec3): Double {
+        val d = b - a
+        val v = d - Vec3.UP * (d dot Vec3.UP)
+        return v.length
+    }
+
+    /**
+     * The one base reference of a box (M3 review m8): index (0..2) of the **tapped** base corner
+     * horizontally nearest to the [top] point. H is measured from it, the overlay draws H from it and the
+     * photographed face is lifted from its level.
+     */
+    fun boxFoot(base: List<Vec3>, top: Vec3): Int {
+        var best = 0
+        var bestD = Double.MAX_VALUE
+        for (i in 0 until minOf(3, base.size)) {
+            val d = horizontalDistance(base[i], top)
+            if (d < bestD) { bestD = d; best = i }
+        }
+        return best
+    }
+
+    /**
+     * True when a box's top point is not clearly above its base (under [MIN_BOX_HEIGHT_M] above the foot,
+     * or below it): almost always a tap on the floor next to the object (M3 review m7).
+     */
+    fun boxTopTooLow(base: List<Vec3>, top: Vec3): Boolean {
+        if (base.size < 3) return false
+        val foot = base[boxFoot(base, top)]
+        return ((top - foot) dot Vec3.UP) < MIN_BOX_HEIGHT_M
+    }
+
+    /** A box's top must be at least this far above its base. Tunable. */
+    const val MIN_BOX_HEIGHT_M = 0.02
 
     /** [model] if its calibration applies to all of [points] (positions, normals, mean range), else uncalibrated. */
     internal fun scopedModel(model: UncertaintyModel, points: List<EndpointData>): UncertaintyModel {

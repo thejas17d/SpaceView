@@ -85,5 +85,49 @@ Calibration is a **known length**: a straight span you measured with a tape, 1�
 ## 15. Hindi
 - Set the phone language to Hindi: text fits on AR chips and cards.
 
+## 16. M3: Scan → Gallery (from `docs/reviews/M3-gate.md` §6)
+
+Install `builds/SpaceView-M3-debug.apk` **over** the M2-final APK, without uninstalling first, so that item 1 tests the database upgrade.
+
+**Upgrade and data**
+1. **v1 → v2 upgrade:** install the M3 APK over M2-final with saved History rows. The rows survive with the same values, and Gallery opens empty. No crash on Home, History or Gallery.
+
+**Front photo**
+
+2. **Auto photo** is taken within about 1 s of holding still and parallel. Test on a 60 Hz phone **and** a 90/120 Hz phone (scan B1).
+3. **The photographed face is the face whose width is shown:**
+   - Box: finish a long cabinet standing near one end of its long face. The Outline card shows W = the long side, and the photo step guides you to that face (scan M1).
+   - TV or frame: the Review photo is upright and unmirrored in portrait and in landscape.
+4. **Pause in step 3** (power button or a call), then resume. "The outline was lost…" appears, no photo is taken, and **Measure again** and **Skip photo** both work (scan M2).
+5. **A low carton on the floor** can be captured at 25° without crouching. If it cannot, note the angle you needed (`MAX_ANGLE_DEG_BOX`).
+6. **Steadiness:** a normal hand-held hold reaches HOLDING. Tune `STEADY_MAX_*` and `HOLD_NS` from what you see.
+7. **Box top tapped on the floor** next to the box: rejected with "aim at the top" (scan m7).
+
+**Review, Gallery and edits**
+
+8. **The Review number equals the Gallery number:** W/H/D and the TV diagonal ± are identical on Review, Saved, the item screen and the share text.
+9. **Edit a side** in the Gallery: the value shows "~" and no ±, and the diagonal loses its ±. Kill the app right after the edit (swipe away): the item still opens, and **Place** (M4) later uses the edited size.
+10. **Share** from Saved and from the item screen to WhatsApp: the photo and the size text arrive. Delete the item: its share copy is gone.
+11. **Thumbnail and photo quality:** note the Review photo's sharpness on this phone (the CPU image is often 640×480). This is input for M6's high-resolution still.
+
+**Ads**
+
+12. **Ads (scan flow):**
+    - Save, then **Place**: no ad.
+    - Save, then **Share**, then **Done**: at most one ad, over the Gallery.
+    - Save, then system **Back**: at most one ad, over the screen you came from.
+    - Back without a save: never an ad.
+    - An ad never appears over the camera or on the Saved screen itself.
+
+**Process death and Hindi**
+
+13. **Process death:** on Saved, enable "Don't keep activities" and switch apps, then return. You land back on Saved for the same item.
+14. **Hindi:** run the whole scan flow (type picker → Saved) in Hindi. No English left, and no truncated buttons.
+
+**History fields**
+
+15. History rows saved from Measure now carry the ARCore version, device tier, calibration factor and raw length (check in the database).
+16. If a USB phone with debugging is available, run `~/.android-toolchain/g.sh :data:connectedDebugAndroidTest`, which runs the Room migration test.
+
 ## Values to tune from results
 Aim error 2 px, motion gates, RANSAC limits, Good/Fair/Rough thresholds, device-tier ± floors (1 cm / 5 mm), calibration acceptance.

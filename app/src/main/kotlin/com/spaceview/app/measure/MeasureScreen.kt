@@ -148,38 +148,7 @@ private fun MeasureArScreen(
                 .background(Color.Black)
                 .onSizeChanged { session.setViewSize(it.width, it.height) },
         ) {
-            ARSceneView(
-                modifier = Modifier.fillMaxSize(),
-                sessionCameraConfig = session::selectCameraConfig,
-                planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL,
-                depthMode = Config.DepthMode.DISABLED,
-                instantPlacementMode = Config.InstantPlacementMode.DISABLED,
-                sessionConfiguration = session::configureSession,
-                planeRenderer = frozen == null,
-                // Nothing lit is rendered (lines are drawn by the overlay): skip the lights.
-                mainLightNode = null,
-                fillLightNode = null,
-                onSessionCreated = session::onSessionCreated,
-                onSessionResumed = session::onSessionResumed,
-                onSessionPaused = session::onSessionPaused,
-                onSessionFailure = { sessionFailed = true },
-                onSessionUpdated = session::onFrame,
-                onGestureListener = null,
-                // Permission and Google Play Services for AR were handled by ArGate.
-                permissionHandler = null,
-                cameraPermissionOverlay = null,
-                arCoreAvailabilityOverlay = null,
-                onARCoreAvailability = { if (it != null) sessionFailed = true },
-            )
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    MeasureOverlayView(ctx).also { v ->
-                        v.frame = session.overlay
-                        session.onOverlayChanged = { v.invalidate() }
-                    }
-                },
-            )
+            ArCameraView(session, planeRenderer = frozen == null, onSessionFailed = { sessionFailed = true })
 
             val f = frozen
             if (f != null) {
@@ -205,7 +174,7 @@ private fun MeasureArScreen(
                     onFreeze = session::freeze,
                     onNew = session::clear,
                     // Saves exactly the reading on the result card (M2 review minor 1).
-                    onSave = { reading, label -> vm.save(reading, label); session.clear() },
+                    onSave = { reading, label -> vm.save(reading, label, state.capabilities?.tier); session.clear() },
                     onStartOver = session::clear,
                     onRetrySession = { sessionFailed = false; sessionKey++ },
                     onDismissSafety = vm::dismissSafetyNotice,
@@ -240,9 +209,50 @@ internal sealed interface TransientMessage {
 
 private const val TRANSIENT_MS = 3000L
 
+/**
+ * The camera with SceneView's ARCore session driven by [session], plus the dimension-line overlay
+ * (drawn from [MeasureSession.overlay], never through Compose). Emits two full-size children into the
+ * caller's Box. Shared by Measure and Scan.
+ */
+@Composable
+internal fun ArCameraView(session: MeasureSession, planeRenderer: Boolean, onSessionFailed: () -> Unit) {
+    ARSceneView(
+        modifier = Modifier.fillMaxSize(),
+        sessionCameraConfig = session::selectCameraConfig,
+        planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL,
+        depthMode = Config.DepthMode.DISABLED,
+        instantPlacementMode = Config.InstantPlacementMode.DISABLED,
+        sessionConfiguration = session::configureSession,
+        planeRenderer = planeRenderer,
+        // Nothing lit is rendered (lines are drawn by the overlay): skip the lights.
+        mainLightNode = null,
+        fillLightNode = null,
+        onSessionCreated = session::onSessionCreated,
+        onSessionResumed = session::onSessionResumed,
+        onSessionPaused = session::onSessionPaused,
+        onSessionFailure = { onSessionFailed() },
+        onSessionUpdated = session::onFrame,
+        onGestureListener = null,
+        // Permission and Google Play Services for AR were handled by ArGate.
+        permissionHandler = null,
+        cameraPermissionOverlay = null,
+        arCoreAvailabilityOverlay = null,
+        onARCoreAvailability = { if (it != null) onSessionFailed() },
+    )
+    AndroidView(
+        modifier = Modifier.fillMaxSize(),
+        factory = { ctx ->
+            MeasureOverlayView(ctx).also { v ->
+                v.frame = session.overlay
+                session.onOverlayChanged = { v.invalidate() }
+            }
+        },
+    )
+}
+
 /** FLAG_KEEP_SCREEN_ON on the AR window only (never a wake lock). */
 @Composable
-private fun KeepScreenOn() {
+internal fun KeepScreenOn() {
     val activity = LocalActivity.current
     DisposableEffect(activity) {
         val window = activity?.window

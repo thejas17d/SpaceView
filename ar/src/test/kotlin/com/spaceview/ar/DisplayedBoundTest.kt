@@ -66,6 +66,24 @@ class DisplayedBoundTest {
                 MeasureMode.DISTANCE -> listOf(endpoint(-w / 2, 1.0), endpoint(w / 2, 1.0 + rng.nextDouble() * 0.2))
                 MeasureMode.HEIGHT -> listOf(endpoint(0.1, 0.2), endpoint(0.12, 0.2 + h))
                 MeasureMode.RECTANGLE -> listOf(endpoint(-w / 2, 1.0 + h), endpoint(w / 2, 1.0 + h), endpoint(w / 2, 1.0))
+                // A real box: base corners on the floor (normal up), then a point on the top.
+                MeasureMode.BOX -> {
+                    fun floorPoint(x: Double, y: Double, z: Double, n: Vec3): EndpointData {
+                        val p = Vec3(x, y, z)
+                        val range = camPos.distanceTo(p)
+                        val loc = AimModel.aim(range, camera, 3.75)!!
+                        return EndpointData(
+                            UncertainPoint.of(p, 0.0001 + rng.nextDouble() * 0.002).withLocalisation(loc), n, HitKind.PLANE, range,
+                            focalPx = loc.focalLengthPx, pixelErrorPx = loc.pixelErrorPx,
+                        )
+                    }
+                    val d = 0.1 + rng.nextDouble() * 1.0
+                    val z0 = wallZ / 2
+                    listOf(
+                        floorPoint(-w / 2, 0.0, z0, Vec3.UP), floorPoint(w / 2, 0.0, z0, Vec3.UP),
+                        floorPoint(w / 2, 0.0, z0 - d, Vec3.UP), floorPoint(0.0, 0.05 + h, z0 - d / 2, Vec3.UP),
+                    )
+                }
             }
             var model = UncertaintyModel(tier)
             if (trial % 2 == 0) {
@@ -83,6 +101,9 @@ class DisplayedBoundTest {
             val sh = shown.secondary
             val eh = engine.secondary
             if (sh != null && eh != null) assertShownCovers(sh, eh, "$mode secondary")
+            val sb = shown.boxHeight
+            val eb = engine.boxHeight
+            if (sb != null && eb != null) assertShownCovers(sb, eb, "$mode box height")
             val sd = shown.diagonal
             val ed = engine.diagonal
             if (sd != null && ed != null) assertShownCovers(sd, ed, "$mode diagonal")

@@ -132,7 +132,13 @@ internal fun FreezeOverlay(
                 val ctx = MeasureFormatter.contextFor(reading)
                 val primary = MeasureFormatter.length(reading.primary, ctx, units).primary
                 val secondary = reading.secondary
-                if (secondary != null) {
+                val boxHeight = reading.boxHeight
+                if (secondary != null && boxHeight != null) {
+                    // BOX: the top point is the one being adjusted, so H must be shown (M3 review m9).
+                    val d = MeasureFormatter.length(secondary, ctx, units).primary
+                    val h = MeasureFormatter.length(boxHeight, ctx, units).primary
+                    DimensionLabel(value = stringResource(R.string.scan_box_value, primary.text, d.text, h.text), onDarkChrome = true)
+                } else if (secondary != null) {
                     val h = MeasureFormatter.length(secondary, ctx, units).primary
                     DimensionLabel(value = stringResource(R.string.history_rect_value, primary.text, h.text), onDarkChrome = true)
                 } else {

@@ -34,6 +34,8 @@ object MeasureFormatter {
         MeasureMode.DISTANCE -> MeasurementKind.DISTANCE
         MeasureMode.HEIGHT -> MeasurementKind.HEIGHT
         MeasureMode.RECTANGLE -> MeasurementKind.RECTANGLE
+        // Scan only (never saved to History): formatted like an object rectangle.
+        MeasureMode.BOX -> MeasurementKind.RECTANGLE
     }
 
     fun contextFor(reading: Reading): MeasureContext = contextFor(kindOf(reading.mode), reading.primary.value)

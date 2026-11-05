@@ -50,6 +50,8 @@ fun HomeScreen(
     onCalibrate: () -> Unit,
     onHistory: () -> Unit,
     onSettings: () -> Unit,
+    onScan: () -> Unit,
+    onGallery: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -76,6 +78,8 @@ fun HomeScreen(
             ModeRow(R.string.home_distance, R.string.home_distance_detail) { onMeasure(MeasureMode.DISTANCE) }
             ModeRow(R.string.home_height, R.string.home_height_detail) { onMeasure(MeasureMode.HEIGHT) }
             ModeRow(R.string.home_rectangle, R.string.home_rectangle_detail) { onMeasure(MeasureMode.RECTANGLE) }
+            ModeRow(R.string.home_scan_object, R.string.home_scan_object_detail, onClick = onScan)
+            ModeRow(R.string.home_gallery, R.string.home_gallery_detail, onClick = onGallery)
             Spacer(Modifier.height(4.dp))
             CalibrationRow(onCalibrate)
             ModeRow(R.string.home_history, R.string.home_history_detail, onClick = onHistory)
@@ -170,6 +174,6 @@ private fun RowCard(title: String, detail: String, onClick: () -> Unit) {
 @Composable
 private fun HomeScreenPreview() {
     SpaceViewTheme {
-        HomeScreen(onMeasure = {}, onCalibrate = {}, onHistory = {}, onSettings = {})
+        HomeScreen(onMeasure = {}, onCalibrate = {}, onHistory = {}, onSettings = {}, onScan = {}, onGallery = {})
     }
 }

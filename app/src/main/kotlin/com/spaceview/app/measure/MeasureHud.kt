@@ -204,6 +204,7 @@ private fun TransientMessage.messageRes(): Int = when (this) {
         CommitFailure.NO_SURFACE -> R.string.measure_reject_no_surface
         CommitFailure.NOT_STEADY -> R.string.measure_reject_not_steady
         CommitFailure.SAME_SPOT -> R.string.measure_reject_same_spot
+        CommitFailure.BOX_TOP_TOO_LOW -> R.string.scan_reject_box_top
     }
     TransientMessage.FreezeUnavailable -> R.string.measure_freeze_unavailable
     TransientMessage.Saved -> R.string.measure_saved
@@ -231,6 +232,12 @@ internal fun instructionRes(mode: MeasureMode, pointCount: Int): Int = when (mod
         1 -> R.string.measure_aim_corner_2
         else -> R.string.measure_aim_corner_3
     }
+    MeasureMode.BOX -> when (pointCount) {
+        0 -> R.string.scan_aim_base_1
+        1 -> R.string.scan_aim_base_2
+        2 -> R.string.scan_aim_base_3
+        else -> R.string.scan_aim_top
+    }
 }
 
 // ---- reticle and live readout ---------------------------------------------------------------
@@ -241,7 +248,7 @@ internal fun instructionRes(mode: MeasureMode, pointCount: Int): Int = when (mod
  * surface it is a dashed grey ring.
  */
 @Composable
-private fun Reticle(state: MeasureState) {
+internal fun Reticle(state: MeasureState) {
     val signal = SpaceViewTheme.colors.signal
     val dark = Color(0xFF16181B)
     val description = stringResource(if (state.locked) R.string.measure_reticle_locked else R.string.measure_reticle)
@@ -286,7 +293,7 @@ private fun DrawScope.crosshair(c: Offset, r: Float, outline: Color, fill: Color
 }
 
 @Composable
-private fun LiveReadout(state: MeasureState, units: UnitPreference, showLength: Boolean) {
+internal fun LiveReadout(state: MeasureState, units: UnitPreference, showLength: Boolean) {
     val reading = state.reading
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -296,7 +303,12 @@ private fun LiveReadout(state: MeasureState, units: UnitPreference, showLength: 
             val ctx = MeasureFormatter.contextFor(reading)
             val primary = MeasureFormatter.length(reading.primary, ctx, units).primary
             val secondary = reading.secondary
-            if (secondary != null) {
+            val boxHeight = reading.boxHeight
+            if (secondary != null && boxHeight != null) {
+                val d = MeasureFormatter.length(secondary, ctx, units).primary
+                val h = MeasureFormatter.length(boxHeight, ctx, units).primary
+                DimensionLabel(value = stringResource(R.string.scan_box_value, primary.text, d.text, h.text), onDarkChrome = true)
+            } else if (secondary != null) {
                 val h = MeasureFormatter.length(secondary, ctx, units).primary
                 DimensionLabel(value = stringResource(R.string.history_rect_value, primary.text, h.text), onDarkChrome = true)
             } else {
@@ -317,7 +329,7 @@ private fun LiveReadout(state: MeasureState, units: UnitPreference, showLength: 
 // ---- controls -------------------------------------------------------------------------------
 
 @Composable
-private fun Controls(state: MeasureState, onAddPoint: () -> Unit, onUndo: () -> Unit, onFreeze: () -> Unit) {
+internal fun Controls(state: MeasureState, onAddPoint: () -> Unit, onUndo: () -> Unit, onFreeze: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             if (state.pointCount > 0) ChromeIconButton(onClick = onUndo, description = R.string.measure_undo) { UndoGlyph(it) }

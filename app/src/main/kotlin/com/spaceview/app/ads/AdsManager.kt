@@ -250,6 +250,16 @@ class AdsManager(
         if (BuildConfig.DEBUG) Log.d(TAG, "Leaving measure, saved this visit=$eligible")
     }
 
+    /**
+     * The user leaves visit [key] for Place in my room (or another action that must never show an ad):
+     * closes the visit without arming an after-save chance and drops any pending one.
+     */
+    fun onVisitLeftWithoutAd(key: String) {
+        visits.leaveWithoutAd(key)
+        pendingShowJob?.cancel()
+        pendingShowJob = null
+    }
+
     /** An AR/camera destination entered composition. Pair with [onArScreenLeft]. */
     fun onArScreenEntered() {
         visits.arScreenEntered()

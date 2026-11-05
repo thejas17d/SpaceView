@@ -9,6 +9,7 @@ import com.spaceview.data.history.MeasurementRepository
 import com.spaceview.data.settings.CalibrationRecord
 import com.spaceview.data.settings.MeasureSettingsRepository
 import com.spaceview.engine.CalibrationResult
+import com.spaceview.engine.DeviceTier
 import com.spaceview.engine.LengthUnit
 import com.spaceview.engine.ReferenceObject
 import com.spaceview.engine.ScaleCalibration
@@ -77,6 +78,7 @@ class MeasureViewModel(
     appSettings: SettingsRepository,
     private val history: MeasurementRepository,
     private val clock: () -> Long,
+    private val arcoreVersion: () -> String? = { null },
 ) : ViewModel() {
 
     val settings: StateFlow<MeasureUiSettings> = combine(
@@ -98,8 +100,12 @@ class MeasureViewModel(
      * Saves exactly the [reading] the user saw on the result card (M2 review minor 1); a live or
      * missing reading is never saved.
      */
-    fun save(reading: Reading, label: String?) {
+    fun save(reading: Reading, label: String?, tier: DeviceTier? = null) {
         if (reading.isLive) return
+        // The canonical record (research §3.3 item 5): the factor actually applied (1.0 when the reading
+        // is not calibrated) and the raw, uncalibrated length, so results can be re-tuned later.
+        val factor = if (reading.calibrated) settings.value.calibration?.factor ?: 1.0 else 1.0
+        val version = arcoreVersion()
         viewModelScope.launch {
             val ok = guarded {
                 history.save(
@@ -112,6 +118,10 @@ class MeasureViewModel(
                     calibrated = reading.calibrated,
                     timestampMillis = clock(),
                     label = label,
+                    deviceTier = tier,
+                    arcoreVersion = version,
+                    calibrationFactor = factor,
+                    rawPrimaryMetres = reading.rawPrimary.value,
                 )
             }
             _events.emit(if (ok) MeasureVmEvent.Saved else MeasureVmEvent.StorageFailed)

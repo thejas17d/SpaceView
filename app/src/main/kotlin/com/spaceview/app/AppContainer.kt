@@ -2,6 +2,7 @@ package com.spaceview.app
 
 import android.content.Context
 import com.spaceview.app.settings.SettingsRepository
+import com.spaceview.data.gallery.GalleryRepository
 import com.spaceview.data.history.MeasurementRepository
 import com.spaceview.data.settings.MeasureSettingsRepository
 
@@ -15,11 +16,22 @@ class AppContainer(context: Context) {
     /** Measurement history (Room). */
     val history: MeasurementRepository by lazy { MeasurementRepository.create(appContext) }
 
+    /** AR Gallery (Room + app-private files), sharing the History database. */
+    val galleryRepository: GalleryRepository by lazy { GalleryRepository.create(appContext) }
+
     /** Calibration, depth and safety-notice settings (`spaceview_measure` DataStore). */
     val measureSettings: MeasureSettingsRepository by lazy { MeasureSettingsRepository.create(appContext) }
 
     /** Units, sounds and onboarding (`spaceview_settings` DataStore, owned by the settings feature). */
     val appSettings: SettingsRepository get() = SettingsRepository.get(appContext)
+
+    /**
+     * Installed Google Play Services for AR version name, for the canonical record of saved results
+     * (null when unknown). Read on demand: ARCore can be updated while the app runs.
+     */
+    val arcoreVersion: () -> String? = {
+        runCatching { appContext.packageManager.getPackageInfo("com.google.ar.core", 0).versionName }.getOrNull()
+    }
 
     /** Wall clock, injectable for tests. */
     val clock: () -> Long = System::currentTimeMillis
