@@ -16,13 +16,17 @@ OUT = ROOT / "SpaceView.html"
 
 # (group, file, short title). Order = reading order.
 DOCS = [
+    ("Start here", "docs/PROJECT-GUIDE.md", "Project guide (plain English)"),
     ("Status", "HANDOFF.md", "Handoff & current status"),
     ("Status", "docs/PLAN.md", "Plan"),
     ("Status", "docs/TESTING.md", "Device testing checklist"),
+    ("Status", "docs/ARCHITECTURE-v2.md", "Architecture v2 (FRIDAY)"),
     ("Research", "docs/research/measurement-engine.md", "Measurement engine"),
     ("Research", "docs/research/ui-ux.md", "UI / UX"),
     ("Research", "docs/research/business.md", "Business"),
     ("Research", "docs/research/android-performance.md", "Android performance & Play"),
+    ("Research", "docs/research/pro-monetization.md", "Pro & monetization"),
+    ("Research", "docs/research/3d-capture.md", "3D capture (cloud & on-device)"),
     ("Reviews", "docs/reviews/M0-M1-review.md", "M0–M1 review"),
     ("Reviews", "docs/reviews/M2-review.md", "M2 review"),
     ("Reviews", "docs/reviews/M2-gate.md", "M2 gate"),
@@ -62,6 +66,10 @@ doc_ids = {Path(f).name: "doc-" + slug(Path(f).stem) for _, f, _ in DOCS}
 
 def render(path: str, doc_id: str):
     text = (ROOT / path).read_text(encoding="utf-8")
+    if text.startswith("---"):  # drop YAML frontmatter (skill files)
+        end = text.find("\n---", 3)
+        if end != -1:
+            text = text[end + 4:].lstrip("\n")
     tokens = md.parse(text)
     toc, used = [], set()
     for i, t in enumerate(tokens):
@@ -96,10 +104,32 @@ def render(path: str, doc_id: str):
     return body, toc
 
 
+EXCLUDE_DIRS = {"build", ".gradle", ".kotlin", ".git", "node_modules", ".idea"}
+EXTRA = [("Engineering tools", "../Chief Engineering Intelligence - FRIDAY.md", "FRIDAY: chief engineering skill")]
+
+
+def all_docs():
+    """Listed docs first, then any other Markdown file in the repo (so nothing is ever left out), then extras."""
+    listed = {str((ROOT / f).resolve()) for _, f, _ in DOCS}
+    found = []
+    for p in sorted(ROOT.rglob("*.md")):
+        rel = p.relative_to(ROOT)
+        if any(part in EXCLUDE_DIRS for part in rel.parts) or str(p.resolve()) in listed:
+            continue
+        group = "Reviews" if "reviews" in rel.parts else "Research" if "research" in rel.parts else "Other docs"
+        found.append((group, rel.as_posix(), p.stem.replace("-", " ").replace("_", " ")))
+    order = {"Start here": -1, "Status": 0, "Research": 1, "Reviews": 2, "Other docs": 3, "Engineering tools": 4}
+    docs = sorted(DOCS + found, key=lambda d: order.get(d[0], 9))  # stable: keeps listed order inside a group
+    return docs + [e for e in EXTRA if (ROOT / e[1]).exists()]
+
+
 def main():
+    global doc_ids
+    docs = all_docs()
+    doc_ids = {Path(f).name: "doc-" + slug(Path(f).stem) for _, f, _ in docs}
     sections, nav = [], []
     current_group = None
-    for group, path, title in DOCS:
+    for group, path, title in docs:
         if not (ROOT / path).exists():
             continue
         doc_id = doc_ids[Path(path).name]
@@ -255,7 +285,7 @@ hr {{ border: 0; border-top: 1px solid var(--line); margin: 24px 0; }}
 <main>
   <header class="hero" id="top">
     <h1>SpaceView Build Book</h1>
-    <p>Every SpaceView document in one place: status, plan, testing checklist, the four research reports and every milestone review. {count} documents, in reading order.</p>
+    <p>Every SpaceView document in one place: status, plan, architecture, testing checklist, all research reports, every milestone review, and the FRIDAY engineering skill. {count} documents, in reading order.</p>
     <div class="meta">Last commit: {commit}<br>Generated {generated} from the Markdown sources by <code>python docs/build_html.py</code>. Edit the .md files, not this page.</div>
     <ol class="milestones" aria-label="Milestones">{strip}</ol>
   </header>

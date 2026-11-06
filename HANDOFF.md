@@ -12,7 +12,7 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
 - Development approved by the user on 2026-11-02; follow `docs/PLAN.md`.
 - Everything lives in `C:\Users\Kanishk\Desktop\Dev\SpaceView`.
 - Keep this HANDOFF.md updated frequently (user asked: every ~5 min of work).
-- All docs stay Markdown (.md). **`SpaceView.html`** (project root) is the consolidated Build Book of every doc, section by section; regenerate it with `python docs/build_html.py` after any doc change (and update the `MILESTONES` list in that script when a milestone changes state). Never hand-edit the HTML.
+- All docs stay Markdown (.md). **`SpaceView.html`** (project root) is the consolidated Build Book of every doc, section by section; regenerate it with `python docs/build_html.py` after any doc change (and update the `MILESTONES` list in that script when a milestone changes state). Never hand-edit the HTML. The script auto-includes every .md in the repo (new research/reviews appear automatically) plus the FRIDAY skill from `../Chief Engineering Intelligence - FRIDAY.md`.
 - 9 agents total: UI/UX research, Measurement research, Business research, Android perf/Play research, 2× Builders, Reviewer, Final Reviewer + Judge (merged), Documentation.
 
 ## Environment constraints
@@ -79,6 +79,38 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
 - **M3 APKs DONE** (clean worktree at 683eaf8, lint clean): `builds/SpaceView-M3-debug.apk` (37.7 MB) + `builds/SpaceView-M3-release.apk` (19.6 MB universal, debug-key signed). Install OVER M2-final to test the v1→v2 migration (TESTING.md §16 item 1). **GitHub:** `thejas17d/SpaceView` still not found (not created or melinnsystems not invited) — user asked about building on CI; waiting for repo, then add remote + push main (first CI run, may need fixes). Next milestone: M4 (place in room) — see M3-gate §7.
 - **GitHub:** `origin` = https://github.com/thejas17d/SpaceView (public; melinnsystems has write access). main pushed at 683eaf8 on 2026-11-05. First CI run: https://github.com/thejas17d/SpaceView/actions/runs/42051294140
 - **First CI run (683eaf8): FAILED only at "Size budget"**: every build, test, lint and 16 KB step before it passed. The cause was bundletool's `get-size` output ending in CR, so the numeric check rejected `10557749`. The measured arm64 Play download is **10.07 MiB** (budget 18). Fixed by stripping non-digits (`tr -dc 0-9`) in android.yml. The same push adds `SpaceView.html` + `docs/build_html.py`.
+- **CI run 2 (dcda24b): GREEN.** Artifacts: spaceview-release (APK+AAB+mapping), spaceview-debug-apk. https://github.com/thejas17d/SpaceView/actions/runs/42053791835
+- **FRIDAY skill:** `Desktop/Dev/Chief Engineering Intelligence - FRIDAY.md` (standalone; 9 source repos audited, no hidden bypass instructions; not installed into ~/.claude). Used as the operating manual for the FRIDAY agent.
+- **New scope requested by user (2026-11-05), pending plan v2 approval:** (1) M4 place-in-room; (2) Smart Measure (auto rectangle detection, hands-free point drop for shaky hands, ML Kit unbundled object naming, later auto 3D box via depth); (3) furniture templates (sofa/L-sofa/bed/wardrobe/table, full 3D from guided measurements); (4) **Pro tier built now** (Play Billing, entitlements, ad removal); (5) **on-device rough 3D scan — moved INTO this sprint by user** (ARCore depth → TSDF → mesh); (6) later: cloud photo-real 3D scan (Pro, paid). Android only. Running: 3D-capture research → `docs/research/3d-capture.md`; Business → `docs/research/pro-monetization.md`; FRIDAY design → `docs/ARCHITECTURE-v2.md`. Next: present recommendations + plan v2 to the user → on approval, Builders start (M4 + Pro billing in parallel).
+- **2026-11-05:** PLAN.md §9 **release quality bar** ("pristine") added, approved by the user as the official launch gate: accuracy ≥ 90% inside ±, crash-free ≥ 99.7%, ANR < 0.15%, start < 0.8 s, 30 fps, native-reviewed Hindi, ≥ 3-phone device set, Beta label fallback. Pro pricing from `docs/research/pro-monetization.md` liked by the user (₹129/mo, ₹799/yr, ₹149 pass, credits). Documentation agent is writing `docs/PROJECT-GUIDE.md` (plain-English explanation of every file plus a glossary) for the user. It appears first in the HTML.
+- **3D capture research DONE** → `docs/research/3d-capture.md`.
+  - **Cloud tech recommendation:** run our own pipeline on permissive open source. COLMAP (BSD-3) with ARCore pose priors makes the model true-scale; mvs-texturing (BSD-3) adds texture; meshoptimizer, xatlas and glTF-Transform (MIT) produce a GLB ≤ 5 MB. It runs on Modal L4 serverless GPUs, with storage on Cloudflare R2.
+  - **Cost:** about $0.45/scan (≈ ₹38), or about $0.30 on RunPod. The KIRI API is $1/scan with a $500 minimum, so use it only as a quality benchmark.
+  - **Licence traps:** Inria 3DGS / 2DGS / SuGaR / GOF / MILo are non-commercial; OpenMVS is AGPL; the RealityScan EULA forbids SaaS use.
+  - **Sofa accuracy:** ±1–2 cm overall.
+  - **On-device:** pure Kotlin TSDF at 1 cm voxels inside the M3 box, about 12 MB RAM and +50–150 KB APK. 76% of ARCore models support depth. The mesh is only a cross-check; the box stays the source of the dimensions.
+  - **Implication for pricing:** ₹38/scan is near the high end of the business sensitivity range, so per pro-monetization §3.4, the monthly plan gets about 1 credit and cloud scans lead with the Studio tier and packs.
+  - **TODO:** `measurement-engine.md` miscites arXiv 2204.01693. That paper measures ARCore feature points vs LiDAR, not the Depth API; fix the citation.
+- **FRIDAY architecture DONE** → `docs/ARCHITECTURE-v2.md` (1,344 lines).
+  - **Top risks:**
+    - R1: FitVerdict uses root-sum-square vs the linear sum, so a borderline result says "Fits" when it should say "Tight".
+    - R2: the migration test has never run (not in CI, no device).
+    - R3: MeasureSession is 1,000 lines with main-thread native work and per-frame allocations; 30 fps is unmeasured.
+    - R4: no entitlement seam; ads start unconditionally, and the backup rules include datastore.
+    - R5: placed GLBs will render dark (lit materials, no lights).
+  - **Order (§12.2):**
+    - Phase 0: AR frame-listener seam + GlbWriter (unlit/multi-part/mesh).
+    - Phase 1: M4 Place ∥ P1 Pro foundation (fake billing).
+    - Phase 2: on-device 3D scan (device spike first, exit criteria §7.1.10) ∥ furniture templates.
+    - Phase 3: release candidate → internal track; the 14-day closed test starts.
+    - Phase 4, during the closed test: SM1 hands-free drop + naming, P2 billing E2E, SM2 auto-rectangles (stretch).
+    - Later: SM3 depth auto-box and cloud.
+  - **Delegation:**
+    - Builder A: ar/data/engine GLB/recon, app/place, app/scan3d, Room v3.
+    - Builder B: Pro/billing/ads gating/paywall/settings/CI/manifest, templates, ML Kit naming.
+    - Optional Builder C: engine/recon (TSDF / marching cubes).
+    - Orchestrator: wires AppNavHost.
+  - **User decisions D1–D17 in §13;** the plan is awaiting the user's approval.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
 ## Log

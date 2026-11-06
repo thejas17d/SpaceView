@@ -1,6 +1,6 @@
 # SpaceView — Workflow & Execution Plan (v1, Android)
 
-Status: **DRAFT — awaiting user approval. No development until approved.**
+Status: **APPROVED 2026-11-02.** Extended 2026-11-05: §9 release quality bar; new scope (M4, Pro, Smart Measure, templates, on-device 3D) to be detailed in `docs/ARCHITECTURE-v2.md`.
 Inputs: `docs/research/{measurement-engine,ui-ux,business,android-performance}.md`.
 
 ## 1. Product scope for v1 (Play Store)
@@ -77,3 +77,24 @@ Ground-truth set: A4 sheet, bank card, door, a TV/frame, a 2 m wall span. Measur
 3. GitHub repo for SpaceView (new repo name/owner?).
 4. "REA" meaning.
 5. Play developer account: personal or organisation?
+
+## 9. Release quality bar ("pristine"), the official launch gate
+Agreed with the user on 2026-11-05. Because Pro is a paid product, **neither Pro nor the public launch ships until every line below holds.** FRIDAY's release gate (FRIDAY skill §6.2) checks each line against evidence, and anything that can only be checked on a real phone sits on the device checklist (`docs/TESTING.md`) until a human confirms it.
+
+| Area | Bar | How it is verified |
+|---|---|---|
+| Accuracy (core promise) | ≥ 90% of real measurements fall inside the displayed ±; the median error is inside the ± | Bench test (§7) on the user's phones at 0.5 / 1 / 2 / 3 m, good and dim light |
+| Stability | Crash-free users ≥ 99.7%, user-perceived ANR < 0.15% | Play pre-launch report, closed test, Play vitals |
+| Speed | Cold start < 0.8 s on mid-range; AR steady 30 fps; no visible stutter while scanning | Release build on a real mid-range phone; Baseline Profiles |
+| Size | arm64 download ≤ 15 MB (CI fails > 18 MB) | CI size gate |
+| Polish | Every screen has designed loading / empty / error / offline states; one visual system; no dead ends; no placeholder text | Screen-by-screen review + screenshot tests |
+| Accessibility | TalkBack reads every control and every measurement in full; works at 200% font; contrast ≥ 4.5:1 | Manual TalkBack pass + Compose accessibility checks |
+| Hindi | Every string translated **and reviewed by a native speaker** | Human review sign-off |
+| Pro honesty | Every paid feature does exactly what the paywall says; on-device 3D is labelled "approximate shape, measured dimensions"; no result held hostage behind a paywall | Paywall copy review + device test |
+| Privacy and policy | Data safety form matches behaviour; ad consent (UMP) shown before any ad; no PII in logs; nothing uploaded without consent | FRIDAY security pass (MASVS) + policy checklist |
+| Testing | Every reviewer BLOCKER/MAJOR closed; all unit tests, lint and CI green; DB upgrade tested on a device over the previous version | CI + device checklist |
+
+**Device test set:** at least 3 phones (one low-end, one mid-range, one with Depth API support) for every milestone build from M4 on, plus Play's free pre-launch report, plus the mandatory 14-day closed test with ≥ 12 testers, run as a real beta (every reported issue triaged).
+
+**Fallback rule:** a feature that misses the bar on mid-range phones ships labelled **Beta** or waits for an update. It never ships as if finished. On-device 3D scan is the most likely candidate.
+
