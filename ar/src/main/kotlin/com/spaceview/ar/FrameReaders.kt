@@ -83,14 +83,16 @@ internal object FrameReaders {
     }
 
     /**
-     * Copies the point cloud (x, y, z per point, confidence ≥ [minConfidence]) into [out] when its
-     * timestamp differs from [lastTimestamp]. Returns (count, timestamp) or null when unchanged.
+     * Copies the point cloud (x, y, z per point, confidence >= [minConfidence]) into [out] when its
+     * timestamp differs from [lastTimestamp]. Returns the number of points copied and stores the cloud's
+     * timestamp in `timestampOut[0]`, or returns -1 when the cloud is unchanged or unreadable. Allocation-free
+     * (R3): no Pair, no copy of [out].
      */
-    fun pointCloud(frame: Frame, lastTimestamp: Long, out: FloatArray, minConfidence: Float = 0.2f): Pair<Int, Long>? {
+    fun pointCloud(frame: Frame, lastTimestamp: Long, out: FloatArray, timestampOut: LongArray, minConfidence: Float = 0.2f): Int {
         return try {
             frame.acquirePointCloud().use { cloud ->
                 val ts = cloud.timestamp
-                if (ts == lastTimestamp) return null
+                if (ts == lastTimestamp) return -1
                 val buf = cloud.points
                 val n = buf.remaining() / 4
                 var k = 0
@@ -102,10 +104,11 @@ internal object FrameReaders {
                     out[k * 3] = px; out[k * 3 + 1] = py; out[k * 3 + 2] = pz
                     k++
                 }
-                k to ts
+                timestampOut[0] = ts
+                k
             }
         } catch (e: Exception) {
-            null
+            -1
         }
     }
 

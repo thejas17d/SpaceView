@@ -403,17 +403,19 @@ object PurchaseVerifier { fun verify(base64PublicKey: String, signedData: String
 
 | Event | From | To |
 |---|---|---|
-| Cold start | — | `Unknown` → the cached value through `effective()` within milliseconds (DataStore read, after the first frame) |
+| Cold start | — | `Unknown` → a cached Pro (inside grace) is published as soon as the DataStore read finishes (after the first frame); otherwise `Unknown` until Play answers, at most 1 s, then the cache through `effective()`. `settled` turns true only when the first start-up query has finished (Ok or Failed); **ads wait for `settled`** (≤ 12 s), so a stale or missing cache never starts UMP or AdMob for a Pro user (P1 review MAJOR 1) |
 | Live query OK, active sub with a valid signature | any | `Pro(source = PLAY_LIVE)`; `confirmedAt = now` is written to the cache |
 | Live query OK, purchase `PENDING` | any | `Pending` (no Pro features). The user sees "Payment pending: Pro unlocks when your bank confirms" |
 | Live query OK, nothing active (expired, refunded, account hold) | any | `Free` **immediately**. Play keeps returning cancelled subscriptions until they expire, and keeps them during Play's own grace period, so "nothing returned" is authoritative |
-| Live query fails (offline, `SERVICE_UNAVAILABLE`, `BILLING_UNAVAILABLE`) | cached Pro | `Pro(CACHE_GRACE)` while `now − confirmedAt ≤ OFFLINE_GRACE_MS`, else `Free` |
-| Wall clock moved backwards (`now < confirmedAt`) | cached Pro | Treat `now = confirmedAt`, so a rollback never *extends* grace. A forward jump only shortens it |
+| Live query fails (offline, `SERVICE_UNAVAILABLE`, `BILLING_UNAVAILABLE`) | cached Pro | `Pro(CACHE_GRACE)` while `max(now, lastSeen) − confirmedAt ≤ OFFLINE_GRACE_MS`, else `Free`. `lastSeen` (a persisted high-water mark of every clock reading taken while offline) moves forward to `now`, never back |
+| Wall clock moved backwards below `lastSeen` (or below `confirmedAt`) by more than 5 minutes | cached Pro | `Free` until Play confirms again. The grace is therefore bounded by 7 days of **app-observed** time: winding the clock back, inside or outside the window, once or repeatedly, does not extend it. A forward jump only shortens it. (Previously "treat `now = confirmedAt`", which let a rollback inside the window extend grace indefinitely: P1 review MAJOR 2.) |
+| Live query OK, Pro confirmed | any | `confirmedAt = lastSeen = now`: Play's answer is authoritative, so the grace restarts from the current clock |
+| Purchase of another package (`packageName` in the signed JSON is not ours) | any | Ignored, like an invalid signature (P1 review MINOR 4) |
 | Signature invalid | any | Ignore that purchase and log a non-PII counter. It **never** grants |
 | Purchase not acknowledged | Pro | Acknowledge, retrying on every start until done (Play refunds unacknowledged purchases after 3 days) |
 
 **The persisted `Cached` record:**
-- **What it holds:** productId, purchaseToken **hash** (SHA-256, for idempotency; the raw token is never logged), confirmedAt, autoRenewing, acknowledged and `catalogVersion`.
+- **What it holds:** productId, purchaseToken **hash** (SHA-256, for idempotency; the raw token is never logged), confirmedAt, autoRenewing, acknowledged, `catalogVersion` and `lastSeen` (the clock high-water mark).
 - **Where:** its own DataStore file, `spaceview_entitlement`.
 - **Backups:** **excluded** from cloud backup and device transfer. `data_extraction_rules.xml` and `backup_rules.xml` gain an `<exclude>`, which fixes R4(b).
 - **No encryption:** the record holds no secret and cannot grant anything Play does not confirm within 7 days. Encryption would protect nothing against the root/patch attacker who can already bypass the check. This is a recorded `shortcut:`.
@@ -709,73 +711,176 @@ object Templates { val all = listOf(Sofa, LSofa, Bed, Wardrobe, Table) }
 
 #### 7.1.4 Fusion, meshing, segmentation, colour (`:engine/recon`, pure JVM)
 
+As built by Builder C (2026-11-06; updated 2026-11-16 for M4 review MINORs 7–10). The code is in `engine/src/main/kotlin/com/spaceview/engine/recon/` and the tests are in the matching test folder (57 tests, 99.7% line coverage). The reviewer and FRIDAY's gate still have to sign off on changes C1–C6 below, including the C5 revision in §7.1.5.
+
 ```kotlin
+// Supporting types (§7.1.4 names them; recon defines them)
+class OrientedBox(val pose: Pose, val width: Double, val height: Double, val depth: Double)
+    // local origin = centre of the box BASE on the support plane, +X width, +Y up, +Z depth;
+    // occupies [-w/2, w/2] × [0, h] × [-d/2, d/2]. contains(), toLocal(), trimmed(6 trims), local(w, h, d).
+class DepthFrame(width, height, depthMm: ShortArray, confidence: ByteArray) {   // pooled slot, refilled per frame
+    var intrinsics: CameraIntrinsics   // at depth resolution, sensor orientation
+    var cameraToWorld: Pose            // Camera.getPose(), NOT the display-oriented pose (looks along −Z)
+    var timestampNs: Long }            // depthMm = mm along the optical axis, 0 = none; smoothed depth: confidence 255
+class YuvFrame(width, height, y, u, v)   // planar 4:2:0, full-range BT.601, same field of view as the depth image
+enum class DepthSource(sigmaAt1mM, inflationPerSideM, sampleWeight) { RAW, SMOOTHED, HARDWARE }
+    // σ at 1 m 1.5 / 2 / 0.5 cm; inflation per side 1 / 2 / 0.5 cm; sample weight 1 / 0.5 / 1
+class DepthNoise(source, meanRangeM, observations, voxelM, scaleSigmaRel, absFloor95M)  // DepthNoise.from(volume, source, model)
+class Extent3(val width: Measurement, val height: Measurement, val depth: Measurement, val vertexCount: Int)
+
 class VolumeSpec(val boxToWorld: Pose, val minCorner: Vec3, val dims: IntArray, val voxelM: Double, val truncM: Double)
-object VolumeSizing {   // voxel = clamp(cbrt(V / N_MAX), 1 cm, 3 cm); V = (box + margins + 2 cm below floor)
+object VolumeSizing {   // voxel = clamp(cbrt(V / N_MAX), 1 cm, 3 cm); V = box + margins + 2 cm below floor; μ = max(4 cm, 3 v)
     const val N_MAX = 1 shl 21            // 2,097,152 voxels
     const val N_MAX_LOW_RAM = 1 shl 20    // memoryClass < 192 MB or isLowRamDevice
     const val MAX_SIDE_M = 2.5
     fun spec(box: OrientedBox, marginM: Double, lowRam: Boolean): VolumeSpec?    // null if any side > MAX_SIDE_M
 }
-class TsdfVolume(spec: VolumeSpec) {   // dense SoA: ShortArray tsdf (scaled ±1), ByteArray weight, ByteArray rgb(3N)
-    fun integrate(depth: DepthFrame, colour: YuvFrame?, sampleWeight: Float)   // ray-based; AABB pre-test per sample
-    fun observedFraction(): Double
+class TsdfVolume(spec: VolumeSpec, params: TsdfParams = TsdfParams()) {
+    // dense SoA: ShortArray tsdf (±1), ByteArray weight (bit 7 = colour set), ByteArray rgb(3N)
+    fun integrate(depth: DepthFrame, colour: YuvFrame?, sampleWeight: Float)   // ray-based; AABB pre-test; allocation-free
+    fun observedFraction(): Double     // + reset(), meanRangeM(), surfaceObservations(), stats
 }
-object MarchingCubes { fun extract(v: TsdfVolume, minWeight: Int): TriMesh }      // Lorensen tables; welded via edge index
+object MarchingCubes { fun extract(v: TsdfVolume, minWeight: Int): TriMesh }      // generated table (C4); welded via edge index
 object MeshSegmenter {
-    fun removeBelow(mesh: TriMesh, plane: Plane, cutM: Double): TriMesh            // floor/support removal
-    fun keepLargestComponent(mesh: TriMesh, keepFraction: Double = 0.05): TriMesh  // union-find on shared vertices; by area
-    fun crop(mesh: TriMesh, box: OrientedBox): TriMesh                              // user crop at Review: O(triangles)
+    fun removeBelow(mesh: TriMesh, plane: Plane, cutM: Double): TriMesh            // clips at the plane (C2)
+    fun keepLargestComponent(mesh: TriMesh, keepFraction: Double = 0.05, insideBox: OrientedBox? = null): TriMesh  // C6 + inside-box rule
+    fun crop(mesh: TriMesh, box: OrientedBox): TriMesh                              // keeps triangles fully inside
 }
-object VertexClusterDecimator { fun decimate(mesh: TriMesh, targetTriangles: Int): TriMesh }   // v1; QEM later if needed
-object MeshExtent { fun estimate(mesh: TriMesh, frame: OrientedBox, noise: DepthNoise): Extent3 }  // §7.1.5
-class TriMesh(val positions: FloatArray, val colours: ByteArray, val indices: IntArray)            // no per-vertex objects
-// GlbWriter (Builder A, delivered first in the sprint):
-fun GlbWriter.writeMesh(mesh: TriMesh, origin: BoxOrigin, unlit: Boolean, extras: MeshExtras): ByteArray   // COLOR_0, u16 indices if < 65,536 verts
+object VertexClusterDecimator { fun decimate(mesh: TriMesh, targetTriangles: Int): TriMesh }   // QEM representatives (C3)
+object MeshExtent {
+    fun estimate(mesh: TriMesh, frame: OrientedBox, noise: DepthNoise): Extent3   // §7.1.5
+    fun crossCheck(extent: Extent3, measured: BoxMeasurement): CrossCheck          // agrees, badge APPROXIMATE|ROUGH, worstAxis
+}
+class TriMesh(val positions: FloatArray, val colours: ByteArray, val indices: IntArray)   // colours empty, RGB or RGBA (phase0.md §2)
+// GlbWriter (Builder A, docs/contracts/phase0.md):
+fun GlbWriter.writeMesh(mesh: TriMesh, origin: BoxOrigin = BOTTOM_CENTER, unlit: Boolean = true, extras: MeshExtras = MeshExtras()): ByteArray
 ```
 
+- **Frames.**
+  - `VolumeSizing.spec` takes the box in **world** (`pose` = box → world).
+  - The mesh functions take an `OrientedBox` in the **mesh's** frame.
+  - Marching-cubes meshes are already in the box frame (origin at the base centre), so use `OrientedBox.local(w, h, d)` or its `trimmed(…)`.
 - **Volume.** A **dense, bounded** volume in the measured box's frame: the box plus a margin, plus 2 cm below the support plane.
   - Dense beats voxel hashing because the bounds are known: the code is simpler, the cost is deterministic, and there is no allocation during capture.
-  - **Memory:** 6 bytes per voxel (2 B TSDF, 1 B weight, 3 B RGB), so **≤ 12.6 MB** at `N_MAX` (6.3 MB on low-RAM phones).
-  - **Allocation:** once, when capture starts. It is released at the end of processing or on cancel.
+  - **Memory:** 6 bytes per voxel (2 B TSDF, 1 B weight, 3 B RGB), so **≤ 12.6 MB** at `N_MAX` (6.3 MB on low-RAM phones). Measured on the sofa example: 12.44 MB.
+  - **Allocation:** once, when capture starts. It is released at the end of processing or on cancel. `reset()` reuses it for "Start again".
 - **Voxel size:** 1 cm by default. 3d-capture.md §7.5 suggests 1.5 cm for volumes over 3 m³ or phones with less than 4 GB RAM, which the formula reproduces through `N_MAX` and `N_MAX_LOW_RAM`. Below 1 cm adds memory but no detail, because the depth noise is centimetre-level.
 - **Margin:** the default is **10 cm** around the box (research §7.5), adjustable from 0 to 15 cm.
 - **Example sizes:**
 
   | Object | Volume with margins | Voxel | Voxels | Memory |
   |---|---|---|---|---|
-  | 60×40×40 cm carton | 0.29 m³ | 1 cm | ~0.29 M | 1.7 MB |
-  | 2.2×1.0×0.9 m sofa | ≈ 2.9 m³ | ≈ 1.1 cm | ~2.1 M | 12.6 MB |
+  | 60×40×40 cm carton | 0.25 m³ | 1 cm | ~0.26 M | 1.6 MB |
+  | 2.2×1.0×0.9 m sofa | ≈ 2.9 m³ | ≈ 1.14 cm | ~2.08 M | 12.5 MB |
 
-- **Integration.** For each depth sample with confidence ≥ the threshold:
+- **Integration.** For each depth sample with confidence ≥ 128 and depth 0.35–2.0 m:
   - **Pre-test:** back-project, then do an AABB test in volume space. If the sample is outside, drop it (most background goes here).
-  - **Ray walk:** walk the ray from d − μ to d + μ at v/2 steps and update `tsdf = (W·tsdf + w·sdf)/(W + w)` with weights saturating at 127.
-  - **Weight:** w ∝ (confidence/255) × source factor / z², capped at 64, so later, better views can still win.
-  - **Truncation:** μ = max(4 cm, 3·σ_depth(z)) (research §7.5), which exceeds the depth noise at the working distance.
-  - **Colour:** a running average from the YUV sample at the depth pixel, only when the view angle to the surface is < 60°.
+  - **Ray walk (C1):**
+    - Walk the ray from **d − μ to d + 0.5·μ** (`TsdfParams.behindFraction`) at v/2 steps, updating each grid point once per ray.
+    - Each update is `tsdf = (W·tsdf + w·sdf)/(W + w)` with the projective SDF and weights saturating at 127.
+    - The band behind the surface is shortened because a full band leaks through convex edges: rays that hit the top near an edge carried "inside" values out through the side face (synthetic box: +12 mm on D; +3 mm after the change).
+  - **Weight:** w = round(2 × confidence/255 × source factor / z²), clamped 1–64, so a typical sample weighs 1–2 and the weight-3 extraction threshold drops one-frame noise.
+  - **Truncation:** μ = max(4 cm, 3 v) per volume (research §7.5).
+    - It exceeds the depth noise at the working distance of about 1 m.
+    - The per-sample σ_depth(z) acts through the weight, not through μ.
+  - **Colour:** a running average from the YUV sample at the depth pixel, only when the view angle to the surface, taken from the depth image's own normal, is < 60°.
 - **Meshing** (after capture, on the processing step, with the AR session paused, so it has the whole CPU and GPU):
-  1. Marching cubes over voxels with weight ≥ 3 (drops one-frame noise).
-  2. Remove geometry below the support plane + max(1 cm, v).
-  3. Keep the largest connected component (drops floaters and leftover wall fragments).
-  4. Decimation to the **budget-derived target** (§7.1.7). v1 uses **vertex clustering** (research §7.5): a uniform grid, one representative vertex per cell, and a cell size chosen by bisection to hit the target. It is O(n), deterministic and about 100 lines. **QEM** (Garland–Heckbert) is the upgrade if the device review finds clustering artefacts unacceptable (§3.1 minimal-change ladder).
-  5. The mesh's own extents and ± (§7.1.5).
+  1. **Marching cubes** (C4) over voxels with weight ≥ 3. Cubes whose corners are **all saturated** are skipped: a sign change there is two truncated bands meeting (e.g. a part thinner than the bands, carved from both sides), not a surface.
+     - "Saturated" follows the asymmetric band (C1): tsdf ≥ +0.9 in front, tsdf ≤ −0.9 × `behindFraction` behind (−0.45 by default; integration never writes below −`behindFraction`).
+     - A real surface always has a corner within √3/2 voxel, i.e. |tsdf| ≤ 0.29 at the 3-voxel minimum μ, so it is never skipped. (Review M4 MINOR 7: the earlier symmetric ±0.9 rule could no longer fire after C1.)
+     - Two passes over the volume: the first counts vertices and indices, the second fills arrays of exactly that size.
+
+     The 256-case table is **generated** at class load:
+     - On an ambiguous face, the inside corners stay separate, so neighbouring cubes always agree and the surface has no cracks.
+     - Every loop is fan-triangulated with no diagonal on a cube face, so every interior edge is shared by exactly 2 triangles. All 256 cases are tested.
+     - No published table is copied.
+  2. **Floor cut** (C2): `removeBelow` **clips** triangles at the support plane + max(1 cm, v) (Sutherland–Hodgman, with welded cut vertices and interpolated colour), so the open bottom rim is a straight line rather than voxel-jagged.
+  3. **Largest component** (C6, with the measured box): `keepLargestComponent(m, insideBox = OrientedBox.local(w, h, d))`.
+     - First, pieces with less than 50% of their area (triangle centroids) inside the measured box grown by 3 cm are dropped. This removes wall patches and neighbouring furniture inside the capture margin, even when they are larger than the object (review M4 MINOR 8: a wall 5 cm behind a sofa is about 30% of the sofa's area).
+     - Then the largest remaining piece by area is kept, plus any piece with ≥ 5% of its area (a chair's separately fused legs survive; floaters go).
+     - Tested: a box 5 cm from a wall (the area rule alone keeps the wall; with the box rule D = 410.7 mm against 400) and a chair with 4 cm legs in front of a wall (all four legs kept, wall dropped).
+     - Limit: a wall closer than about 6 cm (the TSDF bands) fuses into the object's piece and must be trimmed with the Review crop.
+  4. **Decimation** (C3) to the **budget-derived target** (§7.1.7; `DEFAULT_TARGET_TRIANGLES = 20_000`, `MAX_TRIANGLES = 25_000`):
+     - Vertex clustering on a uniform grid, with the cell size found by 20 bisection steps.
+     - Cells, triangles and border edges are found by **sorting** packed keys in one reused `LongArray(max(V, 3T))` (an allocation-free introsort), not by hash tables (review M4 MINOR 9).
+     - Each cell's representative is the **quadric-error minimiser** (Lindstrom 2000 over Garland–Heckbert quadrics), clamped to the cell's own vertices.
+     - Open-border edges add a perpendicular constraint plane.
+     - A plain cell average shrank faces by up to half a cell. Measured bounding-box change: 1.4 mm on the carton at a 32 mm cell, and at most 2.3 mm on the sofa over 2 yaws × targets of 15k, 20k and 25k triangles (limit 5 mm).
+     - Vertex Hausdorff, checked exhaustively both ways: every vertex whose cell survives is within one cell diagonal of its output vertex, and every output vertex is within one cell diagonal of an input vertex. Vertices in cells that collapse entirely have no bound (0.32% on the carton test).
+  5. The mesh's own extents and ± (§7.1.5), and `crossCheck` against the measured box.
   6. A **draft GLB** written to `files/shape_drafts/<uuid>/draft.glb`.
+- **Pipeline call order** (as in `ReconSceneTest`):
+
+  ```kotlin
+  val vol = TsdfVolume(VolumeSizing.spec(boxWorld, marginM, lowRam) ?: return TooBig)
+  vol.integrate(frame, yuv, source.sampleWeight)                             // per integrated frame, fusion worker
+  // Processing: take everything still needed from the volume first …
+  val noise = DepthNoise.from(vol, source, uncertaintyModel)                 // mean range, observations, voxel size
+  val coverage = vol.observedFraction(); val voxelM = vol.spec.voxelM         // for mesh_info
+  var m = MarchingCubes.extract(vol, MarchingCubes.DEFAULT_MIN_WEIGHT)       // 3
+  // … then drop every reference to vol (12.6 MB) before segmentation and decimation.
+  val local = OrientedBox.local(w, h, d)
+  m = MeshSegmenter.removeBelow(m, Plane(Vec3.UP, 0.0), max(0.01, voxelM))
+  m = MeshSegmenter.keepLargestComponent(m, insideBox = local)
+  m = VertexClusterDecimator.decimate(m, targetTriangles)                    // §7.1.7
+  val ext = MeshExtent.estimate(m, local, noise)
+  val check = MeshExtent.crossCheck(ext, measuredBox)                         // ROUGH badge on failure
+  // then GlbWriter.writeMesh(m, BOTTOM_CENTER, unlit = true, extras); an empty mesh → ShapeScanError.ProcessingFailed
+  ```
+
+  Measured timings (desktop JVM, sofa-size volume; phone numbers come from the spike, §7.1.10):
+  - integration: median 6.3 ms per 160×120 frame, 0 bytes allocated (2026-11-06, idle machine)
+  - processing: 0.31 s (marching cubes 51 ms, segmentation 47 ms, decimation 216 ms), measured before the MINOR 9 changes
+  - after them (2026-11-16): marching cubes 122–183 ms and decimation 267–615 ms. These were measured while the machine was loaded (integration on unchanged code read 9.4–17.6 ms in the same runs), so the cost of the two-pass meshing and sort-based decimation is not yet separated from load. Re-measure on an idle machine and in the spike.
+- **Open item for Builder A (phase 2 integration): `writeMesh` re-centring.**
+  - `writeMesh` translates each mesh so that its own AABB's `BOTTOM_CENTER` is the origin (phase0.md K8).
+  - After the floor cut the mesh's lowest point is at plane + 1 cm, so the GLB drops it 1 cm onto the floor.
+  - The GLB's `heightM` is then about 1 cm less than `MeshExtent`'s H, which is measured from the support plane (§7.1.5).
+  - The mesh is also centred horizontally on its own AABB rather than on the measured box. That matters for partial scans.
+  - Decide whether `heightM`/extras carry the mesh AABB (current behaviour), and whether a mesh placed in M4 should keep the box-frame origin. Either way, the cross-check uses `MeshExtent`, not the GLB extras.
 - **Bottom:** left **open**. The material is `doubleSided`, so looking underneath never shows a hole as a missing face. The underside is never visible when the object is placed on a floor.
 - **Colour:** vertex colours (`COLOR_0`), with the front material **unlit** (the captured colour already contains the room's lighting; same reasoning as ADR-003).
 - **No texture atlas:** UV unwrapping, seams and keyframe storage are too complex for a "rough" scan, and too large for 0.5 MB. Photo-real textures are the cloud product's job.
-- **User crop (Review):** six trim sliders on the oriented box, applied to the draft mesh by `MeshSegmenter.crop` (instant, no re-fusion). Extents and ± recompute live.
+- **User crop (Review):** six trim sliders (`OrientedBox.local(w, h, d).trimmed(left, right, bottom, top, back, front)`), applied to the draft mesh by `MeshSegmenter.crop`, which keeps triangles fully inside (instant, no re-fusion). Extents and ± recompute live.
+- **Known limits:**
+  - Parts thinner than about 6 cm (μ + 0.5μ) can be carved from both sides; the saturation rule removes the resulting false surfaces where the bands meet, not the carving.
+  - A wall or object closer than about 6 cm fuses with the scanned object and needs the Review crop.
+  - Clustering can pinch thin parts into non-manifold geometry and blurs colour per cell.
+  - All accuracy figures are from synthetic scenes (no ARCore edge smoothing or textureless holes modelled).
 
 #### 7.1.5 Honest accuracy
 - **The item's dimensions are the measured box:** the W, H and D columns, MEASURED with their ±, exactly as today. The Fit verdict (ADR-002) and every size readout use them. **The mesh never changes them.**
-- **The mesh's own extents** are reported separately, with a 95% ±:
-  - **Extents:** robust percentiles (0.5% and 99.5%) of the vertex coordinates along the box axes, so stray vertices can't stretch them.
-  - **Per-face σ:** √( (σ_depth(r̄)/√n_eff)² + (rel_scale·r̄)² + (v/√12)² ), where:
-    - σ_depth(r̄) is the depth noise at mean range (a per-source constant; raw/ToF is better than smoothed depth-from-motion)
+- **The mesh's own extents** are reported separately, with a 95% ± (`MeshExtent.estimate`):
+  - **W and D:** robust percentiles (0.5% and 99.5%) of the referenced vertices' coordinates along the box axes, so stray vertices can't stretch them (tested: 0.2% outliers ignored).
+  - **H:** from the **support plane** (box-frame y = 0) to the 99.5% percentile, because the floor cut removes the bottom ~1 cm. If the mesh reaches below the plane, H is taken from its own 0.5% percentile instead.
+  - **Random face term:** σ_face² = σ_depth(r̄)²/n_eff + v²/12, where:
+    - σ_depth(r̄) = `DepthSource.sigmaAt1mM` × r̄²: the depth noise at mean range, per source (raw or ToF is better than smoothed depth-from-motion)
     - n_eff = min(observations, 10), because consecutive frames are correlated
-    - rel_scale is the tier's scale term from `UncertaintyModel`
-  - **The extent ±** = 1.96 × √2 × σ_face, then the engine's tier floor, rounded **up** (the existing rules).
-- **Inflation bias:** fused depth-from-motion reads silhouettes **1–3 cm large per side** (research §7.6). That bias is added to the mesh ± and is not "corrected", because it varies by surface.
-- **Cross-check:** if any |mesh extent − box extent| > max(3 cm, 3%, combined ±) (research §7.6 threshold, widened by our ±), the Review shows *"The 3D shape and your measured size differ by X cm on the width. Re-scan, or check the box."* The mesh badge becomes ROUGH.
+    - observations = `TsdfVolume.surfaceObservations()`, which counts rays, not frames: an upper bound that the cap absorbs
+  - **Extent σ (C5, revised 2026-11-16; pending the reviewer and FRIDAY's gate):** σ_ext² = 2·σ_face² + (rel_scale · L)², for W, D and H (H's two "faces" are the top and the support plane).
+    - rel_scale is the tier's scale term, `UncertaintyModel.effectiveScaleSigmaRel`, and L is the extent itself.
+    - The scale term acts on the **length** because depth-from-motion is triangulated from the VIO poses: a VIO scale error scales the whole fused model, so it moves an extent by rel·L.
+    - The first C5 used rel_scale · max(L, √2·r̄). On a 60×40×40 cm carton that made the ± 3–6× the synthetic error (H: mean ±95 38.6 mm against a 95th-percentile error of 6.2 mm), which review M4 MINOR 10 asks the tests to reject.
+    - **Residual risk:** a depth-scale bias that does **not** come from the VIO scale (e.g. a per-device depth calibration error) would move faces by about bias·r̄ and is no longer covered. The bench (§7.1.10, research §7.6) must check the mesh-extent error against a tape before the ± is trusted on devices.
+  - **The extent ±** = 1.96·σ_ext + the inflation bias (below, **W and D only**), then the engine's tier floor, rounded **up** for display (the existing rules).
+- **Inflation bias:** fused depth-from-motion reads silhouettes **1–3 cm large per side** (research §7.6).
+  - The bias is added to the mesh ± (`DepthSource.inflationPerSideM`: raw 1 cm, smoothed 2 cm, ToF 0.5 cm), on 2 sides for W and D. **H gets none:** research §7.6 places the silhouette inflation on W and D and calls the height the best dimension (revised C5).
+  - It is not "corrected", because it varies by surface.
+- **Synthetic check (§7.1.11),** 200 seeded trials:
+  - Each trial has a random yaw, a uniform ±1.5% scale error, 1% range noise, holes, flying pixels and 1-pixel silhouette fattening (about 1 cm per side, the RAW inflation term).
+  - The test asserts both coverage ≥ 95% and **not over-wide**: mean ±95 ≤ 4 × the 95th-percentile error on each axis (review M4 MINOR 10).
+  - Result with the revised C5:
+
+    | Axis | Covered | Max error | 95th-percentile error | Mean ±95 | Ratio |
+    |---|---|---|---|---|---|
+    | W | 100% | 20.0 mm | 17.9 mm | 40.3 mm | 2.25× |
+    | H | 100% | 6.8 mm | 6.2 mm | 19.1 mm | 3.07× |
+    | D | 100% | 20.0 mm | 14.6 mm | 39.1 mm | 2.68× |
+
+  - Real depth is worse than the synthetic noise. Tune `DepthSource` on the bench (§7.1.10).
+- **Cross-check (`MeshExtent.crossCheck`):** if any |mesh extent − box extent| > max(3 cm, 3%, combined ±) (research §7.6 threshold, widened by our ±), the Review shows *"The 3D shape and your measured size differ by X cm on the width. Re-scan, or check the box."* The mesh badge becomes ROUGH, and `worstAxis` names the axis.
+  - The combined ± is the **root-sum-square** of the two ±95s. The errors are independent, and RSS gives the smaller tolerance, so the check warns rather than stays quiet when in doubt (cf. R1).
+  - An empty mesh never agrees.
   - The mesh is **never silently rescaled to the box**, and the box is never rescaled to the mesh.
   - Within tolerance, both are shown: "Size (measured): 82 × 41 × 76 cm ± 1 · 3D shape (approximate, from depth): 80 × 40 × 74 cm ± 3".
 - **Labels everywhere** (Gallery card, item screen, Place chip, share text): **"Approximate 3D shape · measured size"**. The "1:1 True size" chip on Place still applies, because the mesh is at fused metric scale.
@@ -790,8 +895,23 @@ fun GlbWriter.writeMesh(mesh: TriMesh, origin: BoxOrigin, unlit: Boolean, extras
 - **30 fps:**
   - ARCore and the camera keep running every frame. Only integration is rate-limited. A 1-slot channel with DROP_OLDEST between the tap and the worker means the AR loop never waits on fusion.
   - Rendering during capture is only the box wireframe and the coverage overlay (the existing Canvas overlay approach). No mesh is rendered live.
-- **Time limit:** a 45–90 s target with a 90 s hard cap (thermal and battery). Processing then runs with the session **paused**, with a target of ≤ 3 s (marching cubes plus clustering, [est.]) and a progress bar.
-- **Memory:** the TSDF (≤ 12.6 MB) plus the mesh working set (≤ ~10 MB for 100k triangles before decimation) plus the two depth slots. Everything is allocated at capture start, with no per-frame allocation. On `onTrimMemory(RUNNING_CRITICAL)` capture stops and offers Finish.
+- **Time limit:** a 45–90 s target with a 90 s hard cap (thermal and battery). Processing then runs with the session **paused**, with a target of ≤ 3 s (marching cubes plus clustering, [est.]; desktop JVM 0.3–1.3 s, §7.1.4) and a progress bar.
+- **Memory:**
+  - **Capture:** the TSDF (≤ 12.6 MB) plus the two depth slots, all allocated at capture start; integration allocates nothing per frame (measured: 0 bytes over 20 frames).
+  - **Processing** (review M4 MINOR 9): `DepthNoise` and the `mesh_info` numbers are taken from the volume **before** meshing, and the volume is released straight after marching cubes (§7.1.4 pipeline).
+  - **Measured peak extra memory** on a noisy sofa scan (148k raw triangles, 140k after segmentation), as the bytes each stage allocates plus the live inputs it still holds (`ReconMemoryTest`; an upper bound on the live peak):
+
+    | Stage | Before MINOR 9 | After |
+    |---|---|---|
+    | Marching cubes (volume alive) | 22.6 MB | 18.9 MB |
+    | Floor clip | 38.9 MB | 8.0 MB |
+    | Components | 21.1 MB | 8.7 MB |
+    | Decimation | 49.0 MB | 10.9 MB |
+    | **Peak** | **49.0 MB** (volume kept to the end) | **18.9 MB** (volume released after meshing); 23.3 MB if it is kept |
+
+    The decimator alone went from 33.8 MB to 8.1 MB and the floor clip from 23.5 MB to about 2–3 MB. The test asserts a peak ≤ 25 MB, against the spike's 40 MB criterion (§7.1.10 item 3).
+  - Phone PSS is not measured; the spike does that.
+  - On `onTrimMemory(RUNNING_CRITICAL)` capture stops and offers Finish.
 - **Pause** (call, app switch) during capture: integration stops at once, and the anchors are detached by the existing rule. The TSDF stays in memory, but the world frame after resume is not guaranteed to match it, so resume shows **"Finish with what was captured"** (≥ 50% coverage) or **"Start again"**. The fusion is never continued across a pause.
 - **Process death:**
   - **During capture:** the in-memory TSDF is lost, and it is deliberately **not** checkpointed: 12 MB of writes every few seconds would cost I/O and heat for at most 90 s of work, and the anchors can't survive anyway. `SavedStateHandle` keeps the step and the measured box *numbers*. Restore shows "The scan was interrupted" with **Scan again** (re-mark the box) and **Save as box instead** (uses the kept numbers).
@@ -833,7 +953,7 @@ fun GlbWriter.writeMesh(mesh: TriMesh, origin: BoxOrigin, unlit: Boolean, extras
 
 #### 7.1.10 Spike first (Builder A, the first 1–2 days of the D milestone), with hard exit criteria
 On the bench depth phone (and on a smoothed-only depth phone, if one is available), release build:
-1. A 60×40×40 cm carton gives mesh extents within their ± of the measured box on all three axes, in 4 of 5 scans.
+1. A 60×40×40 cm carton gives mesh extents within their ± of the measured box on all three axes, in 4 of 5 scans. **Run it at two distances (≈ 0.7 m and ≈ 1.5 m, 5 scans each)** and compare each against a tape as well as the box. This tests the revised C5 ± (scale term rel·L, no height inflation) against a depth-scale bias that doesn't come from VIO scale; a distance-dependent error means C5 must be widened again (M4-P1 gate R2).
 2. AR frame time p95 ≤ 33 ms during capture at ≥ 3 Hz integration (`gfxinfo`), and fusion ≤ 15 ms per integrated frame (trace markers).
 3. 90 s of capture does not reach thermal SEVERE from a cool start, and the peak extra PSS is ≤ 40 MB (`dumpsys meminfo`).
 4. Processing ≤ 5 s for a sofa-size volume.
@@ -1059,6 +1179,10 @@ All dated 2026-11-05.
   - Ships weeks earlier.
   - Accepts APK-patch piracy, which is low value.
   - Refunds take effect at the next online start.
+  - **Residual risks accepted without a server (P1 review MINOR 4):**
+    - *Replay of a genuine purchase.* A real, correctly signed purchase (its `originalJson` + signature) can be served by a fake billing service on another device: the signature proves Google signed it, not that it belongs to this account or is still current. Purchases of another package are rejected; nothing else can bind a purchase to an account offline.
+    - *Expired prepaid passes.* The client can't tell a prepaid pass from a cancelled auto-renewing subscription (both report `autoRenewing = false`), and a cancelled yearly plan legitimately stays active for up to a year after its `purchaseTime`. A `purchaseTime + 31 d` cut-off would wrongly remove paid Pro, so it is **not** applied. A replayed pass therefore keeps granting until the server check (§8) exists. `purchaseTime` is carried in `OwnedPurchase` for that check.
+    - *Offline grace* is bounded by 7 days of app-observed time (§4.4), not wall time.
   - When the §8 backend exists, subscriptions move to server verification as well. The `BillingGateway` and `EntitlementRepository` seams make that a data-source swap.
 
 ### ADR-005: Entitlement model: a catalogue as data, a 7-day offline grace, and a lapse that never hides data
@@ -1070,7 +1194,7 @@ All dated 2026-11-05.
   - Lapsing must not punish existing data (trust, and Play's subscription policy spirit).
 - **Decision:**
   - `ProCatalog` (one Kotlin file) holds the rules. `EntitlementReducer` is a pure state machine (§4.4).
-  - The grace period is 7 days from the last confirmation, and clock rollback never extends it.
+  - The grace period is 7 days of app-observed time from the last confirmation (a persisted clock high-water mark), so clock rollback never extends it.
   - The cache is excluded from backup.
   - Gates sit at entry points and at Save only, never in AR.
   - Accessibility is never paywalled.
@@ -1304,7 +1428,7 @@ The suggested order was M4 → Pro (parallel) → Smart Measure → templates �
 | D9 | Cloud: hosting, region, sign-in, backend owner | — | **GPU and storage** per 3d-capture.md: **Modal L4 + Cloudflare R2, self-hosted COLMAP**. **API + ledger:** one small container anywhere. **Google Cloud only for Pub/Sub** (RTDN delivery, pushed to the API) and the Developer API service account. **Sign-in:** anonymous + Google link through Credential Manager. **Owner:** a **new backend specialist agent** (not Builder B). **Region:** confirm the DPDP cross-border position with the research (§5 risk 5). |
 | D10 | Lifetime Pro (business.md lists ₹1,499) | Offer / defer | **Defer.** It complicates later cloud economics. Subscriptions only for v1. |
 | D11 | Object names in Hindi | Show ML Kit's English labels / only a curated mapped list | **Curated list only** (no mixed-script UI) |
-| D12 | Play Console actions only you can do | — | **Needed before P2:** (a) a payments profile for selling from a personal account, (b) create the `pro_monthly` and `pro_yearly` products and base plans (yearly with a 7-day trial), (c) add licence testers, (d) recruit **12 closed-test testers**, (e) give me the privacy-policy URL and the support email for the release config. |
+| D12 | Play Console actions only you can do | — | **Needed before P2:** (a) a payments profile for selling from a personal account, (b) create ONE subscription `pro` with base plans `monthly` (₹129), `yearly` (₹799, offer `trial7` = 7-day free trial) and `pass30` (₹149 prepaid), enable grace period + account hold, and put the licence key into the CI secret `PLAY_LICENSE_KEY`, (c) add licence testers, (d) recruit **12 closed-test testers**, (e) give me the privacy-policy URL and the support email for the release config. |
 | D13 | Bench test | — | **Please run the `docs/TESTING.md` accuracy protocol on your phone(s) during M4.** The ADR-002 strictness, the SM2 gate and the tuned constants all depend on it. |
 | D14 | Cloud credit model (later) | Consumable packs / credits included in Pro / both | pro-monetization.md §3 recommends **monthly included credits plus packs, charged only on success**. That works with the §8 ledger (reserve, commit, release). Accept it once 3d-capture.md gives the real cost per scan. |
 | D15 | A third builder for `:engine/recon` | Two builders / add Builder C | **Add C if you can afford the tokens.** It is pure JVM work in a new package, with no file overlap, and takes the biggest maths block off Builder A's critical path. The build lock still allows only one Gradle run at a time, but `:engine:test` is the cheapest one. |

@@ -23,8 +23,13 @@ import com.spaceview.data.history.MeasurementEntity
  * - v1 (M2): `measurements` (History).
  * - v2 (M3): `gallery_items` (AR Gallery) and the canonical-record columns on `measurements`
  *   (M2 gate §6.3): device tier, ARCore version, calibration factor, raw (uncalibrated) length.
+ * - v3 (M4, ARCHITECTURE-v2 §9 / ADR-008): the sprint's one consolidated migration. `gallery_items` gains
+ *   `model_kind` (NOT NULL, default `PROXY_BOX`, which backfills every existing row), the template columns, the mesh
+ *   extent columns (§7.1.5), the mesh GLB box columns, `mesh_info` and `capture_method`; `measurements` gains `capture_method`. All additive.
+ *   **Amendment window:** v3 may be amended in place only until an APK containing v3 is handed to the user or to
+ *   testers; after that any change is v4.
  */
-@Database(entities = [MeasurementEntity::class, GalleryItemEntity::class], version = 2, exportSchema = true)
+@Database(entities = [MeasurementEntity::class, GalleryItemEntity::class], version = 3, exportSchema = true)
 abstract class SpaceViewDatabase : RoomDatabase() {
     abstract fun measurementDao(): MeasurementDao
 
@@ -34,7 +39,7 @@ abstract class SpaceViewDatabase : RoomDatabase() {
         const val FILE_NAME = "spaceview.db"
 
         /** Must equal the `version` in @Database above. */
-        const val LATEST_VERSION = 2
+        const val LATEST_VERSION = 3
 
         /** v1 → v2: adds the gallery table and the canonical-record columns of History (all with defaults). */
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
@@ -62,8 +67,38 @@ abstract class SpaceViewDatabase : RoomDatabase() {
             }
         }
 
+        /** The `ALTER TABLE` statements of [MIGRATION_2_3], in order (also used by the JVM schema test). */
+        internal val V3_STATEMENTS: List<String> = listOf(
+            "ALTER TABLE `gallery_items` ADD COLUMN `model_kind` TEXT NOT NULL DEFAULT 'PROXY_BOX'",
+            "ALTER TABLE `gallery_items` ADD COLUMN `template_id` TEXT",
+            "ALTER TABLE `gallery_items` ADD COLUMN `template_params` TEXT",
+            "ALTER TABLE `gallery_items` ADD COLUMN `mesh_extent_w_m` REAL",
+            "ALTER TABLE `gallery_items` ADD COLUMN `mesh_extent_h_m` REAL",
+            "ALTER TABLE `gallery_items` ADD COLUMN `mesh_extent_d_m` REAL",
+            "ALTER TABLE `gallery_items` ADD COLUMN `mesh_extent_w_bound95_m` REAL",
+            "ALTER TABLE `gallery_items` ADD COLUMN `mesh_extent_h_bound95_m` REAL",
+            "ALTER TABLE `gallery_items` ADD COLUMN `mesh_extent_d_bound95_m` REAL",
+            // Amended in place (M4 review MAJOR 2), inside the v3 amendment window: the GLB's own box.
+            "ALTER TABLE `gallery_items` ADD COLUMN `mesh_glb_w_m` REAL",
+            "ALTER TABLE `gallery_items` ADD COLUMN `mesh_glb_h_m` REAL",
+            "ALTER TABLE `gallery_items` ADD COLUMN `mesh_glb_d_m` REAL",
+            "ALTER TABLE `gallery_items` ADD COLUMN `mesh_info` TEXT",
+            "ALTER TABLE `gallery_items` ADD COLUMN `capture_method` TEXT",
+            "ALTER TABLE `measurements` ADD COLUMN `capture_method` TEXT",
+        )
+
+        /**
+         * v2 → v3: additive columns only (see the class comment). Existing gallery rows become `PROXY_BOX`; every
+         * other new column is NULL, which every reader treats as "unknown / not a mesh / not a template".
+         */
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (sql in V3_STATEMENTS) db.execSQL(sql)
+            }
+        }
+
         /** Every schema migration, oldest first. Never destructive: History and Gallery are user data. */
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 
         @Volatile private var instance: SpaceViewDatabase? = null
 

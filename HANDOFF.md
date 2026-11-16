@@ -2,7 +2,7 @@
 
 Living context file so any new session/LLM can continue. Updated after every step of work.
 
-_Last updated: 2026-11-05 — M3 GATE PASSED and committed; M3 APKs built from clean worktree. Next: M4 (place in room)._
+_Last updated: 2026-11-16 — M4 + P1 Pro + recon core GATE PASSED (with conditions) and committed; CI running; next: M4 APK, then D (3D-scan spike + app) ∥ T (templates)._
 
 ## What SpaceView is
 Android-first (Google Play) AR app: measure anything precisely; scan an object (e.g. photo frame in a café) → save to "AR Gallery" with exact dimensions → place it in your room at true size. Later: B2B for Indian retailers (Croma, Reliance Digital, furniture), iOS (ARKit/LiDAR).
@@ -111,6 +111,88 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
     - Optional Builder C: engine/recon (TSDF / marching cubes).
     - Orchestrator: wires AppNavHost.
   - **User decisions D1–D17 in §13;** the plan is awaiting the user's approval.
+- **2026-11-06: USER APPROVED plan v2** (`docs/ARCHITECTURE-v2.md` §12.2 order) with ALL of FRIDAY's recommended decisions D1–D17 (§13).
+  - **Product decisions:** Smart Measure free; lapse never hides data; 7-day offline grace; client-side purchase check, with cloud credits server-only; no ads after Place; 3D scan "Experimental" (3 free, Pro unlimited); linear-sum fit verdict; Builder C allowed.
+  - **Builders launched:**
+    - Builder A → Phase 0 (AR frame-listener seam, GlbWriter unlit/multi-part/mesh, R1/R3/R5 fixes), then M4 Place.
+    - Builder B → P1 Pro foundation (FeatureGate/entitlements, fake billing, ads gating, paywall, backup-rules fix, migration test in CI = R2/R4).
+    - Builder C → `engine/recon` (pure-JVM TSDF, marching cubes, decimation) for the 3D scan.
+  - **Still needed from the user:** phone models (depth support) for the 3D spike, the bench test, and Play Console setup (D12) by Phase 3.
+- **Phase 0 DONE (Builder A, uncommitted).** The contract is frozen in `docs/contracts/phase0.md`.
+  - GlbWriter writeBox/writeParts/writeMesh with K8 extras; GlbReader.readInfo; TriMesh in engine/recon.
+  - ArFrameListener/ArFrameDispatcher (:ar) + ArSessionHost (app/common/ar); pooled FrameSamples (R3); unlit photo face (R5).
+  - FitPolicy LINEAR|RSS. The orchestrator told A to make **LINEAR the default** (D6).
+  - Tests: engine 192, ar 86. App changes are unverified while Builder B's billing work breaks `:app` compile (expected, in progress).
+  - Builder A is now on M4.
+- 2026-11-06 ~13:00–16:10 IST: the usage limit hit all 3 builders mid-work (A at M4 Room v3, B at the Settings Pro rows, C at the recon scene tests). All three were resumed at 16:11, with no stale lock.
+- **Builder C recon core DONE (uncommitted):** `engine/recon` (VolumeSizing, TsdfVolume, MarchingCubes, MeshSegmenter, VertexClusterDecimator, MeshExtent + crossCheck, ReconTypes).
+  - **Tests:** engine 249 tests (52 recon); recon line coverage 99.6%.
+  - **Synthetic accuracy:** sphere mean error 0.27 mm; 600×400×400 box within 3 mm; ± covers truth in 200/200 trials, but the ± is about 3.7× the worst error, so tune it on the bench.
+  - **Performance:** JVM about 6.3 ms/frame with 0 allocations; sofa volume 12.44 MB.
+  - **Deviations 1–6 accepted provisionally:** behind-band 0.5μ, the floor cut clips, QEM-point decimator, generated MC table, a conservative scale term, and the keepFraction meaning.
+  - **Open for A's Phase 2:** writeMesh re-centring → GLB heightM about 1 cm less than MeshExtent H; the pipeline order is documented in `ReconSceneTest`.
+  - **Doc:** C was asked to update ARCHITECTURE §7.1.4–7.1.5.
+- **M4 DONE (Builder A, uncommitted):** Place in room (floor/table/wall, move/rotate/nudge, wall two-tap fallback, eye level, Check the fit → Fits/Tight/Too big); Room v3 `MIGRATION_2_3`; `modelForPlacement` (K4); K10 `saveTemplate`/`saveMesh`; Place strings in `strings_place.xml`. Tests: ar 104, data 63, 12 Place tests. Device checklist (12 items) is in A's report → TESTING.md §17 at the gate.
+- **P1 Pro DONE (Builder B, uncommitted):**
+  - **Pro code:** `app/pro` (catalogue, entitlement reducer with 7-day grace, `FeatureGate`, paywall) and `app/billing` (Play gateway, signature verifier, fake gateway for debug).
+  - **Ads:** behind `AdsSdk`, never initialised for Pro.
+  - **Robolectric migration test:** runs in `:data` on CI only; Windows-excluded because of an androidx.sqlite path bug.
+  - **CI:** actions pinned by SHA; `PLAY_LICENSE_KEY` secret; app tests 217 (104 new).
+  - **Size:** release universal +184 KiB. Billing pulls in 12 transitive deps, incl. play-services-location (check the merged manifest).
+  - **Play Console IDs:** subscription `pro`, base plans `monthly` / `yearly` (offer `trial7`) / `pass30`, licence key → CI secret `PLAY_LICENSE_KEY`.
+  - **Known gap:** the gallery cap is not enforced at scan entry or Save yet.
+- **Orchestrator nav wiring:**
+  - Gallery item "Place" → `openPlace(id)`; Saved → item → Place.
+  - `placeDestination` and `paywallDestination` added; Settings `onOpenPaywall`.
+  - Unused strings removed (settings_remove_ads, settings_coming_soon, settings_section_ads, gallery_place_soon).
+  - Full build is running.
+  - Reviewers running → `docs/reviews/M4-review.md` (A+C) and `docs/reviews/P1-pro-review.md` (B).
+- **Full build after nav wiring: GREEN.** Tests engine 249 / ar 104 / data 63 (1 skipped) / app 217 (1 skipped); koverVerify, assembleDebug and lint (app, ar, data) all clean. `VertexClusterDecimatorTest` passed this run; it failed once in A's run, so it may be flaky, and the reviewer is investigating.
+- 2026-11-06 → 11-16: there was a long pause (usage limit + re-login). Both reviewers were resumed on 11-16.
+- **P1 Pro review DONE** → `docs/reviews/P1-pro-review.md`: 0 BLOCKER, 3 MAJOR, 7 MINOR.
+  - **MAJOR 1:** AdMob can init for Pro after a stale cache or reinstall plus slow Play; needs a "settled" signal, capped at about 12 s.
+  - **MAJOR 2:** clock rollback inside the 7-day window → offline Pro forever; needs a `lastSeenMillis` high-water mark.
+  - **MAJOR 3:** the paywall sells a 20-item gallery cap that nothing enforces.
+  - **Verified OK:** signature check fails closed, the fake gateway is R8-stripped from release, the backup exclusions, the CI SHA pins, and no location permission merged.
+  - **Builder B resumed to fix all of it.** For MAJOR 3, B may minimally touch `GalleryDao` (count), `AppNavHost` scan entry, and `ScanViewModel.save` (backstop), and will list those files for Builder A.
+- **M4 + recon review DONE** → `docs/reviews/M4-review.md`: 0 BLOCKER, 2 MAJOR, 11 MINOR.
+  - **MAJOR 1:** the fit card's limiting axis and amount can contradict the verdict.
+  - **MAJOR 2:** `saveMesh` rejects real recon output (GLB bbox vs measured extents; 1 cm drop and re-centring).
+  - **Decimator failure:** judged not flaky; the likely cause is a half-edited tree during A's run.
+  - **Fix rounds running:**
+    - Builder A: MAJOR 1–2, MINOR 3/4/5/6/12/13. A must not touch GalleryRepository/GalleryDao/ScanViewModel until the orchestrator says B is done.
+    - Builder C: recon MINOR 7–10.
+    - Builder B: the P1 fixes.
+  - **Orchestrator owns MINOR 11:** pass the template source to GalleryRepository in AppContainer after B finishes; templates don't exist yet, so it stays NONE until the T milestone.
+- **Builder A's M4 review fixes DONE:** MAJOR 1 (limiting axis only among axes sharing the verdict), MAJOR 2 (`writeMesh(keepInputOrigin)`; MeshDraft `glbExtents` + `meshExtents`; the end-to-end recon→save→place test; the GLB is 304 KB at 15k triangles), and MINORs 3/4/5/6/12/13.
+  - **Room v3 amended in place** with `mesh_glb_w/h/d_m`. That's OK, because no v3 APK has shipped (the last APK given to the user was M3 = v2).
+  - **Tests:** ar 106, data 65, app 242. The engine passes except 2 of Builder C's in-progress recon tests.
+  - **Rule for the 3D-scan screen:** it must decimate to ≤15k triangles before `saveMesh`.
+- **Builder B's P1 review fixes DONE (verified 12:40, app 242 / data 65, lint 0 errors).**
+  - **MAJOR 1:** ads wait for `EntitlementRepository.settled`, capped at 12 s.
+  - **MAJOR 2:** a `lastSeenMillis` high-water mark (rollback beyond 5 min → Free until Play confirms).
+  - **MAJOR 3:** `GallerySaveGate` (gallery 20, 3D scans 3), checked at scan entry and as a Save backstop with `GalleryFullCard`. A lapse never hides items. **Callers of `saveTemplate`/`saveMesh` must call the gate first.**
+  - **MINOR 4 partial:** packageName is checked. The prepaid 31-day cut-off was rejected, because it would wrongly revoke cancelled-yearly users; replay is an accepted risk until the server exists (ADR-004).
+  - **MINOR 5:** the licence key is validated at build time. The rest are fixed.
+  - **TESTING.md §17** is now the Pro device checklist. Builder A's Place checklist goes into §18 at the gate.
+  - Release universal 19.99 MB.
+- **Builder C's recon MINOR 7–10 DONE.**
+  - **Fixes:** saturation rule, `insideBox` wall drop, memory peak 49 → 18.9 MB, stronger tests.
+  - **Tests:** engine 262 pass; recon coverage 99.7%.
+  - **C5 revised:** scale term rel·L, no height inflation; ± 2.25–3.07× the p95 error. The FRIDAY gate decides.
+  - **Unverified:** determinism; a back-to-back rerun is running in the orchestrator build.
+  - **Machine memory is critically low:** Claude Code reaped C's waiter. Run `gradle --stop` before big builds.
+- **Gate in progress (2026-11-16):**
+  - The orchestrator's full build + `:engine:test --rerun-tasks` are running.
+  - C is updating ARCHITECTURE §7.1.4–7.1.6.
+  - The **FRIDAY gate** writes `docs/reviews/M4-P1-gate.md`.
+  - Then: TESTING §18 (Place + 3D core) → commit → push → CI → M4 APK from a clean worktree.
+- **M4 + P1 + recon GATE: PASS WITH CONDITIONS** (`docs/reviews/M4-P1-gate.md`).
+  - All 5 MAJORs were verified fixed in the code. C5 ± revision ACCEPTED; the prepaid cut-off rejection UPHELD. No new BLOCKER or MAJOR; new MINORs N1–N7 are listed in the gate.
+  - **R1 closed:** the KDoc now says `mesh_glb_*`.
+  - **R2 closed:** the two-distance carton bench was added to ARCH §7.1.10, and gate §7 was merged into TESTING.md §18.
+  - **R3 OPEN:** the first CI run must show SpaceViewMigrationTest 3/3, the size gate and the 16 KB check. Then the user installs M4 over M3. **The Room v3 amendment window closes when the M4 APK leaves the team.**
+  - **Full build evidence:** engine 262, ar 106, data 65, app 242, all green; `:engine:test --rerun-tasks` green (determinism); release universal 19.99 MB.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
 ## Log

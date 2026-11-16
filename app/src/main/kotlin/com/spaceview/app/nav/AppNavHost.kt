@@ -1,6 +1,5 @@
 package com.spaceview.app.nav
 
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -23,7 +22,6 @@ import androidx.navigation.navArgument
 import com.spaceview.app.ads.AdsManager
 import com.spaceview.app.ads.ArScreenAdGuard
 import com.spaceview.app.ads.NonArScreenAdEffect
-import com.spaceview.app.R
 import com.spaceview.app.appContainer
 import com.spaceview.app.gallery.GalleryItemScreen
 import com.spaceview.app.gallery.GalleryItemViewModel
@@ -34,13 +32,24 @@ import com.spaceview.app.history.HistoryViewModel
 import com.spaceview.app.measure.MeasureRoute
 import com.spaceview.app.measure.MeasureViewModel
 import com.spaceview.app.onboarding.OnboardingScreen
+import com.spaceview.app.place.openPlace
+import com.spaceview.app.place.placeDestination
+import com.spaceview.app.pro.openPaywall
+import com.spaceview.app.pro.paywallDestination
 import com.spaceview.app.scan.GalleryScanStore
 import com.spaceview.app.scan.ScanRoute
 import com.spaceview.app.scan.ScanViewModel
 import com.spaceview.app.settings.SettingsRoute
 import com.spaceview.app.ui.home.HomeScreen
 import com.spaceview.ar.MeasureMode
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import com.spaceview.app.pro.ProFeature
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /** Navigation routes. */
 object Routes {
@@ -75,6 +84,18 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
     val context = LocalContext.current
     val container = context.appContainer
     val ads = AdsManager.get(context)
+    val scope = rememberCoroutineScope()
+    // Free gallery cap (Builder B, P1 review MAJOR 3): checked before the scan's AR session starts, so the
+    // paywall never opens over the camera. Save checks again (ScanViewModel) and keeps the draft.
+    var scanCheck by remember { mutableStateOf<Job?>(null) }
+    val startScan: () -> Unit = {
+        if (scanCheck?.isActive != true) {
+            scanCheck = scope.launch {
+                val gate = container.gallerySaveGate.checkItem()
+                if (gate.allowed) navController.navigate(Routes.SCAN) else navController.openPaywall(ProFeature.GALLERY_UNLIMITED)
+            }
+        }
+    }
     // Wait for the first DataStore answer so we never flash the wrong start screen.
     val onboardingDone by produceState<Boolean?>(initialValue = null) {
         value = container.appSettings.onboardingCompleted.first()
@@ -102,7 +123,7 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                 onCalibrate = { navController.navigate(Routes.CALIBRATE) },
                 onHistory = { navController.navigate(Routes.HISTORY) },
                 onSettings = { navController.navigate(Routes.SETTINGS) },
-                onScan = { navController.navigate(Routes.SCAN) },
+                onScan = startScan,
                 onGallery = { navController.navigate(Routes.GALLERY) },
             )
         }
@@ -115,6 +136,8 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                     arcoreVersion = container.arcoreVersion,
                     // Exactly once per stored scan, from the save itself (never lost to a missed event).
                     onScanSaved = { ads.recordCompletedScan() },
+                    // Save backstop for the Free gallery cap (keeps the draft when full).
+                    canSave = { container.gallerySaveGate.checkItem().allowed },
                 )
             }
             // A scan visit is a Measure-style visit: an interstitial is only possible after a save, and only
@@ -142,9 +165,13 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                 onPlace = { id ->
                     if (isCurrent()) {
                         ads.onVisitLeftWithoutAd(entry.id)
+                        // Item screen underneath, so Back from Place returns to the saved item (M4).
                         navController.navigate(Routes.galleryItem(id)) { popUpTo(Routes.HOME) }
+                        navController.openPlace(id)
                     }
                 },
+                // Gallery full at Save (Review is a non-AR step): the scan's draft stays in its view model.
+                onOpenPaywall = { navController.openPaywall(it) },
             )
         }
         composable(
@@ -195,7 +222,7 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                 viewModel = vm,
                 onOpen = { navController.navigate(Routes.galleryItem(it)) },
                 onBack = { navController.popBackStack() },
-                onScan = { navController.navigate(Routes.SCAN) },
+                onScan = startScan,
             )
         }
         composable(
@@ -207,8 +234,7 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
             val vm = viewModel { GalleryItemViewModel(id, container.galleryRepository, container.appSettings) }
             GalleryItemScreen(
                 viewModel = vm,
-                // M4 replaces this with the placement AR screen.
-                onPlace = { Toast.makeText(context, R.string.gallery_place_soon, Toast.LENGTH_SHORT).show() },
+                onPlace = { navController.openPlace(id) },
                 onBack = { navController.popBackStack() },
             )
         }
@@ -217,7 +243,15 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
             SettingsRoute(
                 onRecalibrate = { navController.navigate(Routes.CALIBRATE) },
                 onBack = { navController.popBackStack() },
+                onOpenPaywall = { navController.openPaywall(it) },
             )
         }
+        // M4 Place in room (Builder A): AR screen with its own ArScreenAdGuard; Free (K2/K5/D7).
+        placeDestination(
+            onBack = { navController.popBackStack() },
+            onOpenPaywall = { navController.openPaywall(it) },
+        )
+        // Pro paywall (Builder B): no ad effect on this screen.
+        paywallDestination(onClose = { navController.popBackStack() })
     }
 }

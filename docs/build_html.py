@@ -41,7 +41,7 @@ MILESTONES = [
     ("M1", "Measurement engine", "done"),
     ("M2", "Measure mode", "done"),
     ("M3", "Scan → Gallery", "done"),
-    ("M4", "Place in room", "next"),
+    ("M4", "Place in room + Pro base", "done"),
     ("M5", "Ads, Hindi, onboarding", "active"),
     ("M6", "Perf, size, release", "next"),
 ]

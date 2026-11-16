@@ -36,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -60,7 +61,17 @@ import com.spaceview.app.R
 import com.spaceview.app.ads.AdsManager
 import com.spaceview.app.ads.BannerAd
 import com.spaceview.app.appContainer
+import com.spaceview.app.billing.FakeBillingControls
+import com.spaceview.app.billing.FakeBillingGateway
 import com.spaceview.app.common.InstrumentCard
+import com.spaceview.app.pro.Entitlement
+import com.spaceview.app.pro.PaywallMessage
+import com.spaceview.app.pro.PaywallViewModel
+import com.spaceview.app.pro.ProFeature
+import com.spaceview.app.pro.ProLinks
+import com.spaceview.app.pro.RefreshReason
+import com.spaceview.app.pro.formatDate
+import com.spaceview.app.pro.paywallMessageRes
 import com.spaceview.app.ui.theme.SpaceViewTheme
 import com.spaceview.data.settings.MeasureSettings
 import com.spaceview.data.settings.MeasureSettingsRepository
@@ -70,27 +81,74 @@ import java.text.DateFormat
 import java.util.Date
 
 /**
- * Settings wired to the app-wide [AdsManager]: privacy options open the UMP form and a banner
- * sits at the end of the list. This is what navigation should host.
+ * Settings wired to the app-wide [AdsManager] and entitlement: privacy options open the UMP form (only
+ * while ads are active), the Pro section shows the status with Restore purchases and Manage
+ * subscription, and a banner sits at the end of the list (hidden for Pro by [BannerAd]). This is what
+ * navigation hosts.
+ *
+ * @param onOpenPaywall contract K5; tapping the Free-plan row opens the paywall. Null: no upgrade action.
  */
 @Composable
 fun SettingsRoute(
     onRecalibrate: () -> Unit,
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
+    onOpenPaywall: ((ProFeature) -> Unit)? = null,
 ) {
     val activity = LocalActivity.current
-    val ads = AdsManager.get(LocalContext.current)
+    val context = LocalContext.current
+    val container = context.appContainer
+    val ads = container.ads
+    val entitlements = container.entitlements
     val privacyRequired by ads.privacyOptionsRequired.collectAsStateWithLifecycle()
+    val entitlement by entitlements.entitlement.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var restoring by remember { mutableStateOf(false) }
+    var restoreMessage by remember { mutableStateOf<PaywallMessage?>(null) }
+    val restore: () -> Unit = {
+        if (!restoring) {
+            restoring = true
+            restoreMessage = null
+            scope.launch {
+                restoreMessage = PaywallViewModel.restoreMessage(entitlements.refresh(RefreshReason.RESTORE_BUTTON))
+                restoring = false
+            }
+        }
+    }
+    val uriHandler = LocalUriHandler.current
     SettingsScreen(
         onRecalibrate = onRecalibrate,
         onOpenPrivacyOptions = { activity?.let { ads.showPrivacyOptions(it) } },
         privacyOptionsRequired = privacyRequired,
         modifier = modifier,
         onBack = onBack,
+        pro = ProSettingsUi(
+            entitlement = entitlement,
+            restoring = restoring,
+            message = restoreMessage,
+            onOpenPaywall = onOpenPaywall?.let { open -> { open(ProFeature.NO_ADS) } },
+            onRestore = restore,
+            onManage = { runCatching { uriHandler.openUri(ProLinks.manageSubscriptions(context.packageName)) } },
+        ),
+        debugPanel = {
+            // Debug builds with fake billing only (BuildConfig.FAKE_BILLING is a constant false in release).
+            if (BuildConfig.FAKE_BILLING) {
+                (container.billing as? FakeBillingGateway)?.let { fake -> FakeBillingControls(fake, onChanged = restore) }
+            }
+        },
         banner = { BannerAd(adsManager = ads) },
     )
 }
+
+/** What the Settings "SpaceView Pro" section shows. */
+data class ProSettingsUi(
+    val entitlement: Entitlement = Entitlement.Unknown,
+    val restoring: Boolean = false,
+    val message: PaywallMessage? = null,
+    val onOpenPaywall: (() -> Unit)? = null,
+    val onRestore: () -> Unit = {},
+    val onManage: () -> Unit = {},
+)
 
 /**
  * Settings screen (S14): units, sounds, depth, calibration (status, recalibrate, clear), privacy
@@ -102,6 +160,9 @@ fun SettingsRoute(
  * @param privacyOptionsRequired from [AdsManager.privacyOptionsRequired]; when false the row is
  *   shown disabled with "No ad privacy choices are needed in your region".
  * @param onBack shows a back arrow when non-null.
+ * @param pro the "SpaceView Pro" section (status, Restore purchases, Manage subscription). The ad
+ *   privacy row is shown only while ads are active, i.e. not for Pro.
+ * @param debugPanel debug-only controls (fake billing); empty by default.
  * @param banner slot at the end of the list for a [BannerAd]; empty by default.
  */
 @Composable
@@ -114,6 +175,8 @@ fun SettingsScreen(
     repository: SettingsRepository = SettingsRepository.get(LocalContext.current),
     measureRepository: MeasureSettingsRepository = LocalContext.current.appContainer.measureSettings,
     clock: () -> Long = LocalContext.current.appContainer.clock,
+    pro: ProSettingsUi = ProSettingsUi(),
+    debugPanel: @Composable () -> Unit = {},
     banner: @Composable () -> Unit = {},
 ) {
     val units by repository.unitPreference.collectAsStateWithLifecycle(UnitPreference.AUTO)
@@ -137,6 +200,8 @@ fun SettingsScreen(
         onOpenPrivacyOptions = onOpenPrivacyOptions,
         privacyOptionsRequired = privacyOptionsRequired,
         onBack = onBack,
+        pro = pro,
+        debugPanel = debugPanel,
         banner = banner,
         modifier = modifier,
     )
@@ -157,6 +222,8 @@ private fun SettingsContent(
     onOpenPrivacyOptions: () -> Unit,
     privacyOptionsRequired: Boolean,
     onBack: (() -> Unit)?,
+    pro: ProSettingsUi,
+    debugPanel: @Composable () -> Unit,
     banner: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -213,24 +280,32 @@ private fun SettingsContent(
                 )
             }
 
-            Section(R.string.settings_section_privacy) {
-                ActionRow(
-                    title = R.string.settings_privacy_options,
-                    detail = if (privacyOptionsRequired) R.string.settings_privacy_options_detail else R.string.settings_privacy_options_not_needed,
-                    enabled = privacyOptionsRequired,
-                    onClick = onOpenPrivacyOptions,
-                )
-                if (BuildConfig.PRIVACY_POLICY_URL.isNotBlank()) {
-                    Divider()
-                    ActionRow(R.string.settings_privacy_policy, null, onClick = {
-                        runCatching { uriHandler.openUri(BuildConfig.PRIVACY_POLICY_URL) }
-                    })
+            // Ad privacy choices only matter while ads can run (never for Pro, ARCHITECTURE-v2 §4.6).
+            val adsActive = pro.entitlement !is Entitlement.Pro
+            val hasPolicy = BuildConfig.PRIVACY_POLICY_URL.isNotBlank()
+            if (adsActive || hasPolicy) {
+                Section(R.string.settings_section_privacy) {
+                    if (adsActive) {
+                        ActionRow(
+                            title = R.string.settings_privacy_options,
+                            detail = if (privacyOptionsRequired) R.string.settings_privacy_options_detail else R.string.settings_privacy_options_not_needed,
+                            enabled = privacyOptionsRequired,
+                            onClick = onOpenPrivacyOptions,
+                        )
+                    }
+                    if (hasPolicy) {
+                        if (adsActive) Divider()
+                        ActionRow(R.string.settings_privacy_policy, null, onClick = {
+                            runCatching { uriHandler.openUri(BuildConfig.PRIVACY_POLICY_URL) }
+                        })
+                    }
                 }
             }
 
-            Section(R.string.settings_section_ads) {
-                ActionRow(R.string.settings_remove_ads, R.string.settings_coming_soon, enabled = false, onClick = {})
+            Section(R.string.pro_settings_section) {
+                ProRows(pro)
             }
+            debugPanel()
 
             Section(R.string.settings_section_about) {
                 Row(
@@ -270,6 +345,47 @@ private fun SettingsContent(
             onDismiss = { confirmClear = false },
         )
     }
+}
+
+@Composable
+private fun ProRows(pro: ProSettingsUi) {
+    val e = pro.entitlement
+    val title: Int
+    val detail: String?
+    when (e) {
+        is Entitlement.Pro -> {
+            title = R.string.pro_status_pro
+            detail = when {
+                e.source == Entitlement.Pro.Source.CACHE_GRACE -> stringResource(R.string.pro_status_grace, formatDate(e.confirmedAtMillis))
+                e.autoRenewing -> stringResource(R.string.pro_status_renewing)
+                else -> stringResource(R.string.pro_status_not_renewing)
+            }
+        }
+        is Entitlement.Pending -> {
+            title = R.string.pro_status_pending
+            detail = stringResource(R.string.pro_status_pending_detail)
+        }
+        Entitlement.Free -> {
+            title = R.string.pro_status_free
+            detail = stringResource(R.string.pro_status_free_detail)
+        }
+        Entitlement.Unknown -> {
+            title = R.string.pro_status_checking
+            detail = null
+        }
+    }
+    val upgrade = pro.onOpenPaywall.takeIf { e is Entitlement.Free }
+    ActionRow(title = title, detail = null, detailText = detail, onClick = upgrade)
+    Divider()
+    ActionRow(
+        title = R.string.pro_restore,
+        detail = R.string.pro_restore_detail,
+        detailText = pro.message?.let { stringResource(paywallMessageRes(it)) },
+        enabled = !pro.restoring,
+        onClick = pro.onRestore,
+    )
+    Divider()
+    ActionRow(R.string.pro_manage, R.string.pro_manage_detail, onClick = pro.onManage)
 }
 
 @Composable
@@ -416,6 +532,7 @@ private val LICENCES = listOf(
     "Filament (Google)" to "Apache License 2.0",
     "ARCore SDK for Android (Google)" to "Google APIs Terms of Service",
     "Google Mobile Ads SDK, User Messaging Platform" to "Google APIs Terms of Service",
+    "Google Play Billing Library" to "Android Software Development Kit License",
 )
 
 @Composable
@@ -446,7 +563,8 @@ private fun SettingsPreview() {
         SettingsContent(
             units = UnitPreference.AUTO, onUnitsChange = {}, sounds = true, onSoundsChange = {},
             depth = false, onDepthChange = {}, calibratedAtMillis = 1_760_000_000_000L, calibrationStale = true,
-            onClearCalibration = {}, onRecalibrate = {}, onOpenPrivacyOptions = {}, privacyOptionsRequired = false, onBack = {}, banner = {},
+            onClearCalibration = {}, onRecalibrate = {}, onOpenPrivacyOptions = {}, privacyOptionsRequired = false, onBack = {},
+            pro = ProSettingsUi(entitlement = Entitlement.Free, onOpenPaywall = {}), debugPanel = {}, banner = {},
         )
     }
 }

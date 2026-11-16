@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pro, paywall and billing strings (Builder B). Every key also exists in values-hi/strings_pro.xml.
+     Prices are never written here: they come from Google Play, localised and tax-inclusive. -->
+<resources>
+    <string name="pro_title">SpaceView Pro</string>
+    <string name="pro_close">Close</string>
+
+    <!-- Why the paywall opened (one per ProFeature). -->
+    <string name="pro_reason_no_ads">Use SpaceView without ads.</string>
+    <string name="pro_reason_gallery">The free gallery holds %1$d items. Pro saves as many as you like. Nothing you\'ve saved is ever hidden or deleted.</string>
+    <string name="pro_reason_device_scan">You\'ve used your %1$d free 3D scans. Pro scans without a limit. Your saved scans stay yours.</string>
+    <string name="pro_reason_templates">This furniture template is part of Pro. Sofa, bed and wardrobe stay free.</string>
+    <string name="pro_reason_compare">Free compares %1$d items at a time. Pro compares as many as you like.</string>
+    <string name="pro_reason_export_glb">Exporting 3D models is part of Pro.</string>
+    <string name="pro_reason_export_pdf">PDF export is part of Pro.</string>
+
+    <!-- Benefits: only features that exist in this build are listed (ProCatalog.advertised). -->
+    <string name="pro_benefits_title">With Pro</string>
+    <string name="pro_benefit_no_ads">No ads anywhere</string>
+    <string name="pro_benefit_gallery">Unlimited gallery saves</string>
+    <string name="pro_benefit_device_scan">Unlimited 3D scans</string>
+    <string name="pro_benefit_templates">Every furniture template</string>
+    <string name="pro_benefit_compare">Compare any number of items</string>
+    <string name="pro_benefit_export_glb">Export 3D models (GLB)</string>
+    <string name="pro_benefit_export_pdf">PDF export with dimensions</string>
+    <string name="pro_free_note">Measuring, scanning, placing and sharing stay free. Pro never changes accuracy.</string>
+
+    <!-- Plans. -->
+    <string name="pro_plan_yearly">Yearly</string>
+    <string name="pro_plan_monthly">Monthly</string>
+    <string name="pro_plan_pass">Pass (doesn\'t renew)</string>
+    <string name="pro_price_recurring">%1$s / %2$s</string>
+    <string name="pro_price_once">%1$s for %2$s</string>
+    <string name="pro_trial_badge">%1$s free</string>
+
+    <string name="pro_per_day">day</string>
+    <string name="pro_per_week">week</string>
+    <string name="pro_per_month">month</string>
+    <string name="pro_per_year">year</string>
+    <string name="pro_every_day">every day</string>
+    <string name="pro_every_week">every week</string>
+    <string name="pro_every_month">every month</string>
+    <string name="pro_every_year">every year</string>
+    <string name="pro_every_n">every %1$s</string>
+    <plurals name="pro_periods_day">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <plurals name="pro_periods_week">
+        <item quantity="one">%d week</item>
+        <item quantity="other">%d weeks</item>
+    </plurals>
+    <plurals name="pro_periods_month">
+        <item quantity="one">%d month</item>
+        <item quantity="other">%d months</item>
+    </plurals>
+    <plurals name="pro_periods_year">
+        <item quantity="one">%d year</item>
+        <item quantity="other">%d years</item>
+    </plurals>
+
+    <!-- Terms (Play subscriptions policy: price, period, renewal, trial end, how to cancel). -->
+    <string name="pro_terms_trial">Free for %1$s, then %2$s %3$s, charged to your Google Play account. It renews automatically until you cancel. Cancel any time in Google Play before the trial ends and you won\'t be charged.</string>
+    <string name="pro_terms_renewing">%1$s %2$s, charged to your Google Play account. It renews automatically until you cancel. Cancel any time in Google Play; Pro stays on until the end of the period you paid for.</string>
+    <string name="pro_terms_prepaid">One payment of %1$s for %2$s, charged to your Google Play account. It doesn\'t renew: Pro ends after %2$s unless you buy again.</string>
+
+    <string name="pro_cta_trial">Try free for %1$s</string>
+    <string name="pro_cta_subscribe">Subscribe</string>
+    <string name="pro_cta_pass">Buy pass</string>
+    <string name="pro_restore">Restore purchases</string>
+    <string name="pro_manage">Manage subscription</string>
+
+    <!-- Paywall states. -->
+    <string name="pro_loading">Getting prices from Google Play…</string>
+    <string name="pro_problem_offline">Couldn\'t reach Google Play. Check your connection and try again.</string>
+    <string name="pro_problem_unavailable">Purchases aren\'t available on this device (the Play Store is missing or blocked).</string>
+    <string name="pro_problem_not_on_sale">Pro isn\'t available to buy right now. Everything else in SpaceView works as usual.</string>
+    <string name="pro_problem_generic">Google Play had a problem. Please try again.</string>
+    <string name="pro_retry">Try again</string>
+    <string name="pro_active_title">You have Pro</string>
+    <string name="pro_active_body">Thank you for supporting SpaceView.</string>
+    <string name="pro_active_offline">Last confirmed by Google Play on %1$s. Pro stays on for up to 7 days without a connection.</string>
+    <string name="pro_done">Done</string>
+    <string name="pro_pending_title">Payment pending</string>
+    <string name="pro_pending_body">Pro unlocks as soon as the payment is confirmed. UPI and cash payments can take a while.</string>
+
+    <!-- One-shot messages. -->
+    <string name="pro_msg_restored">Pro restored.</string>
+    <string name="pro_msg_nothing">No Pro purchase found for this Google account.</string>
+    <string name="pro_msg_restore_pending">A Pro payment is still pending. Pro unlocks when it\'s confirmed.</string>
+    <string name="pro_msg_restore_failed">Couldn\'t check with Google Play. Check your connection and try again.</string>
+    <string name="pro_msg_purchase_failed">The purchase didn\'t complete. Please try again.</string>
+
+    <!-- Settings. -->
+    <string name="pro_settings_section">SpaceView Pro</string>
+    <string name="pro_status_free">Free plan</string>
+    <string name="pro_status_free_detail">Get Pro for no ads and unlimited saves</string>
+    <string name="pro_status_pro">Pro is active</string>
+    <string name="pro_status_renewing">Renews automatically. Manage or cancel it in Google Play.</string>
+    <string name="pro_status_not_renewing">Doesn\'t renew. Pro ends at the end of the paid period.</string>
+    <string name="pro_status_grace">Offline. Last confirmed on %1$s.</string>
+    <string name="pro_status_pending">Payment pending</string>
+    <string name="pro_status_pending_detail">Pro unlocks when the payment is confirmed</string>
+    <string name="pro_status_checking">Checking with Google Play…</string>
+    <string name="pro_restore_detail">After reinstalling, or on a new phone with the same Google account</string>
+    <string name="pro_manage_detail">Change or cancel your plan in Google Play</string>
+
+    <!-- Free gallery cap at Save (the scan is kept). -->
+    <string name="pro_gallery_full_title">Gallery full</string>
+    <string name="pro_gallery_full_body">The free gallery holds %1$d items. Your scan is still here: get Pro to save it, share its sizes, or discard it. Your saved items aren\'t affected.</string>
+    <string name="pro_gallery_full_upgrade">Get Pro to save</string>
+    <string name="pro_gallery_full_share">Share sizes</string>
+    <string name="pro_gallery_full_discard">Discard</string>
+    <string name="pro_gallery_full_discard_title">Discard this scan?</string>
+    <string name="pro_keep">Keep</string>
+</resources>

@@ -15,6 +15,16 @@ interface GalleryDao {
     @Query("SELECT * FROM gallery_items ORDER BY created_at DESC, id DESC")
     fun observeAll(): Flow<List<GalleryItemEntity>>
 
+    // Pro Free caps (Builder B, P1 review MAJOR 3): counts without loading rows.
+    @Query("SELECT COUNT(*) FROM gallery_items")
+    suspend fun count(): Int
+
+    @Query("SELECT COUNT(*) FROM gallery_items")
+    fun observeCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM gallery_items WHERE model_kind = :modelKind")
+    suspend fun countModelKind(modelKind: String): Int
+
     @Query("SELECT * FROM gallery_items WHERE id = :id")
     fun observe(id: Long): Flow<GalleryItemEntity?>
 

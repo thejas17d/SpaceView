@@ -24,12 +24,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.google.ar.core.Config
+import com.spaceview.app.common.ar.ArSessionHost
+import com.spaceview.ar.ArFrameListener
+import io.github.sceneview.ar.ARSceneScope
 import com.spaceview.ar.MeasureEvent
 import com.spaceview.ar.MeasureMode
 import com.spaceview.ar.MeasureSession
 import com.spaceview.engine.ReferenceObject
-import io.github.sceneview.ar.ARSceneView
 import kotlinx.coroutines.delay
 
 /**
@@ -210,35 +211,22 @@ internal sealed interface TransientMessage {
 private const val TRANSIENT_MS = 3000L
 
 /**
- * The camera with SceneView's ARCore session driven by [session], plus the dimension-line overlay
- * (drawn from [MeasureSession.overlay], never through Compose). Emits two full-size children into the
- * caller's Box. Shared by Measure and Scan.
+ * The camera with SceneView's ARCore session driven by [session] (through the shared [ArSessionHost]), plus the
+ * dimension-line overlay (drawn from [MeasureSession.overlay], never through Compose). Emits two full-size
+ * children into the caller's Box. Shared by Measure and Scan; Place adds its own listener after [session].
+ *
+ * @param extraListeners listeners called after [session] on every frame (must not change for this composable).
  */
 @Composable
-internal fun ArCameraView(session: MeasureSession, planeRenderer: Boolean, onSessionFailed: () -> Unit) {
-    ARSceneView(
-        modifier = Modifier.fillMaxSize(),
-        sessionCameraConfig = session::selectCameraConfig,
-        planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL,
-        depthMode = Config.DepthMode.DISABLED,
-        instantPlacementMode = Config.InstantPlacementMode.DISABLED,
-        sessionConfiguration = session::configureSession,
-        planeRenderer = planeRenderer,
-        // Nothing lit is rendered (lines are drawn by the overlay): skip the lights.
-        mainLightNode = null,
-        fillLightNode = null,
-        onSessionCreated = session::onSessionCreated,
-        onSessionResumed = session::onSessionResumed,
-        onSessionPaused = session::onSessionPaused,
-        onSessionFailure = { onSessionFailed() },
-        onSessionUpdated = session::onFrame,
-        onGestureListener = null,
-        // Permission and Google Play Services for AR were handled by ArGate.
-        permissionHandler = null,
-        cameraPermissionOverlay = null,
-        arCoreAvailabilityOverlay = null,
-        onARCoreAvailability = { if (it != null) onSessionFailed() },
-    )
+internal fun ArCameraView(
+    session: MeasureSession,
+    planeRenderer: Boolean,
+    onSessionFailed: () -> Unit,
+    extraListeners: List<ArFrameListener> = emptyList(),
+    content: (@Composable ARSceneScope.() -> Unit)? = null,
+) {
+    val listeners = remember(session, extraListeners) { listOf<ArFrameListener>(session) + extraListeners }
+    ArSessionHost(listeners = listeners, planeRenderer = planeRenderer, onSessionFailed = onSessionFailed, content = content)
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->

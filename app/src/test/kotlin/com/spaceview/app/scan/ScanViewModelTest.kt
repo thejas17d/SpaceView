@@ -137,6 +137,28 @@ class ScanViewModelTest {
         assertEquals(1, reported)
     }
 
+    /** P1 review MAJOR 3 (Builder B): the Free gallery cap at Save keeps the scan; Save works again after upgrading. */
+    @Test
+    fun galleryFullKeepsTheDraftAndSavesAfterUpgrade() {
+        var allowed = false
+        val v = atReview(ScanViewModel(SavedStateHandle(), flowOf(ScanSettings(loaded = true)), store, { "1.57.0" }, { reported++ }, canSave = { allowed }))
+        v.setLabel("Sofa table")
+        v.save("Frame")
+        val s = v.state.value
+        assertTrue(s.galleryFull)
+        assertFalse(s.saving)
+        assertEquals(ScanStep.REVIEW, s.step)
+        assertEquals("Sofa table", s.label)
+        assertTrue("values kept", s.values != null)
+        assertEquals("nothing stored", 0, store.saved.size)
+        assertEquals("not counted as a saved scan", 0, reported)
+        allowed = true // the user bought Pro and came back
+        v.save("Frame")
+        assertFalse(v.state.value.galleryFull)
+        assertEquals("Sofa table", store.saved.single().label)
+        assertEquals(1, reported)
+    }
+
     /** M3 review m4: Measure again / Back cannot start the camera while the save runs. */
     @Test
     fun remeasureAndBackAreIgnoredWhileSaving() {

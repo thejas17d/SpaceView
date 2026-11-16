@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- M4 Place in room (Builder A). Every key also lives in values-hi/strings_place.xml. -->
+<resources>
+    <string name="place_close">Close</string>
+    <string name="place_true_size">1:1 True size</string>
+    <string name="place_true_size_a11y">Shown at true size. The size is locked.</string>
+    <string name="place_mesh_label">Approximate 3D shape · measured size</string>
+    <string name="place_mesh_fallback">3D shape unavailable; showing the measured box</string>
+    <string name="place_loading">Opening the model…</string>
+    <string name="place_deleted">This item was deleted.</string>
+    <string name="place_failed">Couldn\'t open this item\'s 3D model. Your item is unchanged.</string>
+    <string name="place_back">Back</string>
+    <string name="place_retry">Try again</string>
+    <string name="place_session_failed">The camera couldn\'t start.</string>
+
+    <string name="place_target_floor">Floor</string>
+    <string name="place_target_table">Table</string>
+    <string name="place_target_wall">Wall</string>
+
+    <string name="place_hint_init">Move your phone slowly to scan the room.</string>
+    <string name="place_hint_searching_floor">Point at the floor and move your phone slowly.</string>
+    <string name="place_hint_searching_table">Point at the table top.</string>
+    <string name="place_hint_searching_wall">Point at the wall. Plain walls can take a while.</string>
+    <string name="place_hint_preview">Tap Place to put it here.</string>
+    <string name="place_hint_placed">Placed at true size. Nudge it with the arrows.</string>
+    <string name="place_hint_tracking_lost">Lost track of the room. Point back at where the item was.</string>
+    <string name="place_hint_restored">The app was restarted, so the item was picked up. Place it again.</string>
+
+    <string name="place_fallback_offer">No wall found. You can use the line where the wall meets the floor instead.</string>
+    <string name="place_fallback_use">Use the wall–floor line</string>
+    <string name="place_fallback_step0">Aim at one end of the line where the wall meets the floor, then tap +.</string>
+    <string name="place_fallback_step1">Now aim at the other end of the line and tap +.</string>
+    <string name="place_fallback_rejected">That line didn\'t work. Tap two points on the floor, at least 30 cm apart, right against the wall.</string>
+    <string name="place_fallback_not_floor">Aim at the floor, right where it meets the wall.</string>
+    <string name="place_fallback_add">Add a point on the wall–floor line</string>
+    <string name="place_cancel">Cancel</string>
+
+    <string name="place_action_place">Place</string>
+    <string name="place_action_move">Move</string>
+    <string name="place_action_rotate">Rotate 90°</string>
+    <string name="place_nudge_left">Move left 1 cm</string>
+    <string name="place_nudge_right">Move right 1 cm</string>
+    <string name="place_nudge_up">Move up 1 cm</string>
+    <string name="place_nudge_down">Move down 1 cm</string>
+    <string name="place_nudge_away">Move away 1 cm</string>
+    <string name="place_nudge_closer">Move closer 1 cm</string>
+    <string name="place_eye_level">Eye level (145 cm)</string>
+    <string name="place_height">Centre %1$s above the floor</string>
+    <string name="place_place_failed">Couldn\'t place it there. Try again.</string>
+
+    <string name="place_check_fit">Check the fit</string>
+    <string name="place_measure_gap">Gap</string>
+    <string name="place_measure_area">Space</string>
+    <string name="place_measure_hint_gap">Measure the gap: tap + at each side.</string>
+    <string name="place_measure_hint_area">Measure the space: tap + at three corners.</string>
+    <string name="place_use_measurement">Use this</string>
+    <string name="place_undo">Undo</string>
+    <string name="place_fit_clear">Clear</string>
+    <string name="place_fit_again">Measure again</string>
+
+    <string name="place_fit_fits">Fits, %1$s spare</string>
+    <string name="place_fit_tight">Tight: confirm with a tape</string>
+    <string name="place_fit_too_big">Too big by %1$s</string>
+    <string name="place_fit_band">Margin of error ± %1$s</string>
+    <string name="place_fit_typed">Using your typed size</string>
+    <string name="place_fit_width_only">Width checked; height not checked</string>
+    <string name="place_fit_rotated">Fits only if turned</string>
+    <string name="place_fit_bounding">Checked against the overall size</string>
+    <string name="place_fit_axis_width">Limited by the width</string>
+    <string name="place_fit_axis_height">Limited by the height</string>
+    <string name="place_fit_axis_depth">Limited by the depth</string>
+    <string name="place_fit_height_unchecked">Height not checked</string>
+    <string name="place_fit_before_pause">Space measured before the pause</string>
+    <string name="place_height_slider">Centre height above the floor</string>
+    <string name="place_fit_space">Space: %1$s</string>
+    <string name="place_amount_cm">%1$d cm</string>
+    <string name="place_amount_in">%1$d in</string>
+
+    <string name="gallery_kind_furniture">Furniture</string>
+</resources>

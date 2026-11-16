@@ -8,18 +8,10 @@ import androidx.activity.ComponentActivity
 import androidx.core.view.doOnPreDraw
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
-import com.google.android.gms.ads.AdError
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.FullScreenContentCallback
-import com.google.android.gms.ads.LoadAdError
-import com.google.android.gms.ads.MobileAds
-import com.google.android.gms.ads.RequestConfiguration
-import com.google.android.gms.ads.interstitial.InterstitialAd
-import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
-import com.google.android.ump.ConsentInformation
-import com.google.android.ump.ConsentRequestParameters
-import com.google.android.ump.UserMessagingPlatform
 import com.spaceview.app.BuildConfig
+import com.spaceview.app.appContainer
+import com.spaceview.app.pro.Entitlement
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,50 +23,88 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.lang.ref.WeakReference
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Owns consent (UMP), Mobile Ads start-up and the one interstitial.
+ * Owns consent (UMP), Mobile Ads start-up and the one interstitial. One instance per process, owned by
+ * [com.spaceview.app.AppContainer] (ADR-011); [get] returns it.
  *
- * Start-up order (docs/research/android-performance.md §5.2):
- *  1. the first frame is drawn ([startAfterFirstFrame]);
- *  2. UMP `requestConsentInfoUpdate` (every launch, once per process), consent form only where required;
- *  3. when `canRequestAds()`, `MobileAds.initialize` on [Dispatchers.IO], once per process.
+ * **Pro (ARCHITECTURE-v2 §4.6, fixes R4a).** Ads are switched off at the source:
+ * - nothing starts until the entitlement has **settled**: the first start-up check with Play has
+ *   finished (answered, or failed and fell back to the cache), capped at [SETTLE_WAIT_MS]. A 1 s
+ *   "not Unknown" wait is not enough: a stale or missing cache reads as Free while Play is still
+ *   answering, and AdMob can't be de-initialised once a Pro answer arrives (P1 review MAJOR 1);
+ * - for Pro, UMP and `MobileAds.initialize` never run, and [canShowAds] stays false, so every
+ *   [BannerAd] disappears and no interstitial is loaded or shown;
+ * - becoming Pro mid-session drops the loaded interstitial and any pending chance (the SDK can't be
+ *   de-initialised, but no further request goes out);
+ * - a lapse mid-session runs the normal start path (consent before the first request).
+ *
+ * Start-up order (docs/research/android-performance.md §5.2): first frame ([startAfterFirstFrame]) →
+ * entitlement known → UMP `requestConsentInfoUpdate` (once per process; the form only where required)
+ * → when `canRequestAds()`, `MobileAds.initialize` on a background thread, once per process.
  *
  * Placement (docs/research/ui-ux.md §5): banners only on non-camera screens ([BannerAd]); one
  * preloaded interstitial, shown **only** through [maybeShowAfterSave] and only when [AdPolicy]
  * allows it. If no ad is ready, nothing is shown and nothing waits.
  *
- * Interstitial flow after measuring ([MeasureVisitTracker], M2 review M6):
- *  1. navigation calls [onMeasureEntered] / [onMeasureLeaving] around each Measure visit and
- *     [onArScreenEntered] / [onArScreenLeft] around every AR/camera destination;
- *  2. [recordCompletedScan] marks the current visit as "saved";
- *  3. leaving a visit with a save arms one pending chance; leaving without a save never does;
- *  4. the next non-AR screen calls [onNonArScreenResumed] once it is RESUMED (navigation keeps a
- *     destination at STARTED until its transition has finished). That waits until no AR screen is
- *     composed, then asks [AdPolicy]. The ad therefore never opens over the camera.
- * Interstitials are only preloaded from non-AR screens, never while AR is in the foreground.
+ * Interstitial flow after measuring ([MeasureVisitTracker], M2 review M6; contract K2):
+ *  1. navigation calls [onMeasureEntered] / [onMeasureLeaving] around each Measure or Scan visit and
+ *     [onArScreenEntered] / [onArScreenLeft] around every AR/camera destination (Place included);
+ *  2. [recordCompletedScan] marks the current visit as "saved" (never called from Place);
+ *  3. leaving a visit with a save arms one pending chance; leaving without a save, or towards Place
+ *     ([onVisitLeftWithoutAd]), never does;
+ *  4. the next non-AR screen calls [onNonArScreenResumed] once it is RESUMED; that waits until no AR
+ *     screen is composed, then asks [AdPolicy]. The ad therefore never opens over the camera.
  *
  * Main-thread API: call everything from the main thread.
  */
 class AdsManager(
-    context: Context,
     val policy: AdPolicy,
+    private val sdk: AdsSdk,
+    private val entitlement: StateFlow<Entitlement>,
+    /** True once the entitlement has settled ([com.spaceview.app.pro.EntitlementRepository.settled]). */
+    private val settled: StateFlow<Boolean>,
     private val interstitialUnitId: String = BuildConfig.AD_INTERSTITIAL,
     /** Ad unit for [BannerAd]. */
     val bannerUnitId: String = BuildConfig.AD_BANNER,
+    private val clock: () -> Long = SystemClock::elapsedRealtime,
+    main: CoroutineDispatcher = Dispatchers.Main.immediate,
+    private val background: CoroutineDispatcher = Dispatchers.IO,
+    private val activityState: ActivityState = ActivityState.Platform,
+    private val log: (String) -> Unit = { Log.w(TAG, it) },
+    private val settleWaitMs: Long = SETTLE_WAIT_MS,
 ) {
-    private val appContext = context.applicationContext
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val consent: ConsentInformation by lazy { UserMessagingPlatform.getConsentInformation(appContext) }
+    /** Lifecycle questions about an [Activity], injectable for JVM tests. */
+    interface ActivityState {
+        fun isAlive(activity: Activity): Boolean
+
+        fun isResumed(activity: Activity): Boolean
+
+        object Platform : ActivityState {
+            override fun isAlive(activity: Activity): Boolean = !activity.isFinishing && !activity.isDestroyed
+
+            override fun isResumed(activity: Activity): Boolean =
+                isAlive(activity) &&
+                    (activity as? LifecycleOwner)?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) != false
+        }
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + main)
     private val sdkStarted = AtomicBoolean(false)
     private val consentRequested = AtomicBoolean(false)
     private val startScheduled = AtomicBoolean(false)
     @Volatile private var sdkInitialised = false
 
+    /** The entitlement is known and is not Pro. False while Unknown and for Pro. */
+    private var adsAllowed = false
+    private var entitlementJob: Job? = null
+    private var host: WeakReference<Activity>? = null
+
     private val _canShowAds = MutableStateFlow(false)
 
-    /** True once consent allows ad requests and the SDK has finished initialising. */
+    /** True once the user isn't Pro, consent allows ad requests and the SDK has finished initialising. */
     val canShowAds: StateFlow<Boolean> = _canShowAds.asStateFlow()
 
     private val _privacyOptionsRequired = MutableStateFlow(false)
@@ -82,103 +112,112 @@ class AdsManager(
     /** True when UMP says the user must be offered a privacy-options entry point (e.g. EEA/UK). */
     val privacyOptionsRequired: StateFlow<Boolean> = _privacyOptionsRequired.asStateFlow()
 
-    private var interstitial: InterstitialAd? = null
+    private var interstitial: AdsInterstitial? = null
     private var interstitialLoadedAt = 0L
     private var interstitialLoading = false
     private var showing = false
 
     /** "Saved this visit", the pending after-measure chance and AR-foreground tracking. */
-    private val visits = MeasureVisitTracker(clock = SystemClock::elapsedRealtime)
+    private val visits = MeasureVisitTracker(clock = clock)
     private val arForeground = MutableStateFlow(false)
     private var pendingShowJob: Job? = null
 
     /**
-     * Call from `MainActivity.onCreate` (after `setContent`). Defers all consent and SDK work until
-     * just after the first frame has been drawn, so ads never cost cold-start time.
+     * Call from `MainActivity.onCreate` (after `setContent`). Defers all ads work until just after the
+     * first frame has been drawn, so ads never cost cold-start time.
      */
     fun startAfterFirstFrame(activity: ComponentActivity) {
         if (!startScheduled.compareAndSet(false, true)) {
-            gatherConsent(activity)
+            start(activity)
             return
         }
         activity.window.decorView.doOnPreDraw { view ->
             // doOnPreDraw runs just before the first draw; post() lands just after it.
-            view.post { if (!activity.isFinishing && !activity.isDestroyed) gatherConsent(activity) }
+            view.post { if (activityState.isAlive(activity)) start(activity) }
         }
     }
 
-    /** UMP consent: once per process. Shows a consent form only where the law requires one. */
+    /**
+     * After the first frame: waits (≤ [settleWaitMs]) for the entitlement to settle, then follows it. Ads
+     * start only for non-Pro users; a later change of the entitlement switches ads off or on. A Free user's
+     * first ad comes a moment later; ads have no cold-start urgency.
+     */
+    fun start(activity: Activity) {
+        host = WeakReference(activity)
+        if (entitlementJob != null) {
+            if (adsAllowed) gatherConsent(activity)
+            return
+        }
+        entitlementJob = scope.launch {
+            withTimeoutOrNull(settleWaitMs) { settled.first { it } }
+            // Settled, or Play never answered within the cap: follow what is known; still Unknown = Free
+            // (§4.5 rule 5). A later Pro value still switches ads off.
+            onEntitlement(entitlement.value.takeUnless { it is Entitlement.Unknown } ?: Entitlement.Free)
+            entitlement.collect { if (it !is Entitlement.Unknown) onEntitlement(it) }
+        }
+    }
+
+    private fun onEntitlement(e: Entitlement) {
+        val allowed = e !is Entitlement.Pro
+        if (allowed == adsAllowed) return
+        adsAllowed = allowed
+        if (allowed) {
+            host?.get()?.takeIf { activityState.isAlive(it) }?.let { gatherConsent(it) } ?: startSdkIfAllowed()
+        } else {
+            // Pro: no further ad requests. A loaded ad and a pending after-save chance are dropped.
+            interstitial = null
+            pendingShowJob?.cancel()
+            pendingShowJob = null
+        }
+        updateCanShowAds()
+    }
+
+    /** UMP consent: once per process, and only when ads are allowed. Shows a form only where required. */
     fun gatherConsent(activity: Activity) {
+        if (!adsAllowed) return
         // A previous launch may already allow requests: start without waiting for the network.
         startSdkIfAllowed()
         if (!consentRequested.compareAndSet(false, true)) return
-        consent.requestConsentInfoUpdate(
-            activity,
-            ConsentRequestParameters.Builder().build(),
-            {
-                if (activity.isFinishing || activity.isDestroyed) {
-                    consentRequested.set(false)
-                    startSdkIfAllowed()
-                    return@requestConsentInfoUpdate
-                }
-                UserMessagingPlatform.loadAndShowConsentFormIfRequired(activity) { error ->
-                    if (error != null) Log.w(TAG, "Consent form: ${error.message}")
-                    updatePrivacyOptionsRequired()
-                    startSdkIfAllowed()
-                }
-            },
-            { error ->
-                // Offline or misconfigured: fall back to the consent stored by an earlier launch.
-                Log.w(TAG, "Consent update failed: ${error.message}")
-                consentRequested.set(false)
-                updatePrivacyOptionsRequired()
-                startSdkIfAllowed()
-            },
-        )
+        sdk.requestConsent(activity) { result ->
+            // Offline, misconfigured or the activity finished: ask again with the next activity.
+            if (result != ConsentResult.UPDATED) consentRequested.set(false)
+            updatePrivacyOptionsRequired()
+            startSdkIfAllowed()
+        }
     }
 
     /** Opens the UMP privacy-options form (Settings → Privacy options). [onDone] always runs. */
     fun showPrivacyOptions(activity: Activity, onDone: () -> Unit = {}) {
-        UserMessagingPlatform.showPrivacyOptionsForm(activity) { error ->
-            if (error != null) Log.w(TAG, "Privacy options: ${error.message}")
+        sdk.showPrivacyOptions(activity) {
             updatePrivacyOptionsRequired()
             // The user may have withdrawn consent; requests stay governed by canRequestAds().
-            if (!consent.canRequestAds()) {
-                interstitial = null
-                _canShowAds.value = false
-            } else {
-                startSdkIfAllowed()
-            }
+            if (!sdk.canRequestAds()) interstitial = null else startSdkIfAllowed()
+            updateCanShowAds()
             onDone()
         }
     }
 
     private fun updatePrivacyOptionsRequired() {
-        _privacyOptionsRequired.value =
-            consent.privacyOptionsRequirementStatus == ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
+        _privacyOptionsRequired.value = sdk.privacyOptionsRequired()
+    }
+
+    private fun updateCanShowAds() {
+        _canShowAds.value = adsAllowed && sdkInitialised && sdk.canRequestAds()
     }
 
     private fun startSdkIfAllowed() {
-        if (!consent.canRequestAds()) return
+        if (!adsAllowed || !sdk.canRequestAds()) return
         if (!sdkStarted.compareAndSet(false, true)) {
-            if (sdkInitialised) _canShowAds.value = true
+            updateCanShowAds()
             return
         }
         scope.launch {
-            withContext(Dispatchers.IO) {
-                // No mediation in v1: skip adapter start-up work.
-                MobileAds.disableMediationAdapterInitialization(appContext)
-                MobileAds.setRequestConfiguration(
-                    RequestConfiguration.Builder()
-                        .setMaxAdContentRating(RequestConfiguration.MAX_AD_CONTENT_RATING_PG)
-                        .build(),
-                )
-                MobileAds.initialize(appContext) {
+            withContext(background) {
+                sdk.initialize {
                     scope.launch {
-                        MobileAds.setAppMuted(true)
                         sdkInitialised = true
-                        _canShowAds.value = true
-                        if (policy.nextSaveMayShow()) preloadInterstitial()
+                        updateCanShowAds()
+                        if (_canShowAds.value && policy.nextSaveMayShow()) preloadInterstitial()
                     }
                 }
             }
@@ -186,42 +225,32 @@ class AdsManager(
     }
 
     /**
-     * Loads one interstitial if none is loaded or loading. Does nothing while an AR/camera screen is
-     * in the foreground (the ads WebView and network work would compete with tracking); the next
-     * non-AR screen to resume preloads instead ([onNonArScreenResumed]).
+     * Loads one interstitial if none is loaded or loading. Does nothing for Pro, or while an AR/camera
+     * screen is in the foreground (the ads WebView and network work would compete with tracking); the
+     * next non-AR screen to resume preloads instead ([onNonArScreenResumed]).
      */
     fun preloadInterstitial() {
         if (!_canShowAds.value || interstitialLoading || visits.arInForeground) return
         if (interstitial != null && !isStale()) return
         interstitial = null
         interstitialLoading = true
-        InterstitialAd.load(
-            appContext,
-            interstitialUnitId,
-            AdRequest.Builder().build(),
-            object : InterstitialAdLoadCallback() {
-                override fun onAdLoaded(ad: InterstitialAd) {
-                    interstitial = ad
-                    interstitialLoadedAt = SystemClock.elapsedRealtime()
-                    interstitialLoading = false
-                }
-
-                override fun onAdFailedToLoad(error: LoadAdError) {
-                    Log.i(TAG, "Interstitial not loaded: ${error.code}")
-                    interstitial = null
-                    interstitialLoading = false
-                }
-            },
-        )
+        sdk.loadInterstitial(interstitialUnitId) { ad ->
+            scope.launch {
+                interstitialLoading = false
+                // Pro may have started while it loaded: never keep an ad for a Pro user.
+                interstitial = ad?.takeIf { adsAllowed }
+                interstitialLoadedAt = clock()
+            }
+        }
     }
 
     /** Loaded interstitials expire after an hour; refresh a little earlier. */
-    private fun isStale(): Boolean = SystemClock.elapsedRealtime() - interstitialLoadedAt > MAX_AD_AGE_MS
+    private fun isStale(): Boolean = clock() - interstitialLoadedAt > MAX_AD_AGE_MS
 
     /**
      * Call exactly once when a scan or measurement has been saved successfully. Counts toward the
      * frequency cap and marks the current Measure visit as "saved". Never preloads: it runs on the
-     * AR screen.
+     * AR screen. Never call it from Place (contract K2).
      */
     fun recordCompletedScan() {
         visits.onScanSaved()
@@ -230,7 +259,7 @@ class AdsManager(
                 policy.recordCompletedScan()
             } catch (e: Exception) {
                 // Disk full or a corrupt counter file must not crash measuring; the cap just under-counts.
-                Log.w(TAG, "Could not record scan: ${e.message}")
+                log("Could not record scan: ${e.message}")
             }
         }
     }
@@ -247,7 +276,7 @@ class AdsManager(
      */
     fun onMeasureLeaving(key: String) {
         val eligible = visits.leaveMeasure(key)
-        if (BuildConfig.DEBUG) Log.d(TAG, "Leaving measure, saved this visit=$eligible")
+        if (BuildConfig.DEBUG) log("Leaving measure, saved this visit=$eligible")
     }
 
     /**
@@ -283,11 +312,12 @@ class AdsManager(
             scope.launch { preloadIfUseful() }
             return
         }
+        if (!adsAllowed) return
         pendingShowJob = scope.launch {
             // The destination is RESUMED once its transition has finished; the AR content leaves
             // composition in the same or the next frame. Wait for that, but only briefly.
             val arGone = withTimeoutOrNull(AR_EXIT_WAIT_MS) { arForeground.first { !it } } != null
-            if (!arGone || !activity.isResumedNow()) return@launch
+            if (!arGone || !activityState.isResumed(activity)) return@launch
             maybeShowAfterSave(activity, NextAction.BACK) { scope.launch { preloadIfUseful() } }
         }
     }
@@ -303,20 +333,16 @@ class AdsManager(
         val useful = try {
             policy.nextSaveMayShow() || policy.decide(NextAction.DONE) == AdDecision.SHOW
         } catch (e: Exception) {
-            Log.w(TAG, "Ad counters unreadable: ${e.message}")
+            log("Ad counters unreadable: ${e.message}")
             false
         }
         if (useful) preloadInterstitial()
     }
 
-    private fun Activity.isResumedNow(): Boolean =
-        !isFinishing && !isDestroyed &&
-            (this as? LifecycleOwner)?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) != false
-
     /**
-     * The **only** way an interstitial is shown. Shows the preloaded ad if [AdPolicy] allows it for
-     * [nextAction]; otherwise does nothing. [onContinue] runs exactly once: after the ad closes, or
-     * straight away when no ad is shown.
+     * The **only** way an interstitial is shown. Shows the preloaded ad if the user isn't Pro and
+     * [AdPolicy] allows it for [nextAction]; otherwise does nothing. [onContinue] runs exactly once:
+     * after the ad closes, or straight away when no ad is shown.
      *
      * Call only from a RESUMED non-AR screen after the user saved something and reached a natural
      * break (normally through [onNonArScreenResumed]). Never from a camera/AR screen, and never on
@@ -332,44 +358,37 @@ class AdsManager(
             val decision = try {
                 policy.decide(nextAction, screen)
             } catch (e: Exception) {
-                Log.w(TAG, "Ad counters unreadable: ${e.message}")
+                log("Ad counters unreadable: ${e.message}")
                 AdDecision.TOO_SOON
             }
             val ad = interstitial
-            val ready = ad != null && !isStale() && !showing && _canShowAds.value && activity.isResumedNow()
+            val ready = ad != null && adsAllowed && !isStale() && !showing && _canShowAds.value && activityState.isResumed(activity)
             if (decision != AdDecision.SHOW || !ready) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "No interstitial: $decision, ready=$ready")
+                if (BuildConfig.DEBUG) log("No interstitial: $decision, ready=$ready")
                 onContinue()
                 return@launch
             }
             interstitial = null
             showing = true
             val finished = AtomicBoolean(false)
-            fun finish() {
-                if (finished.compareAndSet(false, true)) {
-                    showing = false
-                    onContinue()
-                }
-            }
-            ad.fullScreenContentCallback = object : FullScreenContentCallback() {
-                override fun onAdShowedFullScreenContent() {
+            ad.show(
+                activity,
+                onShown = {
                     scope.launch {
                         try {
                             policy.recordInterstitialShown()
                         } catch (e: Exception) {
-                            Log.w(TAG, "Could not record interstitial: ${e.message}")
+                            log("Could not record interstitial: ${e.message}")
                         }
                     }
-                }
-
-                override fun onAdDismissedFullScreenContent() = finish()
-
-                override fun onAdFailedToShowFullScreenContent(error: AdError) {
-                    Log.w(TAG, "Interstitial failed to show: ${error.message}")
-                    finish()
-                }
-            }
-            ad.show(activity)
+                },
+                onClosed = {
+                    if (finished.compareAndSet(false, true)) {
+                        showing = false
+                        onContinue()
+                    }
+                },
+            )
         }
     }
 
@@ -380,15 +399,13 @@ class AdsManager(
         /** Longest wait for the AR destination to leave composition once the next screen is RESUMED. */
         private const val AR_EXIT_WAIT_MS = 1_500L
 
-        @Volatile private var instance: AdsManager? = null
+        /**
+         * Longest wait for the entitlement to settle before ads follow whatever is known. Above the billing
+         * connect timeout (10 s) plus a query, so a slow but working Play always answers first.
+         */
+        const val SETTLE_WAIT_MS = 12_000L
 
-        /** App-wide instance (manual DI). Cheap: touches no ads SDK until [startAfterFirstFrame]. */
-        fun get(context: Context): AdsManager =
-            instance ?: synchronized(this) {
-                instance ?: AdsManager(
-                    context,
-                    AdPolicy(DataStoreAdCounterStore.get(context)),
-                ).also { instance = it }
-            }
+        /** The app-wide instance, owned by the container. Cheap: touches no ads SDK until [start]. */
+        fun get(context: Context): AdsManager = context.appContainer.ads
     }
 }

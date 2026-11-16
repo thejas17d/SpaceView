@@ -25,7 +25,7 @@ import java.io.File
 import java.io.IOException
 
 /** In-memory DAO mirroring the SQL semantics the repository relies on. */
-private open class FakeGalleryDao : GalleryDao {
+internal open class FakeGalleryDao : GalleryDao {
     val rows = MutableStateFlow<List<GalleryItemEntity>>(emptyList())
     private var nextId = 1L
 
@@ -39,6 +39,9 @@ private open class FakeGalleryDao : GalleryDao {
         rows.map { l -> l.sortedWith(compareByDescending<GalleryItemEntity> { it.createdAt }.thenByDescending { it.id }) }
 
     override fun observe(id: Long): Flow<GalleryItemEntity?> = rows.map { l -> l.firstOrNull { it.id == id } }
+    override suspend fun count() = rows.value.size
+    override fun observeCount(): Flow<Int> = rows.map { it.size }
+    override suspend fun countModelKind(modelKind: String) = rows.value.count { it.modelKind == modelKind }
     override suspend fun get(id: Long) = rows.value.firstOrNull { it.id == id }
     override suspend fun allFileRefs() = rows.value.map { GalleryFileRefs(it.id, it.modelPath, it.photoPath, it.thumbnailPath) }
 
@@ -83,7 +86,7 @@ private open class FakeGalleryDao : GalleryDao {
 }
 
 /** Rolls back the fake DAO when the block throws (like a Room transaction). */
-private class FakeTransactions(private val dao: FakeGalleryDao) : GalleryTransactions {
+internal class FakeTransactions(private val dao: FakeGalleryDao) : GalleryTransactions {
     override suspend fun <R> run(block: suspend () -> R): R {
         val snapshot = dao.rows.value
         try {
@@ -700,7 +703,7 @@ class GalleryRepositoryTest {
 }
 
 /** Minimal GLB reader: the JSON chunk as text and the whole file for byte searches. */
-private class Glb(private val bytes: ByteArray) {
+internal class Glb(private val bytes: ByteArray) {
     val json: String
 
     init {

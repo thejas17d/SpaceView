@@ -40,6 +40,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.util.UUID
+import java.util.concurrent.ArrayBlockingQueue
 import kotlin.math.abs
 
 /**
@@ -154,16 +155,39 @@ class OverlayFrame {
  * fitting and the uncertainty maths run on a single background worker. UI state is published at
  * most every [PUBLISH_INTERVAL_MS].
  *
+ * Per-frame allocations (R3): [FrameSample]s come from a fixed pool; each carries its own point-cloud buffer
+ * and endpoint list, filled in place on main and returned to the pool by the worker (or by the channel when it
+ * drops an old sample). No `copyOf`, no snapshot list, no sample object per frame in steady state.
+ *
+ * It is the primary [ArFrameListener] of every AR host it is in (camera config, session configuration).
+ *
  * @param depthWanted user setting: use the Depth API when supported (off by default).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MeasureSession(
     initialMode: MeasureMode,
     private val depthWanted: Boolean,
-) {
+) : ArFrameListener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val worker = Dispatchers.Default.limitedParallelism(1)
-    private val frames = Channel<FrameSample>(capacity = 4, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** Free samples (main takes, worker / channel give back). Array-backed: offer and poll never allocate. */
+    private val samplePool = ArrayBlockingQueue<FrameSample>(SAMPLE_POOL).also { q -> repeat(SAMPLE_POOL) { q.offer(FrameSample()) } }
+    private val frames = Channel<FrameSample>(
+        capacity = 4,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        onUndeliveredElement = { samplePool.offer(it) },
+    )
+
+    override val requirements: ArRequirements = ArRequirements(depth = depthWanted, lights = false, planeRenderer = true)
+
+    /**
+     * The reticle hit of the frame being dispatched (main thread). Listeners after this one in the same
+     * [ArFrameDispatcher] read it instead of running a second `frame.hitTest` (S1, section 3.5). Null when not
+     * tracking.
+     */
+    internal var latestCentreHit: ArHit? = null
+        private set
 
     private val _state = MutableStateFlow(MeasureState(mode = initialMode))
     /** Throttled UI state. */
@@ -205,7 +229,7 @@ class MeasureSession(
     private var viewW = 0
     private var viewH = 0
     private var lastPointCloudTs = -1L
-    private val cloudBuffer = FloatArray(3 * MAX_CLOUD_POINTS)
+    private val cloudTs = LongArray(1)
     private val viewMatrix = FloatArray(16)
     private val projMatrix = FloatArray(16)
     private var lastPlaneHit: ArHit? = null
@@ -273,10 +297,10 @@ class MeasureSession(
     // ---- SceneView callbacks ----------------------------------------------------------------------
 
     /** `sessionCameraConfig` selector. */
-    fun selectCameraConfig(session: Session): CameraConfig = SessionSetup.selectCameraConfig(session, depthWanted)
+    override fun selectCameraConfig(session: Session): CameraConfig = SessionSetup.selectCameraConfig(session, depthWanted)
 
     /** `sessionConfiguration` callback. */
-    fun configureSession(session: Session, config: Config) {
+    override fun configureSession(session: Session, config: Config) {
         val caps = SessionSetup.detect(session, depthWanted)
         capabilities = caps
         SessionSetup.configure(config, caps.depthActive)
@@ -285,7 +309,7 @@ class MeasureSession(
     }
 
     @MainThread
-    fun onSessionCreated(session: Session) {
+    override fun onSessionCreated(session: Session) {
         if (closed) return
         // A new session has a new world frame: nothing from an earlier one carries over. Its anchors
         // were detached in onSessionPaused (or released by Session.close()); only drop references.
@@ -305,7 +329,7 @@ class MeasureSession(
     }
 
     @MainThread
-    fun onSessionResumed(session: Session) {
+    override fun onSessionResumed(session: Session) {
         if (closed) return
         this.session = session
         live = true
@@ -317,7 +341,7 @@ class MeasureSession(
      * its teardown executor: the last moment anchors may be detached (M2 review M5).
      */
     @MainThread
-    fun onSessionPaused(session: Session) {
+    override fun onSessionPaused(session: Session) {
         if (closed) return
         commitRequestedAtMs = -1L
         freezeRequested = false
@@ -346,7 +370,8 @@ class MeasureSession(
 
     /** `onSessionUpdated`: once per ARCore frame, main thread. */
     @MainThread
-    fun onFrame(session: Session, frame: Frame) {
+    override fun onFrame(session: Session, frame: Frame) {
+        latestCentreHit = null
         if (closed || viewW <= 0 || viewH <= 0) return
         this.session = session
         live = true // a frame means the session is running
@@ -364,9 +389,9 @@ class MeasureSession(
         val centreY = viewH / 2f
         val light = frame.lightEstimate.let { if (it.state == com.google.ar.core.LightEstimate.State.VALID) it.pixelIntensity else Float.NaN }
 
+        val sample = samplePool.poll() ?: FrameSample() // empty only if the worker stalls: never blocks main
         var hit: ArHit? = null
         var cloudCount = 0
-        var cloud: FloatArray? = null
         var depth: DepthPatch? = null
         if (tracking == CameraTracking.TRACKING) {
             // Camera-image intrinsics (fixed for the session's camera config): the aim error is
@@ -376,11 +401,12 @@ class MeasureSession(
                 updateViewScale()
             }
             hit = FrameReaders.centreHit(frame, centreX, centreY)
+            latestCentreHit = hit
             if (hit?.kind == HitKind.PLANE) lastPlaneHit = hit
-            FrameReaders.pointCloud(frame, lastPointCloudTs, cloudBuffer)?.let { (n, ts) ->
-                lastPointCloudTs = ts
+            val n = FrameReaders.pointCloud(frame, lastPointCloudTs, sample.cloud, cloudTs)
+            if (n >= 0) {
+                lastPointCloudTs = cloudTs[0]
                 cloudCount = n
-                cloud = cloudBuffer.copyOf(n * 3)
             }
             if (capabilities?.depthActive == true) depth = FrameReaders.depthPatch(frame, centreX, centreY)
         }
@@ -404,27 +430,25 @@ class MeasureSession(
         if (freezeRequested) captureFreeze(frame, vp, tracking)
         if (capture.isArmed) processFrontCapture(frame, cameraPose, tracking == CameraTracking.TRACKING && allTracking, !anyUnanchored)
 
-        val snapshot = if (endpoints.isEmpty()) emptyList() else ArrayList<EndpointData>(endpoints.size).also { l -> for (e in endpoints) l += e.data }
-        val sample = FrameSample(
-            timestampNs = frame.timestamp,
-            generation = generation,
-            tracking = tracking,
-            reason = reason,
-            cameraPose = cameraPose,
-            light = light,
-            centreRay = vp.centreRay(),
-            hit = hit?.let { HitSample(it.position, it.normal, it.kind, it.distance) },
-            cloud = cloud,
-            cloudCount = cloudCount,
-            depth = depth,
-            endpoints = snapshot,
-            pointsTracking = allTracking,
-            intrinsics = intrinsics,
-            viewPxPerImagePx = viewPxPerImagePx,
-            mode = mode,
-            frozen = frozenCapture != null,
-        )
-        frames.trySend(sample)
+        sample.timestampNs = frame.timestamp
+        sample.generation = generation
+        sample.tracking = tracking
+        sample.reason = reason
+        sample.cameraPose = cameraPose
+        sample.light = light
+        sample.centreRay = vp.centreRay()
+        sample.hit = hit?.let { HitSample(it.position, it.normal, it.kind, it.distance) }
+        sample.cloudCount = cloudCount
+        sample.depth = depth
+        sample.endpoints.clear()
+        for (i in endpoints.indices) sample.endpoints += endpoints[i].data
+        sample.pointsTracking = allTracking
+        sample.intrinsics = intrinsics
+        sample.viewPxPerImagePx = viewPxPerImagePx
+        sample.mode = mode
+        sample.frozen = frozenCapture != null
+        // DROP_OLDEST: a dropped sample goes back to the pool through onUndeliveredElement.
+        if (frames.trySend(sample).isFailure) samplePool.offer(sample)
 
         overlay.projection = vp
         overlay.points.clear()
@@ -850,86 +874,92 @@ class MeasureSession(
         var lowLightSeen = false
 
         for (s in frames) {
-            val gateResult = gate.update(s.timestampNs, s.tracking, s.reason, s.cameraPose, s.light)
-            if (s.endpoints.isEmpty()) lowLightSeen = false
-            if (gateResult.lowLight) lowLightSeen = true
-            val tracked = gateResult.sampleQuality != TrackingQuality.NOT_TRACKING
+            try {
+                val gateResult = gate.update(s.timestampNs, s.tracking, s.reason, s.cameraPose, s.light)
+                if (s.endpoints.isEmpty()) lowLightSeen = false
+                if (gateResult.lowLight) lowLightSeen = true
+                val tracked = gateResult.sampleQuality != TrackingQuality.NOT_TRACKING
 
-            // Raw 3-D points for our own plane fit, pre-filtered to a cone around the reticle ray.
-            val ray = s.centreRay
-            val cloud = s.cloud
-            if (cloud != null && s.cloudCount > 0) surface.addPoints(cloud, s.cloudCount, s.timestampNs, ray)
-            s.depth?.let { patch ->
-                val n = patch.toWorldPoints(depthPoints)
-                if (n > 0) surface.addPoints(depthPoints, n, s.timestampNs, ray)
-            }
-
-            val chosen = if (tracked && ray != null) {
-                SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs)
-            } else {
-                null
-            }
-            val range = chosen?.range ?: 0.0
-            val loc = s.intrinsics?.let { AimModel.aim(range, it, s.viewPxPerImagePx) }
-            if (!s.frozen) {
-                // While the user works on a frozen still, tracking stays fresh but nothing is averaged.
-                // NOT_TRACKING resets the stabiliser even without a position (M2 review minor 4).
-                stabilizer.add(chosen?.position, range, gateResult.sampleQuality, loc)
-            }
-
-            val est = stabilizer.estimate
-            val liveData: EndpointData? = if (chosen != null) {
-                val normal = chosen.normal
-                val incidence = if (normal != null && ray != null) abs(normal dot ray.direction) else null
-                // The estimate already carries the aim term (engine-localised); a raw live point gets it here.
-                val point = est?.point ?: loc?.let { UncertainPoint(chosen.position).withLocalisation(it) } ?: UncertainPoint(chosen.position)
-                EndpointData(
-                    point, normal, chosen.kind, range, chosen.planeBiasRel, est?.spreadRms ?: 0.0, incidence,
-                    loc?.focalLengthPx ?: 0.0, loc?.pixelErrorPx ?: 0.0,
-                )
-            } else {
-                null
-            }
-            // Only a full-quality frame may offer a commit (never during the post-loss warm-up).
-            candidate = if (liveData != null && est != null && gateResult.sampleQuality == TrackingQuality.TRACKING) {
-                CommitCandidate(liveData, est.isStable, s.timestampNs, SystemClock.elapsedRealtimeNanos())
-            } else {
-                null
-            }
-
-            val now = SystemClock.elapsedRealtime()
-            val discreteChange = s.generation != lastGeneration || gateResult.status != lastStatus
-            if (!discreteChange && now - lastPublishMs < PUBLISH_INTERVAL_MS) continue
-            if (s.generation != generation) continue // the points changed since this frame: stale
-            lastPublishMs = now
-            lastGeneration = s.generation
-            lastStatus = gateResult.status
-
-            val complete = s.endpoints.size >= s.mode.requiredPoints
-            val reading = runCatching {
-                MeasurementComposer.compose(s.mode, s.endpoints, if (complete) null else liveData, model)
-            }.getOrNull()
-            val tip = if (complete && reading != null) MeasurementComposer.tipFor(reading, s.endpoints, lowLightSeen) else null
-            val stability = if (chosen == null) 0f else ((stabilizer.progress * 10).toInt() / 10f)
-            val locked = stabilizer.isLocked
-            // Merge only the worker-owned fields, and only while the points are still those of this frame.
-            _state.update { cur ->
-                if (s.generation != generation) {
-                    cur
-                } else {
-                    cur.copy(
-                        tracking = gateResult.status,
-                        hasSurface = chosen != null,
-                        surfaceKind = chosen?.kind,
-                        targetDistanceCm = if (chosen != null) (range * 100).toInt() else null,
-                        stability = stability,
-                        locked = locked,
-                        reading = reading,
-                        tip = tip,
-                        pointsTracking = s.pointsTracking,
-                        lowLight = gateResult.lowLight,
-                    )
+                // Raw 3-D points for our own plane fit, pre-filtered to a cone around the reticle ray.
+                val ray = s.centreRay
+                if (s.cloudCount > 0) surface.addPoints(s.cloud, s.cloudCount, s.timestampNs, ray)
+                s.depth?.let { patch ->
+                    val n = patch.toWorldPoints(depthPoints)
+                    if (n > 0) surface.addPoints(depthPoints, n, s.timestampNs, ray)
                 }
+
+                val chosen = if (tracked && ray != null) {
+                    SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs)
+                } else {
+                    null
+                }
+                val range = chosen?.range ?: 0.0
+                val loc = s.intrinsics?.let { AimModel.aim(range, it, s.viewPxPerImagePx) }
+                if (!s.frozen) {
+                    // While the user works on a frozen still, tracking stays fresh but nothing is averaged.
+                    // NOT_TRACKING resets the stabiliser even without a position (M2 review minor 4).
+                    stabilizer.add(chosen?.position, range, gateResult.sampleQuality, loc)
+                }
+
+                val est = stabilizer.estimate
+                val liveData: EndpointData? = if (chosen != null) {
+                    val normal = chosen.normal
+                    val incidence = if (normal != null && ray != null) abs(normal dot ray.direction) else null
+                    // The estimate already carries the aim term (engine-localised); a raw live point gets it here.
+                    val point = est?.point ?: loc?.let { UncertainPoint(chosen.position).withLocalisation(it) } ?: UncertainPoint(chosen.position)
+                    EndpointData(
+                        point, normal, chosen.kind, range, chosen.planeBiasRel, est?.spreadRms ?: 0.0, incidence,
+                        loc?.focalLengthPx ?: 0.0, loc?.pixelErrorPx ?: 0.0,
+                    )
+                } else {
+                    null
+                }
+                // Only a full-quality frame may offer a commit (never during the post-loss warm-up).
+                candidate = if (liveData != null && est != null && gateResult.sampleQuality == TrackingQuality.TRACKING) {
+                    CommitCandidate(liveData, est.isStable, s.timestampNs, SystemClock.elapsedRealtimeNanos())
+                } else {
+                    null
+                }
+
+                val now = SystemClock.elapsedRealtime()
+                val discreteChange = s.generation != lastGeneration || gateResult.status != lastStatus
+                if (!discreteChange && now - lastPublishMs < PUBLISH_INTERVAL_MS) continue
+                if (s.generation != generation) continue // the points changed since this frame: stale
+                lastPublishMs = now
+                lastGeneration = s.generation
+                lastStatus = gateResult.status
+
+                val complete = s.endpoints.size >= s.mode.requiredPoints
+                val reading = runCatching {
+                    MeasurementComposer.compose(s.mode, s.endpoints, if (complete) null else liveData, model)
+                }.getOrNull()
+                val tip = if (complete && reading != null) MeasurementComposer.tipFor(reading, s.endpoints, lowLightSeen) else null
+                val stability = if (chosen == null) 0f else ((stabilizer.progress * 10).toInt() / 10f)
+                val locked = stabilizer.isLocked
+                // Merge only the worker-owned fields, and only while the points are still those of this frame.
+                _state.update { cur ->
+                    if (s.generation != generation) {
+                        cur
+                    } else {
+                        cur.copy(
+                            tracking = gateResult.status,
+                            hasSurface = chosen != null,
+                            surfaceKind = chosen?.kind,
+                            targetDistanceCm = if (chosen != null) (range * 100).toInt() else null,
+                            stability = stability,
+                            locked = locked,
+                            reading = reading,
+                            tip = tip,
+                            pointsTracking = s.pointsTracking,
+                            lowLight = gateResult.lowLight,
+                        )
+                    }
+                }
+            } finally {
+                // Only now are the sample's buffers free again (main may refill it on the next frame).
+                s.depth = null
+                s.hit = null
+                samplePool.offer(s)
             }
         }
     }
@@ -956,25 +986,31 @@ class MeasureSession(
 
     private class CommitCandidate(val data: EndpointData, val locked: Boolean, val timestampNs: Long, val wallNs: Long)
 
-    private class FrameSample(
-        val timestampNs: Long,
-        val generation: Int,
-        val tracking: CameraTracking,
-        val reason: FailureReason,
-        val cameraPose: com.spaceview.engine.Pose,
-        val light: Float,
-        val centreRay: com.spaceview.engine.Ray?,
-        val hit: HitSample?,
-        val cloud: FloatArray?,
-        val cloudCount: Int,
-        val depth: DepthPatch?,
-        val endpoints: List<EndpointData>,
-        val pointsTracking: Boolean,
-        val intrinsics: ImageIntrinsics?,
-        val viewPxPerImagePx: Double,
-        val mode: MeasureMode,
-        val frozen: Boolean,
-    )
+    /**
+     * One frame's copied-out data, pooled (R3). Filled on main, read by the worker, then returned to
+     * [samplePool]; main never touches it while it is queued or being processed.
+     */
+    private class FrameSample {
+        var timestampNs = 0L
+        var generation = 0
+        var tracking = CameraTracking.STOPPED
+        var reason = FailureReason.NONE
+        var cameraPose: com.spaceview.engine.Pose = com.spaceview.engine.Pose(Vec3.ZERO)
+        var light = Float.NaN
+        var centreRay: com.spaceview.engine.Ray? = null
+        var hit: HitSample? = null
+
+        /** Point cloud, x, y, z per point; only the first [cloudCount] points are valid (0 = no new cloud). */
+        val cloud = FloatArray(3 * MAX_CLOUD_POINTS)
+        var cloudCount = 0
+        var depth: DepthPatch? = null
+        val endpoints = ArrayList<EndpointData>(4)
+        var pointsTracking = true
+        var intrinsics: ImageIntrinsics? = null
+        var viewPxPerImagePx = Double.POSITIVE_INFINITY
+        var mode = MeasureMode.DISTANCE
+        var frozen = false
+    }
 
     companion object {
         /** UI publish interval: ≤ 10 Hz. */
@@ -996,5 +1032,8 @@ class MeasureSession(
         private const val MAX_CLOUD_POINTS = 2048
         private const val MAX_DEPTH_POINTS = 1024
         private const val STILL_JPEG_QUALITY = 92
+
+        /** Samples in the pool: 4 queued + 1 in the worker + 1 being filled, plus slack. */
+        private const val SAMPLE_POOL = 8
     }
 }

@@ -90,6 +90,8 @@ data class ScanUiState(
     val savedId: Long? = null,
     val savedItem: GalleryItem? = null,
     val saveFailed: Boolean = false,
+    /** Save was refused by the Free gallery cap; the draft is kept (Upgrade / Share / Discard). */
+    val galleryFull: Boolean = false,
 ) {
     val shape: ScanShape? get() = kind?.let { ScanDraftBuilder.shapeFor(it) }
 
@@ -119,6 +121,11 @@ class ScanViewModel(
     private val store: ScanStore,
     private val arcoreVersion: () -> String?,
     private val onScanSaved: () -> Unit,
+    /**
+     * The Free gallery cap at Save (Builder B, P1 review MAJOR 3): false means "needs Pro". The scan is then
+     * kept on the Review screen, never dropped.
+     */
+    private val canSave: suspend () -> Boolean = { true },
 ) : ViewModel() {
 
     val settings: StateFlow<ScanSettings> = settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, ScanSettings())
@@ -236,9 +243,14 @@ class ScanViewModel(
         val kind = s.kind ?: return
         val values = s.values ?: return
         if (s.saving || s.savedId != null || s.photoBusy || !values.isSavable) return
-        setState { it.copy(saving = true, saveFailed = false) }
+        setState { it.copy(saving = true, saveFailed = false, galleryFull = false) }
         val draft = ScanDraftBuilder.draft(kind, values, frontJpeg, ScanDraftBuilder.label(s.label, suggestedLabel), s.tier, arcoreVersion())
         viewModelScope.launch {
+            if (!canSave()) {
+                // Gallery full on Free: keep everything (values, edits, name, photo) for Upgrade then Save.
+                setState { it.copy(saving = false, galleryFull = true) }
+                return@launch
+            }
             val id = try {
                 store.save(draft)
             } catch (e: CancellationException) {

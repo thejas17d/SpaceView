@@ -67,7 +67,8 @@ object ScanDraftBuilder {
 
     fun shapeFor(kind: ObjectKind): ScanShape = when (kind) {
         ObjectKind.FRAME, ObjectKind.TV -> ScanShape.FLAT
-        ObjectKind.APPLIANCE, ObjectKind.BOX, ObjectKind.OTHER -> ScanShape.BOX
+        // FURNITURE comes from templates, never from a scan; a box is its nearest shape.
+        ObjectKind.APPLIANCE, ObjectKind.BOX, ObjectKind.OTHER, ObjectKind.FURNITURE -> ScanShape.BOX
     }
 
     /** The typed default depth of a flat, wall-hung object; null when depth is measured. */

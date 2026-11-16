@@ -5,8 +5,14 @@ import com.spaceview.data.SpaceViewDatabase
 import com.spaceview.data.StorageLayout
 import com.spaceview.engine.BoxOrigin
 import com.spaceview.engine.DeviceTier
+import com.spaceview.engine.GLB_VERSION
+import com.spaceview.engine.GlbInfo
+import com.spaceview.engine.GlbReader
 import com.spaceview.engine.GlbWriter
 import com.spaceview.engine.Measurement
+import com.spaceview.engine.ModelKind
+import com.spaceview.engine.Palette
+import com.spaceview.engine.Part
 import com.spaceview.engine.Quality
 import com.spaceview.engine.Uncertainty
 import kotlinx.coroutines.CancellationException
@@ -27,6 +33,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.abs
 
 /**
  * A saved gallery item as the app sees it.
@@ -40,6 +47,12 @@ import java.util.concurrent.atomic.AtomicReference
  * @property photoFile rectified front photo (≤ 1024 px), null when the scan had none.
  * @property thumbnailFile 256 px WebP, null when the scan had no photo.
  * @property bytes total size of the item's files on disk.
+ * @property modelKind where the model's geometry came from (v3; legacy rows are PROXY_BOX).
+ * @property templateId / [templateParams] the furniture template (TEMPLATE only; params null if unreadable).
+ * @property meshExtents the scanned mesh's §7.1.5 measured extents and ± (meshes only); never the item's size.
+ * @property glbExtents the mesh GLB's own bounding box (meshes only; null for rows saved before it was stored).
+ * @property meshInfo JSON diagnostics of a mesh scan.
+ * @property captureMethod how the measured sides were captured (null = unknown or before v3).
  */
 data class GalleryItem(
     val id: Long,
@@ -62,6 +75,13 @@ data class GalleryItem(
     val measuredHeight: Dimension? = null,
     val measuredDepth: Dimension? = null,
     val calibrationFactor: Double? = null,
+    val modelKind: ModelKind = ModelKind.PROXY_BOX,
+    val templateId: String? = null,
+    val templateParams: Map<String, Double>? = null,
+    val meshExtents: MeshExtents? = null,
+    val glbExtents: GlbExtents? = null,
+    val meshInfo: String? = null,
+    val captureMethod: CaptureMethod? = null,
 ) {
     /** True if any dimension was typed or preset rather than measured. */
     val hasEstimates: Boolean get() = width.isEstimate || height.isEstimate || depth.isEstimate
@@ -86,8 +106,9 @@ interface GalleryTransactions {
 
 /**
  * AR Gallery storage: Room rows plus, per item, `filesDir/gallery/<id>/` with
- * - `model.glb` (`model-<time>.glb` after an edit): a true-size box (engine [GlbWriter]); front face textured
- *   with the photo, other faces neutral;
+ * - `model.glb` (`model-<time>.glb` after an edit or a regeneration): the true-size model (engine [GlbWriter]):
+ *   a proxy box (front face textured with the photo, other faces neutral) for scans, a multi-part model for
+ *   furniture templates ([saveTemplate]), or a mesh for 3D scans ([saveMesh]);
  * - `front.jpg`: the rectified front photo, long side ≤ 1024 px, JPEG q82;
  * - `thumb.webp`: 256 px lossy WebP.
  *
@@ -123,6 +144,8 @@ class GalleryRepository(
     private val cacheDir: File? = null,
     /** fsyncs a directory after a rename into it (no-op on the JVM; `Os.fsync` on Android). */
     private val syncDir: (File) -> Unit = {},
+    /** Rebuilds template parts for regeneration (Builder B's registry); [TemplateModelSource.NONE] = unknown. */
+    private val templates: TemplateModelSource = TemplateModelSource.NONE,
 ) {
     private val layout = StorageLayout(filesDir)
     private val writeLock = Mutex()
@@ -133,6 +156,22 @@ class GalleryRepository(
             .map<List<GalleryItemEntity>, List<GalleryItem>?> { rows -> rows.mapNotNull { it.toDomain() } }
             .flowOn(io)
             .catch { e -> if (e is CancellationException) throw e else emit(null) }
+
+    /**
+     * Number of saved items, for the Free gallery cap (Builder B, P1 review MAJOR 3). Throws if the gallery
+     * can't be read; the caller decides (the Pro gate lets the save through rather than block on our error).
+     */
+    suspend fun count(): Int = withContext(io) { dao.count() }
+
+    /** Live item count for the "18 / 20" counter; null when unreadable. Never throws. */
+    fun observeCount(): Flow<Int?> =
+        dao.observeCount()
+            .map<Int, Int?> { it }
+            .flowOn(io)
+            .catch { e -> if (e is CancellationException) throw e else emit(null) }
+
+    /** Saved on-device 3D scans (`model_kind = MESH_DEVICE`), for the Free cap of 3. Throws like [count]. */
+    suspend fun countDeviceScans(): Int = withContext(io) { dao.countModelKind(ModelKind.MESH_DEVICE.name) }
 
     /** One item (null when deleted or unreadable). Never throws. */
     fun observe(id: Long): Flow<GalleryItem?> =
@@ -161,52 +200,140 @@ class GalleryRepository(
         val d = normalised(draft.depth)
         for (dim in listOf(w, h, d)) validate(dim, forSave = true)
         val encoded = withContext(cpu) { encode(draft.kind, w, h, d, draft.label, draft.frontJpeg) }
-        return withContext(io) {
-            writeLock.withLock {
-                currentCoroutineContext().ensureActive()
-                withContext(NonCancellable) { commit(draft, w, h, d, encoded) }
-            }
+        val staged = Staged(encoded.glb, encoded.front?.takeIf { encoded.thumbnail != null }, encoded.thumbnail?.takeIf { encoded.front != null })
+        return commitLocked(staged) { now ->
+            baseRow(draft.kind, w, h, d, draft.quality, draft.calibrated, draft.calibrationFactor, draft.deviceTier, draft.arcoreVersion, draft.label, now)
+                .copy(modelKind = ModelKind.PROXY_BOX.name, captureMethod = draft.captureMethod?.name)
         }
     }
 
-    private suspend fun commit(draft: ScanDraft, w: Dimension, h: Dimension, d: Dimension, encoded: Encoded): Long {
+    /**
+     * Saves a furniture template item (contract K10) and returns its id. The GLB is `writeParts` of the draft's
+     * parts (BOTTOM_CENTER, `modelKind` TEMPLATE); there is no photo. Throws [IllegalArgumentException] for an
+     * invalid draft (dimensions, parameters, parts whose union box is not W×H×D to 0.1 mm) and [IOException] when
+     * nothing could be saved. Same atomicity and budget as [save].
+     */
+    suspend fun saveTemplate(draft: TemplateDraft): Long {
+        val w = normalised(draft.width)
+        val h = normalised(draft.height)
+        val d = normalised(draft.depth)
+        for (dim in listOf(w, h, d)) validate(dim, forSave = true)
+        require(draft.templateId.isNotBlank() && draft.templateId.length <= MAX_TEMPLATE_ID) { "Invalid template id" }
+        val params = TemplateParamsCodec.encode(draft.params)
+        val glb = withContext(cpu) {
+            GlbWriter.writeParts(draft.parts, draft.palette, BoxOrigin.BOTTOM_CENTER, displayName(ObjectKind.FURNITURE, draft.label), ModelKind.TEMPLATE)
+        }
+        val info = GlbReader.readInfo(glb)
+        require(info != null && matches(info, w.meters, h.meters, d.meters)) {
+            "Template parts span ${info?.widthM} x ${info?.heightM} x ${info?.depthM} m, not the item's W x H x D"
+        }
+        val quality = measuredQuality(w, h, d) ?: Quality.ROUGH
+        return commitLocked(Staged(glb, null, null)) { now ->
+            baseRow(ObjectKind.FURNITURE, w, h, d, quality, draft.calibrated, draft.calibrationFactor, draft.deviceTier, draft.arcoreVersion, draft.label, now)
+                .copy(
+                    modelKind = ModelKind.TEMPLATE.name,
+                    templateId = draft.templateId,
+                    templateParams = params,
+                    captureMethod = draft.captureMethod?.name,
+                )
+        }
+    }
+
+    /**
+     * Saves a 3D scan (contract K10) and returns its id. The row's W/H/D are the **measured box** (ADR-013); the
+     * §7.1.5 extents go to the `mesh_extent_*` columns and the GLB's own box to `mesh_glb_*`. The GLB must be a mesh
+     * written by `GlbWriter.writeMesh` (BOTTOM_CENTER, `modelKind` MESH_DEVICE or MESH_CLOUD) whose extras equal
+     * [MeshDraft.glbExtents] to 0.1 mm (M4 review MAJOR 2: not the §7.1.5 extents, which differ by the floor cut);
+     * the thumbnail is a 256 px WebP of [MeshDraft.thumbnailSource] (none if absent or undecodable). The whole item
+     * must fit [MAX_SCAN_BYTES] (the caller decimates to the budget, §7.1.7). Same atomicity as [save].
+     */
+    suspend fun saveMesh(draft: MeshDraft): Long {
+        val w = normalised(draft.width)
+        val h = normalised(draft.height)
+        val d = normalised(draft.depth)
+        for (dim in listOf(w, h, d)) validate(dim, forSave = true)
+        require(draft.modelKind == ModelKind.MESH_DEVICE || draft.modelKind == ModelKind.MESH_CLOUD) { "Not a mesh kind: ${draft.modelKind}" }
+        val e = draft.meshExtents
+        for (v in listOf(e.widthM, e.heightM, e.depthM)) require(isValidSide(v)) { "Mesh extents must be in [$MIN_SIDE_M, ${GlbWriter.MAX_SIDE_M}] m" }
+        for (v in listOf(e.widthBound95, e.heightBound95, e.depthBound95)) require(v.isFinite() && v >= 0) { "Mesh extent ± must be finite and >= 0" }
+        val g = draft.glbExtents
+        val info = GlbReader.readInfo(draft.glb)
+        require(info != null && info.modelKind == draft.modelKind && info.origin == BoxOrigin.BOTTOM_CENTER) { "Not a ${draft.modelKind} mesh GLB with origin BOTTOM_CENTER" }
+        require(matches(info, g.widthM, g.heightM, g.depthM)) { "Mesh GLB extras do not match glbExtents" }
+        require(draft.glb.size <= MAX_SCAN_BYTES) { "Mesh GLB is ${draft.glb.size} B, over the $MAX_SCAN_BYTES B budget" }
+        val thumb = draft.thumbnailSource?.let { src ->
+            withContext(cpu) {
+                try {
+                    thumbnailOf(src)
+                } catch (ex: CancellationException) {
+                    throw ex
+                } catch (ex: Exception) {
+                    null
+                }
+            }
+        }
+        return commitLocked(Staged(draft.glb, null, thumb)) { now ->
+            baseRow(draft.kind, w, h, d, draft.quality, draft.calibrated, draft.calibrationFactor, draft.deviceTier, draft.arcoreVersion, draft.label, now)
+                .copy(
+                    modelKind = draft.modelKind.name,
+                    meshExtentW = e.widthM, meshExtentH = e.heightM, meshExtentD = e.depthM,
+                    meshExtentWBound95 = e.widthBound95, meshExtentHBound95 = e.heightBound95, meshExtentDBound95 = e.depthBound95,
+                    meshGlbW = g.widthM, meshGlbH = g.heightM, meshGlbD = g.depthM,
+                    meshInfo = draft.meshInfo?.take(MAX_MESH_INFO),
+                    captureMethod = draft.captureMethod?.name,
+                )
+        }
+    }
+
+    /** The files of a new item: the model always, a photo and a thumbnail when present. */
+    private class Staged(val model: ByteArray, val photo: ByteArray?, val thumbnail: ByteArray?)
+
+    private fun baseRow(
+        kind: ObjectKind, w: Dimension, h: Dimension, d: Dimension, quality: Quality, calibrated: Boolean,
+        calibrationFactor: Double?, deviceTier: DeviceTier, arcoreVersion: String?, label: String?, now: Long,
+    ) = GalleryItemEntity(
+        kind = kind.name,
+        widthMeters = w.meters, widthBound95 = w.bound95, widthSource = w.source.name,
+        heightMeters = h.meters, heightBound95 = h.bound95, heightSource = h.source.name,
+        depthMeters = d.meters, depthBound95 = d.bound95, depthSource = d.source.name,
+        measuredWidthMeters = w.measuredOrNull()?.meters, measuredWidthBound95 = w.measuredOrNull()?.bound95,
+        measuredHeightMeters = h.measuredOrNull()?.meters, measuredHeightBound95 = h.measuredOrNull()?.bound95,
+        measuredDepthMeters = d.measuredOrNull()?.meters, measuredDepthBound95 = d.measuredOrNull()?.bound95,
+        quality = quality.name,
+        calibrated = calibrated,
+        calibrationFactor = calibrationFactor?.takeIf { it.isFinite() && it > 0 },
+        deviceTier = deviceTier.name,
+        arcoreVersion = arcoreVersion?.take(MAX_VERSION),
+        label = cleanLabel(label),
+        createdAt = now,
+        updatedAt = now,
+        modelPath = "",
+    )
+
+    /** Cancellation is honoured until the files are about to be committed; from then on the save completes. */
+    private suspend fun commitLocked(staged: Staged, row: (now: Long) -> GalleryItemEntity): Long = withContext(io) {
+        writeLock.withLock {
+            currentCoroutineContext().ensureActive()
+            withContext(NonCancellable) { commit(staged, row) }
+        }
+    }
+
+    private suspend fun commit(staged: Staged, row: (now: Long) -> GalleryItemEntity): Long {
         val galleryDir = layout.galleryDir
         if (!galleryDir.isDirectory && !galleryDir.mkdirs()) throw IOException("Cannot create $galleryDir")
         val stage = File(galleryDir, STAGING_PREFIX + UUID.randomUUID())
         val committedDir = AtomicReference<File?>(null)
         try {
             if (!stage.mkdir()) throw IOException("Cannot create $stage")
-            writeAtomic(File(stage, MODEL), encoded.glb)
-            if (encoded.front != null && encoded.thumbnail != null) {
-                writeAtomic(File(stage, PHOTO), encoded.front)
-                writeAtomic(File(stage, THUMB), encoded.thumbnail)
-            }
+            writeAtomic(File(stage, MODEL), staged.model)
+            staged.photo?.let { writeAtomic(File(stage, PHOTO), it) }
+            staged.thumbnail?.let { writeAtomic(File(stage, THUMB), it) }
             syncDir(stage)
             val bytes = dirBytes(stage)
             check(bytes <= MAX_SCAN_BYTES) { "Item is $bytes B, over the $MAX_SCAN_BYTES B budget" }
             val now = clock()
-            val hasPhoto = encoded.front != null
             return transactions.run {
-                val id = dao.insert(
-                    GalleryItemEntity(
-                        kind = draft.kind.name,
-                        widthMeters = w.meters, widthBound95 = w.bound95, widthSource = w.source.name,
-                        heightMeters = h.meters, heightBound95 = h.bound95, heightSource = h.source.name,
-                        depthMeters = d.meters, depthBound95 = d.bound95, depthSource = d.source.name,
-                        measuredWidthMeters = w.measuredOrNull()?.meters, measuredWidthBound95 = w.measuredOrNull()?.bound95,
-                        measuredHeightMeters = h.measuredOrNull()?.meters, measuredHeightBound95 = h.measuredOrNull()?.bound95,
-                        measuredDepthMeters = d.measuredOrNull()?.meters, measuredDepthBound95 = d.measuredOrNull()?.bound95,
-                        quality = draft.quality.name,
-                        calibrated = draft.calibrated,
-                        calibrationFactor = draft.calibrationFactor?.takeIf { it.isFinite() && it > 0 },
-                        deviceTier = draft.deviceTier.name,
-                        arcoreVersion = draft.arcoreVersion?.take(MAX_VERSION),
-                        label = cleanLabel(draft.label),
-                        createdAt = now,
-                        updatedAt = now,
-                        modelPath = "",
-                    ),
-                )
+                val id = dao.insert(row(now))
                 val dir = layout.itemDir(id.toString())
                 // An id can be handed out again after a rolled-back insert: anything there is an orphan.
                 if (dir.exists()) dir.deleteRecursively()
@@ -217,8 +344,8 @@ class GalleryRepository(
                 dao.setFiles(
                     id,
                     modelPath = relative(id, MODEL),
-                    photoPath = if (hasPhoto) relative(id, PHOTO) else null,
-                    thumbnailPath = if (hasPhoto) relative(id, THUMB) else null,
+                    photoPath = if (staged.photo != null) relative(id, PHOTO) else null,
+                    thumbnailPath = if (staged.thumbnail != null) relative(id, THUMB) else null,
                     totalBytes = bytes,
                 )
                 id
@@ -240,6 +367,10 @@ class GalleryRepository(
      * (± 0: typed values are shown without a ±) and the GLB is regenerated at the new size. The measured values
      * recorded at save time are kept. The badge can only stay or get worse (an edit never upgrades a measurement).
      * False for invalid values, a missing item or a storage failure; the item is then unchanged.
+     *
+     * By model kind: a proxy box is regenerated at the new size; a **mesh** keeps its model (it describes the scanned
+     * shape, never the item's size, ADR-013) and only the row changes; a **template** is not editable here (its
+     * size is a template parameter: re-open it in the furniture flow), so this returns false.
      */
     suspend fun updateDimensions(id: Long, widthM: Double? = null, heightM: Double? = null, depthM: Double? = null): Boolean {
         val edits = listOf(widthM, heightM, depthM)
@@ -249,11 +380,24 @@ class GalleryRepository(
                 guarded {
                     val row = dao.get(id) ?: return@guarded false
                     val item = row.toDomain() ?: return@guarded false
+                    if (item.modelKind == ModelKind.TEMPLATE) return@guarded false
                     val w = widthM?.let { Dimension.typed(it) } ?: item.width
                     val h = heightM?.let { Dimension.typed(it) } ?: item.height
                     val d = depthM?.let { Dimension.typed(it) } ?: item.depth
                     val measured = measuredQuality(w, h, d)
                     val quality = if (measured == null) item.quality else Quality.worst(item.quality, measured)
+                    if (!item.modelKind.regenerable) {
+                        return@guarded dao.setDimensions(
+                            id,
+                            w.meters, w.bound95, w.source.name,
+                            h.meters, h.bound95, h.source.name,
+                            d.meters, d.bound95, d.source.name,
+                            quality.name,
+                            row.modelPath,
+                            row.totalBytes,
+                            clock(),
+                        ) > 0
+                    }
                     val photo = item.photoFile?.takeIf { it.isFile }
                     val glb = withContext(cpu) { buildGlb(item.kind, w, h, d, photo?.readBytes(), item.label) }
                     val dir = layout.itemDir(id.toString())
@@ -373,10 +517,14 @@ class GalleryRepository(
         if (modelOk && photoOk && thumbOk) return false
         val row = dao.get(ref.id) ?: return false
         val item = row.toDomain() ?: return false
+        // Only a missing mesh: nothing can be repaired (placement shows the measured box instead).
+        if (!modelOk && !item.modelKind.regenerable && photoOk && thumbOk) return false
         val dir = layout.itemDir(ref.id.toString())
         if (!dir.isDirectory && !dir.mkdirs()) return false
         val keptPhoto = photo?.takeIf { it.isFile }
-        var keptThumb = thumb?.takeIf { it.isFile && keptPhoto != null }
+        // A scan's thumbnail is made from its photo; a 3D scan's comes from a keyframe and has no photo.
+        val thumbFromPhoto = item.modelKind.regenerable
+        var keptThumb = thumb?.takeIf { it.isFile && (keptPhoto != null || !thumbFromPhoto) }
         if (keptPhoto != null && keptThumb == null) {
             keptThumb = try {
                 withContext(cpu) { thumbnailOf(keptPhoto.readBytes()) }?.let { bytes -> File(dir, THUMB).also { writeAtomic(it, bytes) } }
@@ -386,22 +534,159 @@ class GalleryRepository(
                 null // the grid then shows the "No photo" placeholder; the photo itself is still there
             }
         }
-        if (keptPhoto == null) thumb?.delete()
+        if (keptPhoto == null && thumbFromPhoto) thumb?.delete()
         var modelFile = model?.takeIf { it.isFile }
         if (modelFile == null) {
-            val glb = withContext(cpu) { buildGlb(item.kind, item.width, item.height, item.depth, keptPhoto?.readBytes(), item.label) }
-            modelFile = File(dir, nextModelName(dir, model?.name ?: MODEL)).also { writeAtomic(it, glb) }
+            // A mesh is never regenerated (ADR-014): placement falls back to the measured box instead.
+            val glb = if (item.modelKind.regenerable) withContext(cpu) { regenerate(item, keptPhoto) } else null
+            modelFile = glb?.let { bytes -> File(dir, nextModelName(dir, model?.name ?: MODEL)).also { writeAtomic(it, bytes) } }
         }
         syncDir(dir)
         dao.setFiles(
             ref.id,
-            modelPath = relative(ref.id, modelFile.name),
+            modelPath = modelFile?.let { relative(ref.id, it.name) } ?: ref.modelPath,
             photoPath = keptPhoto?.let { relative(ref.id, it.name) },
             thumbnailPath = keptThumb?.let { relative(ref.id, it.name) },
-            totalBytes = modelFile.length() + (keptPhoto?.length() ?: 0L) + (keptThumb?.length() ?: 0L),
+            totalBytes = (modelFile?.length() ?: 0L) + (keptPhoto?.length() ?: 0L) + (keptThumb?.length() ?: 0L),
         )
         return true
     }
+
+    // ---- placement (M4, contract K4) ---------------------------------------------------------------
+
+    /**
+     * The model Place should render for item [id] (K4, K8), or null when the item is missing or unreadable.
+     * Reads only the GLB's header and JSON chunk (~3 KB).
+     * - **Proxy box / template:** the stored model is used when its extras match the row's W/H/D to 0.1 mm, it was
+     *   written for the expected origin, and `glbVersion >= GLB_VERSION`. Otherwise (a stale M3 model, a mismatch,
+     *   a missing file) it is regenerated once through the versioned-file path: new file, one UPDATE, then the old
+     *   file is deleted (NonCancellable, under the write lock). A template whose parts cannot be rebuilt
+     *   ([TemplateModelSource]) keeps a usable stored model, or falls back to a box of the row's size in the cache.
+     * - **Mesh:** never regenerated and never rescaled. A missing, unreadable or mismatched mesh (extras vs the
+     *   `mesh_glb_*` columns) falls back to a proxy box of the **measured** size written to the cache
+     *   ([PlacementModel.meshFallback]); the row is not touched.
+     * Runs on [io]; regeneration CPU work on [cpu]. Never throws (null on storage failure).
+     */
+    suspend fun modelForPlacement(id: Long): PlacementModel? = (placementModel(id) as? PlacementResult.Ready)?.model
+
+    /**
+     * As [modelForPlacement], but tells a missing item ([PlacementResult.Missing]) from a storage or decoding failure
+     * ([PlacementResult.Failed]: an unreadable row, a full disk during regeneration…), so Place never says "deleted"
+     * for an item that still exists (M4 review MINOR 5). Never throws except [CancellationException].
+     */
+    suspend fun placementModel(id: Long): PlacementResult = withContext(io) {
+        try {
+            val row = dao.get(id) ?: return@withContext PlacementResult.Missing
+            val item = row.toDomain() ?: return@withContext PlacementResult.Failed
+            val info = readInfo(item.modelFile)
+            val model = when {
+                usable(item, info) -> placement(item, item.modelFile, info!!, fallback = false)
+                item.modelKind.regenerable -> regenerateForPlacement(id)
+                else -> fallbackBox(item)
+            }
+            when {
+                model != null -> PlacementResult.Ready(model)
+                dao.get(id) == null -> PlacementResult.Missing // deleted meanwhile
+                else -> PlacementResult.Failed
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            PlacementResult.Failed
+        }
+    }
+
+    private fun readInfo(file: File): GlbInfo? =
+        file.takeIf { it.isFile }?.let { f -> runCatching { f.inputStream().use { GlbReader.readInfo(it) } }.getOrNull() }
+
+    /** True when [info] is a current, matching model for [item]. */
+    private fun usable(item: GalleryItem, info: GlbInfo?): Boolean {
+        if (info == null) return false
+        return when (item.modelKind) {
+            ModelKind.PROXY_BOX, ModelKind.TEMPLATE ->
+                info.glbVersion >= GLB_VERSION && info.origin == originOf(item) &&
+                    (info.modelKind ?: ModelKind.PROXY_BOX) == item.modelKind &&
+                    matches(info, item.width.meters, item.height.meters, item.depth.meters)
+            ModelKind.MESH_DEVICE, ModelKind.MESH_CLOUD -> {
+                val g = item.glbExtents
+                info.modelKind == item.modelKind && info.origin != null &&
+                    listOf(info.widthM, info.heightM, info.depthM).all { it > 0 && it <= GlbWriter.MAX_SIDE_M } &&
+                    (g == null || matches(info, g.widthM, g.heightM, g.depthM))
+            }
+        }
+    }
+
+    private suspend fun regenerateForPlacement(id: Long): PlacementModel? = writeLock.withLock {
+        // Re-read under the lock: another caller may have regenerated it meanwhile.
+        val row = dao.get(id) ?: return@withLock null
+        val item = row.toDomain() ?: return@withLock null
+        readInfo(item.modelFile)?.let { if (usable(item, it)) return@withLock placement(item, item.modelFile, it, fallback = false) }
+        val photo = item.photoFile?.takeIf { it.isFile }
+        val glb = withContext(cpu) { regenerate(item, photo) }
+            ?: return@withLock fallbackBox(item) // a template we cannot rebuild: show its measured box, row untouched
+        val dir = layout.itemDir(id.toString())
+        if (!dir.isDirectory && !dir.mkdirs()) throw IOException("Cannot create $dir")
+        val newModel = File(dir, nextModelName(dir, item.modelFile.name))
+        withContext(NonCancellable) {
+            try {
+                writeAtomic(newModel, glb)
+                syncDir(dir)
+                val thumb = item.thumbnailFile?.takeIf { it.isFile }
+                val bytes = newModel.length() + (photo?.length() ?: 0L) + (thumb?.length() ?: 0L)
+                // One statement: the row moves to the new model (photo and thumbnail unchanged).
+                dao.setFiles(id, relative(id, newModel.name), row.photoPath, row.thumbnailPath, bytes)
+                // Only now is the old model unreferenced (a failed delete is swept by cleanUp).
+                item.modelFile.takeIf { it != newModel }?.delete()
+            } catch (e: Throwable) {
+                newModel.delete()
+                throw e
+            }
+        }
+        val info = GlbReader.readInfo(glb) ?: return@withLock null
+        placement(item, newModel, info, fallback = false)
+    }
+
+    /** A box of the item's row size in `<cacheDir>/place/` (never under the item's directory, never in the row). */
+    private suspend fun fallbackBox(item: GalleryItem): PlacementModel? {
+        val glb = withContext(cpu) { buildGlb(item.kind, item.width, item.height, item.depth, null, item.label) }
+        val dir = File(cacheDir ?: File(filesDir, ".cache"), PLACE_DIR)
+        if (!dir.isDirectory && !dir.mkdirs()) return null
+        val file = File(dir, "${item.id}-box.glb")
+        writeAtomic(file, glb)
+        val info = GlbReader.readInfo(glb) ?: return null
+        return placement(item, file, info, fallback = true)
+    }
+
+    private fun placement(item: GalleryItem, file: File, info: GlbInfo, fallback: Boolean) = PlacementModel(
+        id = item.id,
+        file = file,
+        widthM = info.widthM,
+        heightM = info.heightM,
+        depthM = info.depthM,
+        origin = info.origin ?: originOf(item),
+        kind = item.kind,
+        width = item.width,
+        height = item.height,
+        depth = item.depth,
+        modelKind = item.modelKind,
+        meshFallback = fallback,
+        label = item.label,
+    )
+
+    /** A fresh model for a regenerable item, or null for a template whose parts are unknown. */
+    private fun regenerate(item: GalleryItem, photo: File?): ByteArray? = when (item.modelKind) {
+        ModelKind.TEMPLATE -> {
+            val parts = item.templateId?.let { id -> item.templateParams?.let { templates.parts(id, it) } }
+            parts?.let { buildTemplateGlb(it, item.label) }
+                ?.takeIf { glb -> GlbReader.readInfo(glb)?.let { matches(it, item.width.meters, item.height.meters, item.depth.meters) } == true }
+        }
+        ModelKind.PROXY_BOX -> buildGlb(item.kind, item.width, item.height, item.depth, photo?.readBytes(), item.label)
+        else -> null
+    }
+
+    private fun buildTemplateGlb(parts: List<Part>, label: String?): ByteArray? = runCatching {
+        GlbWriter.writeParts(parts, Palette.DEFAULT, BoxOrigin.BOTTOM_CENTER, displayName(ObjectKind.FURNITURE, label), ModelKind.TEMPLATE)
+    }.getOrNull()
 
     // ---- internals ------------------------------------------------------------------------------
 
@@ -473,9 +758,12 @@ class GalleryRepository(
             frontJpeg = frontJpeg,
             sideColorSrgb = SIDE_COLOR,
             frontColorSrgb = FRONT_COLOR,
-            origin = if (kind == ObjectKind.FRAME || kind == ObjectKind.TV) BoxOrigin.BACK_CENTER else BoxOrigin.BOTTOM_CENTER,
-            name = cleanLabel(label) ?: kind.name.lowercase().replaceFirstChar { it.uppercase() },
+            origin = originOf(kind),
+            name = displayName(kind, label),
+            modelKind = ModelKind.PROXY_BOX,
         )
+
+    private fun originOf(item: GalleryItem): BoxOrigin = if (item.modelKind == ModelKind.PROXY_BOX) originOf(item.kind) else BoxOrigin.BOTTOM_CENTER
 
     /**
      * Row → item. Unknown enum names (a later rename, a downgrade) fall back to the most cautious value instead of
@@ -503,8 +791,28 @@ class GalleryRepository(
             measuredHeight = measuredOf(measuredHeightMeters, measuredHeightBound95),
             measuredDepth = measuredOf(measuredDepthMeters, measuredDepthBound95),
             calibrationFactor = calibrationFactor,
+            modelKind = enumOr(modelKind, ModelKind.PROXY_BOX),
+            templateId = templateId,
+            templateParams = TemplateParamsCodec.decode(templateParams),
+            meshExtents = meshExtentsOf(),
+            glbExtents = glbExtentsOf(),
+            meshInfo = meshInfo,
+            captureMethod = captureMethod?.let { c -> CaptureMethod.entries.firstOrNull { it.name == c } },
         ).also { item -> listOf(item.width, item.height, item.depth).forEach { validate(it, forSave = false) } }
     }.getOrNull()
+
+    private fun GalleryItemEntity.meshExtentsOf(): MeshExtents? {
+        val w = meshExtentW; val h = meshExtentH; val d = meshExtentD
+        if (w == null || h == null || d == null || !isValidSide(w) || !isValidSide(h) || !isValidSide(d)) return null
+        fun b(x: Double?) = x?.takeIf { it.isFinite() && it >= 0 } ?: 0.0
+        return MeshExtents(w, h, d, b(meshExtentWBound95), b(meshExtentHBound95), b(meshExtentDBound95))
+    }
+
+    private fun GalleryItemEntity.glbExtentsOf(): GlbExtents? {
+        val w = meshGlbW; val h = meshGlbH; val d = meshGlbD
+        if (w == null || h == null || d == null || !(w > 0 && h > 0 && d > 0) || !isValidSide(w) || !isValidSide(h) || !isValidSide(d)) return null
+        return GlbExtents(w, h, d)
+    }
 
     /** A model file name in [dir] that is neither [current] nor an existing file: `model-<time>[-k].glb`. */
     private fun nextModelName(dir: File, current: String): String {
@@ -557,6 +865,22 @@ class GalleryRepository(
 
         const val MAX_LABEL = 80
         private const val MAX_VERSION = 40
+        private const val MAX_TEMPLATE_ID = 40
+        private const val MAX_MESH_INFO = 4000
+        private const val PLACE_DIR = "place"
+
+        /** GLB extras must match the row to this (m): 0.1 mm (§3.3). */
+        const val PLACEMENT_MATCH_M = 1e-4
+
+        internal fun matches(info: GlbInfo, w: Double, h: Double, d: Double): Boolean =
+            abs(info.widthM - w) <= PLACEMENT_MATCH_M && abs(info.heightM - h) <= PLACEMENT_MATCH_M && abs(info.depthM - d) <= PLACEMENT_MATCH_M
+
+        /** Wall items (FRAME, TV) hang from their back face; everything else stands on its bottom face. */
+        fun originOf(kind: ObjectKind): BoxOrigin =
+            if (kind == ObjectKind.FRAME || kind == ObjectKind.TV) BoxOrigin.BACK_CENTER else BoxOrigin.BOTTOM_CENTER
+
+        private fun displayName(kind: ObjectKind, label: String?): String =
+            cleanLabel(label) ?: kind.name.lowercase().replaceFirstChar { it.uppercase() }
 
         const val MODEL = "model.glb"
         const val PHOTO = "front.jpg"
@@ -645,7 +969,7 @@ class GalleryRepository(
          * Repository on the app's Room database (opened lazily) and `filesDir`. Call once per
          * process (AppContainer); Room types stay internal to `:data`.
          */
-        fun create(context: android.content.Context): GalleryRepository {
+        fun create(context: android.content.Context, templates: TemplateModelSource = TemplateModelSource.NONE): GalleryRepository {
             val app = context.applicationContext
             val db = SpaceViewDatabase.get(app)
             return GalleryRepository(
@@ -655,6 +979,7 @@ class GalleryRepository(
                 transactions = RoomGalleryTransactions(db),
                 cacheDir = app.cacheDir,
                 syncDir = ::fsyncDirectory,
+                templates = templates,
             )
         }
     }

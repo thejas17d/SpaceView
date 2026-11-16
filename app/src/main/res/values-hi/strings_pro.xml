@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hindi for values/strings_pro.xml. Needs native-speaker review before release (PLAN §9). -->
+<resources>
+    <string name="pro_title">SpaceView Pro</string>
+    <string name="pro_close">बंद करें</string>
+
+    <string name="pro_reason_no_ads">SpaceView बिना विज्ञापनों के इस्तेमाल करें।</string>
+    <string name="pro_reason_gallery">मुफ़्त गैलरी में %1$d चीज़ें सेव होती हैं। Pro में जितनी चाहें उतनी सेव करें। आपकी सेव की हुई कोई भी चीज़ कभी छिपाई या हटाई नहीं जाती।</string>
+    <string name="pro_reason_device_scan">आपने अपने %1$d मुफ़्त 3D स्कैन इस्तेमाल कर लिए हैं। Pro में बिना किसी सीमा के स्कैन करें। आपके सेव किए गए स्कैन आपके ही रहेंगे।</string>
+    <string name="pro_reason_templates">यह फ़र्नीचर टेम्पलेट Pro का हिस्सा है। सोफ़ा, बेड और अलमारी मुफ़्त रहेंगे।</string>
+    <string name="pro_reason_compare">मुफ़्त में एक बार में %1$d चीज़ों की तुलना होती है। Pro में जितनी चाहें उतनी चीज़ों की तुलना करें।</string>
+    <string name="pro_reason_export_glb">3D मॉडल एक्सपोर्ट करना Pro का हिस्सा है।</string>
+    <string name="pro_reason_export_pdf">PDF एक्सपोर्ट Pro का हिस्सा है।</string>
+
+    <string name="pro_benefits_title">Pro में</string>
+    <string name="pro_benefit_no_ads">कहीं कोई विज्ञापन नहीं</string>
+    <string name="pro_benefit_gallery">गैलरी में असीमित सेव</string>
+    <string name="pro_benefit_device_scan">असीमित 3D स्कैन</string>
+    <string name="pro_benefit_templates">सभी फ़र्नीचर टेम्पलेट</string>
+    <string name="pro_benefit_compare">कितनी भी चीज़ों की तुलना</string>
+    <string name="pro_benefit_export_glb">3D मॉडल (GLB) एक्सपोर्ट</string>
+    <string name="pro_benefit_export_pdf">नाप के साथ PDF एक्सपोर्ट</string>
+    <string name="pro_free_note">नापना, स्कैन करना, रखकर देखना और शेयर करना मुफ़्त रहेगा। Pro से सटीकता नहीं बदलती।</string>
+
+    <string name="pro_plan_yearly">सालाना</string>
+    <string name="pro_plan_monthly">मासिक</string>
+    <string name="pro_plan_pass">पास (अपने-आप रिन्यू नहीं होता)</string>
+    <string name="pro_price_recurring">%1$s / %2$s</string>
+    <string name="pro_price_once">%2$s के लिए %1$s</string>
+    <string name="pro_trial_badge">%1$s मुफ़्त</string>
+
+    <string name="pro_per_day">दिन</string>
+    <string name="pro_per_week">हफ़्ता</string>
+    <string name="pro_per_month">महीना</string>
+    <string name="pro_per_year">साल</string>
+    <string name="pro_every_day">हर दिन</string>
+    <string name="pro_every_week">हर हफ़्ते</string>
+    <string name="pro_every_month">हर महीने</string>
+    <string name="pro_every_year">हर साल</string>
+    <string name="pro_every_n">हर %1$s</string>
+    <plurals name="pro_periods_day">
+        <item quantity="one">%d दिन</item>
+        <item quantity="other">%d दिन</item>
+    </plurals>
+    <plurals name="pro_periods_week">
+        <item quantity="one">%d हफ़्ता</item>
+        <item quantity="other">%d हफ़्ते</item>
+    </plurals>
+    <plurals name="pro_periods_month">
+        <item quantity="one">%d महीना</item>
+        <item quantity="other">%d महीने</item>
+    </plurals>
+    <plurals name="pro_periods_year">
+        <item quantity="one">%d साल</item>
+        <item quantity="other">%d साल</item>
+    </plurals>
+
+    <string name="pro_terms_trial">%1$s मुफ़्त, फिर %3$s %2$s, जो आपके Google Play खाते से लिया जाएगा। जब तक आप रद्द नहीं करते, यह अपने-आप रिन्यू होता रहेगा। ट्रायल खत्म होने से पहले Google Play में कभी भी रद्द करें, तो आपसे कोई पैसा नहीं लिया जाएगा।</string>
+    <string name="pro_terms_renewing">%2$s %1$s, जो आपके Google Play खाते से लिया जाएगा। जब तक आप रद्द नहीं करते, यह अपने-आप रिन्यू होता रहेगा। Google Play में कभी भी रद्द करें; जिस अवधि का भुगतान हो चुका है, उसके खत्म होने तक Pro चालू रहेगा।</string>
+    <string name="pro_terms_prepaid">%2$s के लिए %1$s का एक ही भुगतान, जो आपके Google Play खाते से लिया जाएगा। यह अपने-आप रिन्यू नहीं होता: दोबारा न खरीदें तो %2$s बाद Pro बंद हो जाएगा।</string>
+
+    <string name="pro_cta_trial">%1$s का मुफ़्त ट्रायल शुरू करें</string>
+    <string name="pro_cta_subscribe">सब्सक्राइब करें</string>
+    <string name="pro_cta_pass">पास खरीदें</string>
+    <string name="pro_restore">खरीदारी वापस लाएँ</string>
+    <string name="pro_manage">सब्सक्रिप्शन मैनेज करें</string>
+
+    <string name="pro_loading">Google Play से कीमतें ली जा रही हैं…</string>
+    <string name="pro_problem_offline">Google Play से जुड़ नहीं पाए। अपना कनेक्शन जाँचें और फिर कोशिश करें।</string>
+    <string name="pro_problem_unavailable">इस डिवाइस पर खरीदारी उपलब्ध नहीं है (Play Store नहीं है या ब्लॉक है)।</string>
+    <string name="pro_problem_not_on_sale">Pro अभी खरीदा नहीं जा सकता। SpaceView की बाकी सभी सुविधाएँ पहले की तरह चलती रहेंगी।</string>
+    <string name="pro_problem_generic">Google Play में कोई दिक्कत आई। कृपया फिर कोशिश करें।</string>
+    <string name="pro_retry">फिर कोशिश करें</string>
+    <string name="pro_active_title">आपके पास Pro है</string>
+    <string name="pro_active_body">SpaceView का साथ देने के लिए धन्यवाद।</string>
+    <string name="pro_active_offline">Google Play ने आख़िरी बार %1$s को पुष्टि की। बिना कनेक्शन के Pro 7 दिन तक चालू रहता है।</string>
+    <string name="pro_done">हो गया</string>
+    <string name="pro_pending_title">भुगतान बाकी है</string>
+    <string name="pro_pending_body">भुगतान की पुष्टि होते ही Pro चालू हो जाएगा। UPI और नकद भुगतान में थोड़ा समय लग सकता है।</string>
+
+    <string name="pro_msg_restored">Pro वापस आ गया।</string>
+    <string name="pro_msg_nothing">इस Google खाते पर Pro की कोई खरीदारी नहीं मिली।</string>
+    <string name="pro_msg_restore_pending">Pro का एक भुगतान अभी बाकी है। पुष्टि होते ही Pro चालू हो जाएगा।</string>
+    <string name="pro_msg_restore_failed">Google Play से जाँच नहीं हो पाई। अपना कनेक्शन जाँचें और फिर कोशिश करें।</string>
+    <string name="pro_msg_purchase_failed">खरीदारी पूरी नहीं हुई। कृपया फिर कोशिश करें।</string>
+
+    <string name="pro_settings_section">SpaceView Pro</string>
+    <string name="pro_status_free">मुफ़्त प्लान</string>
+    <string name="pro_status_free_detail">बिना विज्ञापन और असीमित सेव के लिए Pro लें</string>
+    <string name="pro_status_pro">Pro चालू है</string>
+    <string name="pro_status_renewing">अपने-आप रिन्यू होता है। Google Play में मैनेज करें या रद्द करें।</string>
+    <string name="pro_status_not_renewing">रिन्यू नहीं होगा। भुगतान की अवधि खत्म होने पर Pro बंद हो जाएगा।</string>
+    <string name="pro_status_grace">ऑफ़लाइन। आख़िरी पुष्टि %1$s को।</string>
+    <string name="pro_status_pending">भुगतान बाकी है</string>
+    <string name="pro_status_pending_detail">भुगतान की पुष्टि होने पर Pro चालू होगा</string>
+    <string name="pro_status_checking">Google Play से जाँच हो रही है…</string>
+    <string name="pro_restore_detail">ऐप दोबारा इंस्टॉल करने के बाद, या उसी Google खाते वाले नए फ़ोन पर</string>
+    <string name="pro_manage_detail">Google Play में अपना प्लान बदलें या रद्द करें</string>
+
+    <string name="pro_gallery_full_title">गैलरी भर गई है</string>
+    <string name="pro_gallery_full_body">मुफ़्त गैलरी में %1$d चीज़ें सेव होती हैं। आपका स्कैन अभी यहीं है: इसे सेव करने के लिए Pro लें, इसके नाप शेयर करें, या इसे हटा दें। आपकी सेव की हुई चीज़ों पर कोई असर नहीं पड़ता।</string>
+    <string name="pro_gallery_full_upgrade">सेव करने के लिए Pro लें</string>
+    <string name="pro_gallery_full_share">नाप शेयर करें</string>
+    <string name="pro_gallery_full_discard">हटाएँ</string>
+    <string name="pro_gallery_full_discard_title">यह स्कैन हटाएँ?</string>
+    <string name="pro_keep">रखें</string>
+</resources>

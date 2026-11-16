@@ -13,7 +13,11 @@ class FitVerdictTest {
         val r = FitVerdict.evaluate(m(1.00, 0.02), m(1.10, 0.02))
         assertEquals(Fit.FITS, r.fit)
         assertEquals(0.10, r.clearance.value, 1e-12)
-        assertEquals(sqrt(2.0) * 0.02, r.clearance.bound95, 1e-12)
+        // Linear sum by default (D6): 2 cm + 2 cm.
+        assertEquals(0.04, r.clearance.bound95, 1e-12)
+        // RSS only as an explicit opt-in.
+        val rss = FitVerdict.evaluate(m(1.00, 0.02), m(1.10, 0.02), FitPolicy(combination = UncertaintyCombination.RSS))
+        assertEquals(sqrt(2.0) * 0.02, rss.clearance.bound95, 1e-12)
         assertFalse(r.rotated)
     }
 
@@ -24,7 +28,7 @@ class FitVerdictTest {
     }
 
     @Test fun withinUncertaintyIsTight() {
-        // 1 cm spare but ±2.8 cm combined: cannot promise.
+        // 1 cm spare but ±4 cm combined: cannot promise.
         assertEquals(Fit.TIGHT, FitVerdict.evaluate(m(1.00, 0.02), m(1.01, 0.02)).fit)
         // 1 cm too big, same uncertainty: also tight, not a hard "no".
         assertEquals(Fit.TIGHT, FitVerdict.evaluate(m(1.01, 0.02), m(1.00, 0.02)).fit)

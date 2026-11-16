@@ -129,5 +129,104 @@ Install `builds/SpaceView-M3-debug.apk` **over** the M2-final APK, without unins
 15. History rows saved from Measure now carry the ARCore version, device tier, calibration factor and raw length (check in the database).
 16. If a USB phone with debugging is available, run `~/.android-toolchain/g.sh :data:connectedDebugAndroidTest`, which runs the Room migration test.
 
+## 17. Pro and billing (P1; internal track with licence testers)
+
+**Release gate (must pass before promoting any build with real products)**
+
+1. **The licence key is this app's (P1 review MINOR 5):** a licence tester buys `pro` / `monthly` on the internal track and Pro turns on within seconds. The build only checks that `PLAY_LICENSE_KEY` parses as a 2048-bit RSA key; a key from another app would charge testers, never grant Pro, and Play would refund after 3 days.
+2. Restore after a reinstall gives Pro; a second Google account on the same phone gets no Pro.
+
+**Purchases**
+
+3. Monthly; yearly with the 7-day trial (new account only); the 30-day pass.
+4. Slow test card: pending, then approved, unlocks Pro. A declined card leaves Free. Cancelling Play's sheet is silent.
+5. Cancel the subscription in Play: Pro stays until the period ends. Refund from Play Console: Free at the next start.
+
+**Ads and Pro (P1 review MAJOR 1)**
+
+6. A Pro user never sees the UMP consent form or an ad, including: a cold start after 8+ days away, a fresh reinstall, and a slow network (Play answering after several seconds). Check in `adb logcat` that `MobileAds` never initialises.
+7. Buying Pro removes the History/Gallery banner at once; no interstitial after the next save.
+
+**Gallery cap (P1 review MAJOR 3)**
+
+8. Free with 20 items: "Scan object" (Home and Gallery) opens the paywall *before* the camera. With Pro the scan starts.
+9. Free, reaching 20 between starting a scan and Save (e.g. Pro lapsed meanwhile): Save shows "Gallery full" with the scan still on screen. Share sizes works; Get Pro, buy, come back, Save stores it; Discard asks first.
+10. Lapsed Pro with 30+ items: every item still opens, places, shares and deletes.
+
+**Offline grace**
+
+11. Airplane mode within 7 days: still Pro. After 7 days of use offline: Free. Setting the clock back while offline does not bring Pro back (P1 review MAJOR 2).
+
+**UI**
+
+12. Hindi paywall. TalkBack on the Close button, plan radios and terms. At 200% font size the Close button stays visible while scrolling. Manage subscription opens Play.
+
+**Cold start**
+
+13. `am start -W` three times on a release build, before and after P1: no regression (no billing or ads object is built before the first frame).
+
+**Play Console: Data safety (P1 review MINOR 10; decide at submission)**
+
+- **Purchase history:** the app stores only a SHA-256 hash of the purchase token, on the device, excluded from backup and never sent anywhere by SpaceView. Google Play Billing handles the purchase itself.
+- **Diagnostics from SDKs:** Play Billing Library 9.1 brings `com.google.android.datatransport` (Firelog), which sends library diagnostics to Google. Check Google's current Play Billing Library data disclosure and declare what it lists, together with the AdMob and UMP rows.
+- **Permission:** `com.android.vending.BILLING` (install-time, no prompt).
+- Re-check the form whenever `ci/release-dependencies.txt` changes in `com.android.billingclient` or `com.google.android.datatransport`.
+
+## 18. M4 Place in room + 3D core (from `docs/reviews/M4-P1-gate.md` §7)
+
+Install the M4 APK **over M3**, without uninstalling, so the v2→v3 database upgrade gets tested.
+
+**Upgrade and data**
+1. **v2 → v3 upgrade (mandatory first):** install the M4 APK **over** M3 on a phone with several gallery items (TV, frame, box) and History rows.
+   - Every item still opens, shares and deletes, and History is intact.
+   - Placing each M3 item once regenerates its model, which happens silently. The item still opens after an app restart.
+
+**Place**
+
+2. **True scale:**
+   - Place a gallery item next to the real object, or a box you scanned next to the box itself. The outline matches within the item's ±.
+   - The "1:1 True size" chip is shown, and pinching never scales.
+3. **Surfaces:**
+   - Floor, table and wall.
+   - A frame or TV hangs flush and upright. A box stands on its bottom.
+   - Move, rotate (90° and twist) and 1 cm nudges behave from several viewing angles.
+4. **Plain wall fallback:**
+   - On a plain painted wall the fallback is offered after about 5 s. Two taps on the wall–floor line build the wall.
+   - Two taps on a table edge are rejected.
+   - **Repeat on a polished vitrified or marble tile floor (N1).** Note any wrongly rejected floor taps.
+5. **Eye level and slider:** the centre-height readout matches a tape within about 2 cm. The slider value survives "Don't keep activities".
+6. **Fit verdict:**
+   - Measure a gap about 3 cm wider than a measured item: the card reads Tight (linear band).
+   - Measure a gap 10 cm wider: Fits, quoting the smallest spare.
+   - A wall rectangle where only the width is too small: "Too big by X · width" (M4 MAJOR 1).
+   - A typed size shows "using your typed size".
+7. **A floor rectangle** shows "Height not checked".
+8. **Pause and process death:**
+   - Power button on Place: the item is picked up, and the space is labelled "measured before the pause".
+   - Under "Don't keep activities", the target, spin, height and space are restored with the restore note.
+9. **Errors:** delete the item while Place is open, in another task or via Back stack tricks. The screen says "deleted" and goes back, with no crash.
+10. **Rendering:** the photo face of a placed TV or frame matches the real colours (it is unlit). The sides are lit and not black.
+11. **Ads:**
+    - Saved → Place → Back → item → Back: no ad anywhere.
+    - Gallery item → Place → Back: no ad.
+    - Never an ad over the camera.
+12. **30 fps:** run `gfxinfo` on Place with a textured item placed, on the low-end and the mid-range phone. Frame time p95 must be ≤ 33 ms. Note any GC pauses in a trace (N5).
+13. **Hindi and TalkBack:** the Place screens in Hindi with nothing truncated. TalkBack reads the verdict card in full: verdict, amount, axis and notes.
+
+**3D core (spike, D milestone; depth phone)**
+
+14. **Carton 60×40×40 cm at about 0.7 m and about 1.5 m, 5 scans each.** Record the mesh-extent error against a tape and the ± (decision (a), R2).
+15. If a ToF phone is available, repeat item 14 with ToF depth. If not, record the depth source the phone used.
+16. **Memory, thermal and time:**
+    - 90 s capture from a cool start: peak extra PSS ≤ 40 MB (`dumpsys meminfo`).
+    - No SEVERE thermal state.
+    - Sofa processing ≤ 5 s.
+17. **Sofa about 5 cm from a wall:** no wall patch in the mesh, and D is not inflated (M4 MINOR 8).
+18. **Saved scan:**
+    - The item is ≤ 0.5 MB (Settings storage, or the app's files).
+    - It places standing on the floor at its measured footprint (bottom about 1 cm up).
+    - The Gallery shows "Approximate 3D shape · measured size".
+19. **Free caps:** with 3 saved 3D scans on Free, the next 3D scan opens the paywall **before** the camera. The 20-item cap behaves as in TESTING §17 items 8–10.
+
 ## Values to tune from results
 Aim error 2 px, motion gates, RANSAC limits, Good/Fair/Rough thresholds, device-tier ± floors (1 cm / 5 mm), calibration acceptance.

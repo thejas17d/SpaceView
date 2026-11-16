@@ -23,6 +23,14 @@ import androidx.room.PrimaryKey
  * @property modelPath the true-size GLB (versioned file name, e.g. `gallery/12/model-1730800000000.glb`);
  *   [photoPath] / [thumbnailPath] are null when the scan had no photo.
  * @property totalBytes bytes on disk of all of the item's files.
+ * @property modelKind engine `ModelKind` name (v3; legacy rows are `PROXY_BOX`).
+ * @property templateId / [templateParams] the furniture template and its parameters as JSON (TEMPLATE only).
+ * @property meshExtentW … [meshExtentDBound95] the scanned mesh's measured extents and 95% ± (meshes only, §7.1.5:
+ *   percentile spreads, height from the support plane). Shown beside the item's size; never used for it.
+ * @property meshGlbW / [meshGlbH] / [meshGlbD] the mesh GLB's own bounding box (its K8 extras), which differs from the
+ *   §7.1.5 extents (floor cut, percentile trim): placement checks the GLB against these (M4 review MAJOR 2).
+ * @property meshInfo JSON diagnostics of a mesh scan.
+ * @property captureMethod `CaptureMethod` name (NULL = before v3).
  */
 @Entity(tableName = "gallery_items", indices = [Index("created_at")])
 data class GalleryItemEntity(
@@ -55,4 +63,19 @@ data class GalleryItemEntity(
     @ColumnInfo(name = "photo_path") val photoPath: String? = null,
     @ColumnInfo(name = "thumbnail_path") val thumbnailPath: String? = null,
     @ColumnInfo(name = "total_bytes") val totalBytes: Long = 0,
+    // ---- v3 (ARCHITECTURE-v2 §9): one consolidated migration for the sprint. ----
+    @ColumnInfo(name = "model_kind", defaultValue = "'PROXY_BOX'") val modelKind: String = "PROXY_BOX",
+    @ColumnInfo(name = "template_id") val templateId: String? = null,
+    @ColumnInfo(name = "template_params") val templateParams: String? = null,
+    @ColumnInfo(name = "mesh_extent_w_m") val meshExtentW: Double? = null,
+    @ColumnInfo(name = "mesh_extent_h_m") val meshExtentH: Double? = null,
+    @ColumnInfo(name = "mesh_extent_d_m") val meshExtentD: Double? = null,
+    @ColumnInfo(name = "mesh_extent_w_bound95_m") val meshExtentWBound95: Double? = null,
+    @ColumnInfo(name = "mesh_extent_h_bound95_m") val meshExtentHBound95: Double? = null,
+    @ColumnInfo(name = "mesh_extent_d_bound95_m") val meshExtentDBound95: Double? = null,
+    @ColumnInfo(name = "mesh_glb_w_m") val meshGlbW: Double? = null,
+    @ColumnInfo(name = "mesh_glb_h_m") val meshGlbH: Double? = null,
+    @ColumnInfo(name = "mesh_glb_d_m") val meshGlbD: Double? = null,
+    @ColumnInfo(name = "mesh_info") val meshInfo: String? = null,
+    @ColumnInfo(name = "capture_method") val captureMethod: String? = null,
 )

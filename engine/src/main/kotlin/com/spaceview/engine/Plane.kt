@@ -120,6 +120,37 @@ class Plane(normal: Vec3, @JvmField val d: Double) {
             if (along.length < 0.01) return null
             return fromPointNormal(a, (along cross u).normalized())
         }
+
+        /** Shortest floor–wall line accepted by [verticalThroughFloorLine] (m). */
+        const val MIN_FLOOR_LINE_M = 0.30
+
+        /** Largest distance of a tapped point from the floor plane (m). */
+        const val MAX_OFF_FLOOR_M = 0.03
+
+        /** Steepest floor accepted (degrees from horizontal). */
+        const val MAX_FLOOR_TILT_DEG = 10.0
+
+        /**
+         * The M4 wall fallback (ui-ux §3.5, §3.4 step 3): the vertical plane through the line where a plain wall
+         * meets the [floor], from two tapped points [a] and [b] on that line. The normal is horizontal
+         * (perpendicular to the floor's normal) and faces [towards] (the camera), so the item's front looks into
+         * the room. Null when the floor is not horizontal (> [MAX_FLOOR_TILT_DEG]), the line is shorter than
+         * [MIN_FLOOR_LINE_M] after projecting onto the floor, or either point is more than [MAX_OFF_FLOOR_M] off
+         * the floor (a tap on furniture or the wall itself).
+         */
+        fun verticalThroughFloorLine(a: Vec3, b: Vec3, towards: Vec3, floor: Plane): Plane? {
+            if (!a.isFinite || !b.isFinite || !towards.isFinite) return null
+            if (floor.tiltFromHorizontalDeg() > MAX_FLOOR_TILT_DEG) return null
+            if (abs(floor.signedDistance(a)) > MAX_OFF_FLOOR_M || abs(floor.signedDistance(b)) > MAX_OFF_FLOOR_M) return null
+            val up = if (floor.normal dot Vec3.UP >= 0) floor.normal else -floor.normal
+            val pa = floor.project(a)
+            val along = floor.project(b) - pa
+            if (along.length < MIN_FLOOR_LINE_M) return null
+            val n = (along cross up).normalized()
+            val wall = fromPointNormal(pa, n)
+            // A viewpoint exactly on the wall gives no side; keep the computed orientation then.
+            return if (wall.signedDistance(towards) < 0) wall.flipped() else wall
+        }
     }
 }
 

@@ -36,14 +36,15 @@ jobs:
         # Explicit bash runs with -eo pipefail, so a failing command inside a pipe fails the step.
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      # Actions are pinned to commit SHAs (supply chain, ARCHITECTURE-v2 O5); the comment is the tag at pin time (2026-11-06).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
         with:
           distribution: temurin
           java-version: '21'
 
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
@@ -51,11 +52,15 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Unit tests, lint and debug build
+      # :data:testDebugUnitTest also runs SpaceViewMigrationTest (every Room migration, real SQLite, exported
+      # schemas) under Robolectric, so no device or emulator is needed (ARCHITECTURE-v2 R2 / ADR-008).
+      # :data:compileDebugAndroidTestKotlin keeps the same test compiling for on-device runs.
+      - name: Unit tests (incl. Room migrations), lint and debug build
         run: >-
           ./gradlew --stacktrace "-Dorg.gradle.jvmargs=$CI_GRADLE_JVMARGS"
           :engine:test :engine:koverVerify
           :ar:testDebugUnitTest :data:testDebugUnitTest :app:testDebugUnitTest
+          :data:compileDebugAndroidTestKotlin
           :ar:lintDebug :data:lintDebug :app:lintDebug
           :app:assembleDebug
 
@@ -89,11 +94,14 @@ jobs:
           ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID }}
           PRIVACY_POLICY_URL: ${{ secrets.PRIVACY_POLICY_URL }}
           SUPPORT_EMAIL: ${{ secrets.SUPPORT_EMAIL }}
+          # Play Console -> Monetisation setup -> Licensing (base64 RSA public key). Required on version tags.
+          PLAY_LICENSE_KEY: ${{ secrets.PLAY_LICENSE_KEY }}
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: 0.1.${{ github.run_number }}
           REQUIRE_RELEASE_CONFIG: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           if [ -z "$ADMOB_APP_ID" ]; then echo "::warning::AdMob secrets not set: the release build uses Google test ads."; fi
+          if [ -z "$PLAY_LICENSE_KEY" ]; then echo "::warning::PLAY_LICENSE_KEY not set: this release build refuses all purchases (Pro can't be bought)."; fi
           ./gradlew --stacktrace "-Dorg.gradle.jvmargs=$CI_GRADLE_JVMARGS" :app:lintRelease :app:assembleRelease :app:bundleRelease
 
       - name: R8 metadata (r8.json from the AAB)
@@ -184,14 +192,14 @@ jobs:
           fi
 
       - name: Upload debug APK
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: spaceview-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
       - name: Upload release APK, AAB and mapping
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: spaceview-release
           path: |
@@ -201,7 +209,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload R8 metadata
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: r8-metadata
           path: ${{ runner.temp }}/r8/
@@ -209,7 +217,7 @@ jobs:
 
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: reports
           path: |

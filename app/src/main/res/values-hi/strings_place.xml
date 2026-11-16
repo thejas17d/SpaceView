@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- M4 Place in room (Builder A). Machine-drafted Hindi: needs native review before release (PLAN §9). -->
+<resources>
+    <string name="place_close">बंद करें</string>
+    <string name="place_true_size">1:1 असली आकार</string>
+    <string name="place_true_size_a11y">असली आकार में दिखाया गया है। आकार लॉक है।</string>
+    <string name="place_mesh_label">अनुमानित 3D आकार · मापा गया साइज़</string>
+    <string name="place_mesh_fallback">3D आकार उपलब्ध नहीं है; मापा गया बॉक्स दिखाया जा रहा है</string>
+    <string name="place_loading">मॉडल खुल रहा है…</string>
+    <string name="place_deleted">यह आइटम हटा दिया गया है।</string>
+    <string name="place_failed">इस आइटम का 3D मॉडल नहीं खुल सका। आपका आइटम नहीं बदला है।</string>
+    <string name="place_back">वापस</string>
+    <string name="place_retry">फिर से कोशिश करें</string>
+    <string name="place_session_failed">कैमरा शुरू नहीं हो सका।</string>
+
+    <string name="place_target_floor">फ़र्श</string>
+    <string name="place_target_table">टेबल</string>
+    <string name="place_target_wall">दीवार</string>
+
+    <string name="place_hint_init">कमरे को स्कैन करने के लिए फ़ोन धीरे-धीरे घुमाएँ।</string>
+    <string name="place_hint_searching_floor">फ़र्श की ओर फ़ोन करें और धीरे-धीरे घुमाएँ।</string>
+    <string name="place_hint_searching_table">टेबल की ऊपरी सतह की ओर फ़ोन करें।</string>
+    <string name="place_hint_searching_wall">दीवार की ओर फ़ोन करें। सादी दीवार में थोड़ा समय लग सकता है।</string>
+    <string name="place_hint_preview">यहाँ रखने के लिए \'रखें\' दबाएँ।</string>
+    <string name="place_hint_placed">असली आकार में रखा गया। तीरों से इसे थोड़ा खिसकाएँ।</string>
+    <string name="place_hint_tracking_lost">कमरे का ट्रैक छूट गया। फ़ोन वापस उस जगह की ओर करें जहाँ आइटम था।</string>
+    <string name="place_hint_restored">ऐप फिर से शुरू हुआ, इसलिए आइटम हटा लिया गया। इसे फिर से रखें।</string>
+
+    <string name="place_fallback_offer">कोई दीवार नहीं मिली। इसकी जगह दीवार और फ़र्श के मिलने वाली रेखा का उपयोग कर सकते हैं।</string>
+    <string name="place_fallback_use">दीवार–फ़र्श रेखा का उपयोग करें</string>
+    <string name="place_fallback_step0">दीवार और फ़र्श के मिलने वाली रेखा के एक सिरे पर निशाना लगाएँ, फिर + दबाएँ।</string>
+    <string name="place_fallback_step1">अब रेखा के दूसरे सिरे पर निशाना लगाएँ और + दबाएँ।</string>
+    <string name="place_fallback_rejected">यह रेखा नहीं बनी। फ़र्श पर दीवार से सटे दो बिंदु दबाएँ, कम से कम 30 cm दूर।</string>
+    <string name="place_fallback_not_floor">फ़र्श पर ठीक वहाँ निशाना लगाएँ जहाँ वह दीवार से मिलता है।</string>
+    <string name="place_fallback_add">दीवार–फ़र्श रेखा पर बिंदु जोड़ें</string>
+    <string name="place_cancel">रद्द करें</string>
+
+    <string name="place_action_place">रखें</string>
+    <string name="place_action_move">हटाएँ</string>
+    <string name="place_action_rotate">90° घुमाएँ</string>
+    <string name="place_nudge_left">1 cm बाएँ</string>
+    <string name="place_nudge_right">1 cm दाएँ</string>
+    <string name="place_nudge_up">1 cm ऊपर</string>
+    <string name="place_nudge_down">1 cm नीचे</string>
+    <string name="place_nudge_away">1 cm दूर</string>
+    <string name="place_nudge_closer">1 cm पास</string>
+    <string name="place_eye_level">आँखों की ऊँचाई (145 cm)</string>
+    <string name="place_height">बीच का हिस्सा फ़र्श से %1$s ऊपर</string>
+    <string name="place_place_failed">वहाँ नहीं रखा जा सका। फिर से कोशिश करें।</string>
+
+    <string name="place_check_fit">फ़िट जाँचें</string>
+    <string name="place_measure_gap">खाली जगह</string>
+    <string name="place_measure_area">जगह</string>
+    <string name="place_measure_hint_gap">खाली जगह मापें: दोनों किनारों पर + दबाएँ।</string>
+    <string name="place_measure_hint_area">जगह मापें: तीन कोनों पर + दबाएँ।</string>
+    <string name="place_use_measurement">इसका उपयोग करें</string>
+    <string name="place_undo">पूर्ववत करें</string>
+    <string name="place_fit_clear">हटाएँ</string>
+    <string name="place_fit_again">फिर से मापें</string>
+
+    <string name="place_fit_fits">फ़िट होता है, %1$s बचता है</string>
+    <string name="place_fit_tight">तंग है: फ़ीते से जाँच लें</string>
+    <string name="place_fit_too_big">%1$s बड़ा है</string>
+    <string name="place_fit_band">त्रुटि की सीमा ± %1$s</string>
+    <string name="place_fit_typed">आपका टाइप किया हुआ साइज़ इस्तेमाल हुआ</string>
+    <string name="place_fit_width_only">चौड़ाई जाँची गई; ऊँचाई नहीं जाँची गई</string>
+    <string name="place_fit_rotated">घुमाने पर ही फ़िट होता है</string>
+    <string name="place_fit_bounding">कुल साइज़ से जाँचा गया</string>
+    <string name="place_fit_axis_width">चौड़ाई से सीमित</string>
+    <string name="place_fit_axis_height">ऊँचाई से सीमित</string>
+    <string name="place_fit_axis_depth">गहराई से सीमित</string>
+    <string name="place_fit_height_unchecked">ऊँचाई नहीं जाँची गई</string>
+    <string name="place_fit_before_pause">जगह रुकने से पहले मापी गई थी</string>
+    <string name="place_height_slider">फ़र्श से बीच के हिस्से की ऊँचाई</string>
+    <string name="place_fit_space">जगह: %1$s</string>
+    <string name="place_amount_cm">%1$d cm</string>
+    <string name="place_amount_in">%1$d in</string>
+
+    <string name="gallery_kind_furniture">फ़र्नीचर</string>
+</resources>

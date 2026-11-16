@@ -1,3 +1,8 @@
+import java.security.KeyFactory
+import java.security.interfaces.RSAPublicKey
+import java.security.spec.X509EncodedKeySpec
+import java.util.Base64
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -25,6 +30,24 @@ if (config("KEYSTORE_FILE") != null && missingKeystoreSecrets.isNotEmpty()) {
     throw GradleException("A release keystore is configured but ${missingKeystoreSecrets.joinToString(", ")} is missing")
 }
 
+// A non-empty but wrong PLAY_LICENSE_KEY would let users pay, fail every signature check and get refunded
+// after 3 days. Any build that is given a key must get a parsable one: base64 X.509 RSA, 2048+ bits (Play's
+// licence keys). That it is *this app's* key is checked by the release-gate licence-tester purchase
+// (docs/TESTING.md §17). P1 review MINOR 5.
+config("PLAY_LICENSE_KEY")?.let { key ->
+    val valid = runCatching {
+        val der = Base64.getDecoder().decode(key.filterNot(Char::isWhitespace))
+        val rsa = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(der)) as RSAPublicKey
+        rsa.modulus.bitLength() >= 2048
+    }.getOrDefault(false)
+    if (!valid) {
+        throw GradleException(
+            "PLAY_LICENSE_KEY is not a base64 X.509 RSA public key of 2048+ bits " +
+                "(copy it from Play Console > Monetisation setup > Licensing)",
+        )
+    }
+}
+
 // Store builds (CI sets REQUIRE_RELEASE_CONFIG=true on version tags) must never ship test ads,
 // a debug signature or a placeholder support address.
 if (config("REQUIRE_RELEASE_CONFIG") == "true") {
@@ -34,6 +57,8 @@ if (config("REQUIRE_RELEASE_CONFIG") == "true") {
         addAll(missingKeystoreSecrets)
         if (config("SUPPORT_EMAIL") == null) add("SUPPORT_EMAIL")
         if (config("PRIVACY_POLICY_URL") == null) add("PRIVACY_POLICY_URL")
+        // Without the Play licence key no purchase can be verified, so Pro could never be granted.
+        if (config("PLAY_LICENSE_KEY") == null) add("PLAY_LICENSE_KEY")
     }
     if (missing.isNotEmpty()) throw GradleException("Release build is missing: ${missing.joinToString(", ")}")
 }
@@ -51,6 +76,10 @@ android {
         versionName = config("VERSION_NAME") ?: "0.1.0"
         buildConfigField("String", "PRIVACY_POLICY_URL", "\"${config("PRIVACY_POLICY_URL") ?: ""}\"")
         buildConfigField("String", "SUPPORT_EMAIL", "\"${config("SUPPORT_EMAIL") ?: ""}\"")
+        // Play Console -> Monetisation setup -> Licensing: base64 RSA public key used by PurchaseVerifier
+        // (ADR-004). Not secret, but kept out of the public repo; a CI secret / gradle property. Blank =
+        // purchases refused (fail closed).
+        buildConfigField("String", "PLAY_LICENSE_KEY", "\"${config("PLAY_LICENSE_KEY")?.filterNot(Char::isWhitespace) ?: ""}\"")
 
         // ARCore is only certified on ARM phones. x86/x86_64 would only bloat the universal APK.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
@@ -81,6 +110,8 @@ android {
             buildConfigField("String", "AD_BANNER", "\"$testBannerId\"")
             buildConfigField("String", "AD_INTERSTITIAL", "\"$testInterstitialId\"")
             buildConfigField("boolean", "TEST_ADS", "true")
+            // Debug builds sell through FakeBillingGateway (no Play Console needed) unless -PFAKE_BILLING=false.
+            buildConfigField("boolean", "FAKE_BILLING", (config("FAKE_BILLING") != "false").toString())
         }
         release {
             // R8 full mode is the AGP default; never set android.enableR8.fullMode=false.
@@ -97,6 +128,8 @@ android {
             buildConfigField("String", "AD_BANNER", "\"${releaseAd("ADMOB_BANNER_ID", testBannerId)}\"")
             buildConfigField("String", "AD_INTERSTITIAL", "\"${releaseAd("ADMOB_INTERSTITIAL_ID", testInterstitialId)}\"")
             buildConfigField("boolean", "TEST_ADS", (!hasRealAds).toString())
+            // Release always uses Google Play Billing.
+            buildConfigField("boolean", "FAKE_BILLING", "false")
         }
     }
 
@@ -171,6 +204,11 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.play.services.ads)
     implementation(libs.ump)
+
+    // P1 (Builder B): Play Billing 9.1 (ARCHITECTURE-v2 §4); lifecycle-process for foreground refreshes
+    // (already on the release classpath through other AndroidX libraries; declared because it is used).
+    implementation(libs.billing.ktx)
+    implementation(libs.androidx.lifecycle.process)
 
     // M2 (Builder A): navigation host, ViewModels for the measure / history features.
     implementation(libs.androidx.navigation.compose)

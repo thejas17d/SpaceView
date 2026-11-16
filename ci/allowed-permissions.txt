@@ -4,4 +4,5 @@ android.permission.ACCESS_ADSERVICES_TOPICS
 android.permission.ACCESS_NETWORK_STATE
 android.permission.CAMERA
 android.permission.INTERNET
+com.android.vending.BILLING
 com.google.android.gms.permission.AD_ID

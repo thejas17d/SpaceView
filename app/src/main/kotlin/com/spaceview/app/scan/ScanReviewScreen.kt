@@ -47,6 +47,7 @@ import com.spaceview.app.common.AccuracyBadge
 import com.spaceview.app.common.InstrumentCard
 import com.spaceview.app.common.hintRes
 import com.spaceview.app.gallery.GalleryFormatter
+import com.spaceview.app.pro.GalleryFullCard
 import com.spaceview.app.gallery.labelRes
 import com.spaceview.app.measure.messageRes
 import com.spaceview.app.ui.theme.SpaceViewTheme
@@ -65,7 +66,14 @@ import com.spaceview.engine.Units
  * when Fair or Rough, and **Save to Gallery**. What is shown here is exactly what is saved.
  */
 @Composable
-internal fun ScanReviewScreen(state: ScanUiState, units: UnitPreference, vm: ScanViewModel, onRemeasure: () -> Unit) {
+internal fun ScanReviewScreen(
+    state: ScanUiState,
+    units: UnitPreference,
+    vm: ScanViewModel,
+    onRemeasure: () -> Unit,
+    onUpgrade: () -> Unit = {},
+    onDiscard: () -> Unit = {},
+) {
     val kind = state.kind ?: return
     val outline = state.outline
     val values = state.values
@@ -132,6 +140,17 @@ internal fun ScanReviewScreen(state: ScanUiState, units: UnitPreference, vm: Sca
                 modifier = Modifier.fillMaxWidth(),
             )
             if (state.saveFailed) Text(stringResource(R.string.scan_save_failed), color = MaterialTheme.colorScheme.error)
+            // Free gallery cap (Builder B): the scan stays here; Upgrade, Share or Discard.
+            if (state.galleryFull) {
+                GalleryFullCard(
+                    title = state.label ?: suggested,
+                    dims = listOf(values.width, values.height, values.depth).map { d ->
+                        Units.formatForContext(Measurement(d.meters, if (d.isEstimate) 0.0 else d.bound95 / Uncertainty.K95), ScanDraftBuilder.contextFor(kind), units).primary.text
+                    },
+                    onUpgrade = onUpgrade,
+                    onDiscard = onDiscard,
+                )
+            }
             if (!values.isSavable) Text(stringResource(R.string.scan_invalid_size), color = MaterialTheme.colorScheme.error)
             Button(
                 onClick = { vm.save(suggested) },

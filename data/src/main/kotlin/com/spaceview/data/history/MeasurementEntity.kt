@@ -45,4 +45,6 @@ data class MeasurementEntity(
     @ColumnInfo(name = "calibration_factor") val calibrationFactor: Double? = null,
     /** Primary length before calibration (m), so a later re-tune can recompute it. */
     @ColumnInfo(name = "raw_value_m") val rawValueMetres: Double? = null,
+    /** v3: `CaptureMethod` name (MANUAL / HANDS_FREE / AUTO_RECT / DEPTH_SCAN); NULL for rows saved before v3. */
+    @ColumnInfo(name = "capture_method") val captureMethod: String? = null,
 )

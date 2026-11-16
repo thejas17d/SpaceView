@@ -28,8 +28,9 @@ class AxisFit(val axis: Int, val itemAxis: Int, val clearance: Measurement, val 
  *
  * @property fit worst axis verdict.
  * @property axes per-axis detail in space-axis order.
- * @property limitingAxis axis with the least clearance (relative to its uncertainty) — what the UI quotes:
- *   "Fits, 6 cm to spare" / "Too big by 4 cm".
+ * @property limitingAxis the axis the UI quotes ("Fits, 6 cm to spare" / "Too big by 4 cm"), always one whose own
+ *   verdict equals [fit] (M4 review MAJOR 1): for TOO_BIG the largest overshoot (min c + z·σc), for FITS the
+ *   smallest spare (min c), for TIGHT the least pessimistic margin (min c − z·σc).
  * @property rotated true if the best orientation swaps item dimensions.
  */
 class FitResult(val fit: Fit, val axes: List<AxisFit>, val limitingAxis: AxisFit, val rotated: Boolean) {
@@ -55,10 +56,28 @@ enum class FitRotation {
 }
 
 /**
+ * How the item's and the space's uncertainties combine into the clearance's σc (ADR-002).
+ */
+enum class UncertaintyCombination {
+    /**
+     * σc = σs + σi: an upper bound for any correlation between the two errors (same phone, same IMU scale error,
+     * shared calibration). **The default** (decision D6, approved by the user): every user-facing Fits / Tight /
+     * Too big verdict uses it, so near the edge it says TIGHT rather than FITS.
+     */
+    LINEAR,
+
+    /**
+     * σc = √(σs² + σi²): assumes independent errors, so the band is narrower and says FITS more often. Explicit
+     * opt-in only (no caller uses it today); re-evaluate once the bench test shows the ± coverage (ADR-002).
+     */
+    RSS,
+}
+
+/**
  * Fit verdict between an item and a space, accounting for uncertainty on both.
  *
- * For each axis, clearance c = space − item and σc = √(σs² + σi²) (treated as independent, which is the
- * conservative choice when they were measured separately). With z = [z] (1.96 ≈ 95%):
+ * For each axis, clearance c = space − item and σc from [combination]: by default the linear sum σs + σi
+ * (ADR-002, decision D6), which bounds any correlation between the two errors. With z = [z] (1.96 ≈ 95%):
  * - FITS     if c − z·σc > [minClearance]
  * - TOO_BIG  if c + z·σc < [minClearance]
  * - TIGHT    otherwise (including exact equality with zero uncertainty).
@@ -72,6 +91,8 @@ class FitPolicy(
     val allowRotation: Boolean = false,
     /** Orientations tried. Defaults from [allowRotation] (false → NONE, true → ABOUT_VERTICAL). */
     val rotation: FitRotation = if (allowRotation) FitRotation.ABOUT_VERTICAL else FitRotation.NONE,
+    /** How item and space σ combine; LINEAR unless a caller explicitly opts into RSS. */
+    val combination: UncertaintyCombination = UncertaintyCombination.LINEAR,
 ) {
     init { require(z >= 0 && minClearance >= 0) }
 }
@@ -100,11 +121,11 @@ object FitVerdict {
         var bestScore = Double.NEGATIVE_INFINITY
         for (perm in perms) {
             val axes = space.indices.map { a -> axisFit(a, perm[a], item[perm[a]], space[a], policy) }
-            val limiting = axes.minBy { score(it, policy) }
             val worst = axes.maxOf { it.fit.ordinal }
-            val result = FitResult(Fit.entries[worst], axes, limiting, perm != identity)
-            // Rank: verdict first, then the limiting axis' normalised margin.
-            val s = -worst * 1e12 + score(limiting, policy)
+            val verdict = Fit.entries[worst]
+            val result = FitResult(verdict, axes, limitingOf(axes, verdict, policy), perm != identity)
+            // Rank: verdict first, then the most limiting pessimistic margin over all axes.
+            val s = -worst * 1e12 + axes.minOf { score(it, policy) }
             if (best == null || s > bestScore) { best = result; bestScore = s }
         }
         return best!!
@@ -116,13 +137,26 @@ object FitVerdict {
 
     private fun axisFit(axis: Int, itemAxis: Int, item: Measurement, space: Measurement, p: FitPolicy): AxisFit {
         val c = space.value - item.value
-        val s = sqrt(space.sigma * space.sigma + item.sigma * item.sigma)
+        val s = when (p.combination) {
+            UncertaintyCombination.LINEAR -> space.sigma + item.sigma
+            UncertaintyCombination.RSS -> sqrt(space.sigma * space.sigma + item.sigma * item.sigma)
+        }
         val fit = when {
             c - p.z * s > p.minClearance -> Fit.FITS
             c + p.z * s < p.minClearance -> Fit.TOO_BIG
             else -> Fit.TIGHT
         }
         return AxisFit(axis, itemAxis, Measurement(c, s), fit)
+    }
+
+    /** The quoted axis: among the axes whose verdict is [verdict], the one that best explains it. */
+    private fun limitingOf(axes: List<AxisFit>, verdict: Fit, p: FitPolicy): AxisFit {
+        val same = axes.filter { it.fit == verdict }
+        return when (verdict) {
+            Fit.TOO_BIG -> same.minBy { it.clearance.value + p.z * it.clearance.sigma }
+            Fit.FITS -> same.minBy { it.clearance.value }
+            Fit.TIGHT -> same.minBy { score(it, p) }
+        }
     }
 
     /** Pessimistic margin above the requirement (m); lower = more limiting. */

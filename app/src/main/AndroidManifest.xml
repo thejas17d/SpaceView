@@ -15,6 +15,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Play Billing 9.1 (Pro) merges com.android.vending.BILLING (normal, install-time) and a <queries>
+         entry for the Play billing service; listed in ci/allowed-permissions.txt. Its two proxy
+         activities are exported="false". -->
+
     <!-- Merged in by SceneView (haptics). SpaceView avoids vibration during AR (it disturbs
          tracking), so it is stripped. -->
     <uses-permission

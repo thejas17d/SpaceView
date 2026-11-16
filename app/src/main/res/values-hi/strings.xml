@@ -185,9 +185,6 @@
     <string name="settings_privacy_options_detail">विज्ञापन से जुड़ी अपनी सहमति देखें या बदलें</string>
     <string name="settings_privacy_options_not_needed">आपके इलाके में विज्ञापन निजता के कोई विकल्प ज़रूरी नहीं हैं</string>
     <string name="settings_privacy_policy">निजता नीति</string>
-    <string name="settings_section_ads">विज्ञापन</string>
-    <string name="settings_remove_ads">विज्ञापन हटाएँ</string>
-    <string name="settings_coming_soon">जल्द आ रहा है</string>
     <string name="settings_section_about">ऐप के बारे में</string>
     <string name="settings_version">वर्शन</string>
     <string name="settings_accuracy_note_title">सटीकता</string>
@@ -229,7 +226,6 @@
     <string name="gallery_depth">गहराई</string>
     <string name="gallery_diagonal">बाहरी विकर्ण (किनारे सहित)</string>
     <string name="gallery_place">मेरे कमरे में रखकर देखें</string>
-    <string name="gallery_place_soon">कमरे में रखकर देखना अगले अपडेट में आएगा।</string>
     <string name="gallery_share">शेयर करें</string>
     <string name="gallery_share_text">%1$s: %2$s — SpaceView से नापा गया</string>
     <string name="gallery_share_failed">शेयर नहीं हो सका।</string>

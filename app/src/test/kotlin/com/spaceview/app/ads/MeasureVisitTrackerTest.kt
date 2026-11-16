@@ -142,4 +142,48 @@ class MeasureVisitTrackerTest {
         tracker.arScreenEntered()
         assertTrue(tracker.arInForeground)
     }
+    // ---- Contract K2 (ARCHITECTURE-v2 §12.3): Place and the on-device 3D scan ----
+
+    @Test
+    fun `K2 Place never arms an interstitial, even with a save recorded while on it`() {
+        // Place is an AR destination that is not a Measure visit: a stray save there is ignored.
+        tracker.arScreenEntered()
+        tracker.onScanSaved()
+        assertFalse(tracker.hasSavedThisVisit)
+        tracker.arScreenLeft()
+        assertFalse(tracker.consumePending())
+    }
+
+    @Test
+    fun `K2 Place opened from a saved scan, then back to the gallery, owes no ad`() {
+        tracker.enterMeasure("scan-1")
+        tracker.onScanSaved()
+        tracker.leaveWithoutAd("scan-1") // Saved -> Place in my room
+        tracker.arScreenEntered() // Place
+        tracker.arScreenLeft()
+        assertFalse("the gallery after Place finds no chance", tracker.consumePending())
+    }
+
+    @Test
+    fun `K2 a saved 3D scan counts like a proxy scan and its chance waits for the next non-AR screen`() {
+        tracker.enterMeasure("shape-scan-1")
+        tracker.arScreenEntered()
+        tracker.onScanSaved()
+        assertTrue(tracker.hasSavedThisVisit)
+        assertTrue(tracker.arInForeground)
+        assertTrue(tracker.leaveMeasure("shape-scan-1"))
+        tracker.arScreenLeft()
+        assertFalse(tracker.arInForeground)
+        assertTrue("used once, by the next non-AR screen", tracker.consumePending())
+        assertFalse(tracker.consumePending())
+    }
+
+    @Test
+    fun `K2 a 3D scan left without saving owes no ad`() {
+        tracker.enterMeasure("shape-scan-2")
+        tracker.arScreenEntered()
+        assertFalse(tracker.leaveMeasure("shape-scan-2"))
+        tracker.arScreenLeft()
+        assertFalse(tracker.consumePending())
+    }
 }

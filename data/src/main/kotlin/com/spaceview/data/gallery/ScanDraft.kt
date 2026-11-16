@@ -1,6 +1,15 @@
 package com.spaceview.data.gallery
 
-enum class ObjectKind { FRAME, TV, APPLIANCE, BOX, OTHER }
+/**
+ * What a gallery item is. Stored by name: never rename an entry (unknown names read back as [OTHER]).
+ * [FURNITURE] is a parametric template (v3, K10).
+ */
+enum class ObjectKind { FRAME, TV, APPLIANCE, BOX, OTHER, FURNITURE }
+
+/**
+ * How the points of a measurement or scan were captured (v3 `capture_method`, NULL = before v3). Stored by name.
+ */
+enum class CaptureMethod { MANUAL, HANDS_FREE, AUTO_RECT, DEPTH_SCAN }
 
 /**
  * Where a dimension's value comes from. Stored by name: never rename an entry.
@@ -45,4 +54,5 @@ class ScanDraft(
     val label: String?,
     val arcoreVersion: String?,
     val calibrationFactor: Double? = null,
+    val captureMethod: CaptureMethod? = CaptureMethod.MANUAL,
 )

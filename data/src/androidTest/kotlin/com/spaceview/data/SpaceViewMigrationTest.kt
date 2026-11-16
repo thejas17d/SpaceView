@@ -98,6 +98,46 @@ class SpaceViewMigrationTest {
         }
     }
 
+    @Test
+    fun migrate2To3BackfillsProxyBoxAndKeepsRows() {
+        helper.createDatabase(DB, 2).use { db ->
+            db.execSQL(
+                "INSERT INTO measurements (kind, value_m, sigma_m, quality, unit_context, calibrated, timestamp) " +
+                    "VALUES ('DISTANCE', 0.6, 0.005, 'FAIR', 'OBJECT', 0, 1000)",
+            )
+            db.execSQL(
+                "INSERT INTO gallery_items (kind, width_m, width_bound95_m, width_source, height_m, height_bound95_m, " +
+                    "height_source, depth_m, depth_bound95_m, depth_source, quality, calibrated, device_tier, created_at, " +
+                    "updated_at, model_path, total_bytes) VALUES ('FRAME', 0.457, 0.01, 'MEASURED', 0.61, 0.01, 'MEASURED', " +
+                    "0.02, 0.0, 'PRESET', 'FAIR', 0, 'NO_DEPTH', 1, 1, 'gallery/1/model.glb', 1234)",
+            )
+        }
+        helper.runMigrationsAndValidate(DB, 3, true, SpaceViewDatabase.MIGRATION_2_3).use { db ->
+            db.query("SELECT model_kind, template_id, mesh_extent_w_m, mesh_info, capture_method, width_m FROM gallery_items").use { c ->
+                c.moveToFirst()
+                assertEquals("PROXY_BOX", c.getString(0))
+                assertEquals(true, c.isNull(1))
+                assertEquals(true, c.isNull(2))
+                assertEquals(true, c.isNull(3))
+                assertEquals(true, c.isNull(4))
+                assertEquals(0.457, c.getDouble(5), 0.0)
+            }
+            db.query("SELECT capture_method, value_m FROM measurements").use { c ->
+                c.moveToFirst()
+                assertEquals(true, c.isNull(0))
+                assertEquals(0.6, c.getDouble(1), 0.0)
+            }
+        }
+        val room = openRoom()
+        try {
+            val row = runBlocking { room.galleryDao().get(1) }!!
+            assertEquals("PROXY_BOX", row.modelKind)
+            assertNull(row.templateId)
+        } finally {
+            room.close()
+        }
+    }
+
     private companion object {
         const val DB = "migration-test.db"
     }

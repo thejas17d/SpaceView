@@ -1,5 +1,6 @@
 package com.spaceview.app.scan
 
+import com.spaceview.app.pro.ProFeature
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
@@ -68,6 +69,8 @@ fun ScanRoute(
     onClose: () -> Unit,
     onDone: () -> Unit,
     onPlace: (Long) -> Unit,
+    /** Contract K5: open the paywall (from Review, a non-AR step) when the Free gallery is full. */
+    onOpenPaywall: (ProFeature) -> Unit = {},
 ) {
     val shareCopy: suspend (Long, String) -> java.io.File? = viewModel::shareCopy
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -109,7 +112,11 @@ fun ScanRoute(
         }
         ScanStep.REVIEW -> {
             BackHandler(onBack = requestRemeasure)
-            ScanReviewScreen(state, settings.units, viewModel, onRemeasure = requestRemeasure)
+            ScanReviewScreen(
+                state, settings.units, viewModel, onRemeasure = requestRemeasure,
+                onUpgrade = { onOpenPaywall(ProFeature.GALLERY_UNLIMITED) },
+                onDiscard = onClose,
+            )
             if (confirmDiscard) {
                 AlertDialog(
                     onDismissRequest = { confirmDiscard = false },

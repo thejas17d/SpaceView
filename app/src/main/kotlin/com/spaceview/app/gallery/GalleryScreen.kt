@@ -56,6 +56,7 @@ fun ObjectKind.labelRes(): Int = when (this) {
     ObjectKind.APPLIANCE -> R.string.gallery_kind_appliance
     ObjectKind.BOX -> R.string.gallery_kind_box
     ObjectKind.OTHER -> R.string.gallery_kind_other
+    ObjectKind.FURNITURE -> R.string.gallery_kind_furniture
 }
 
 /** The item's label, or its kind when unnamed. */
