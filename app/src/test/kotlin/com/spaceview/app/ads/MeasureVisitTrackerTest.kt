@@ -186,4 +186,20 @@ class MeasureVisitTrackerTest {
         tracker.arScreenLeft()
         assertFalse(tracker.consumePending())
     }
+
+    @Test
+    fun `furniture saved then Place never arms an ad, saved then Done arms one (K2, same as the scan flow)`() {
+        tracker.enterMeasure("furniture-1")
+        tracker.onScanSaved()
+        tracker.leaveWithoutAd("furniture-1")
+        assertFalse(tracker.consumePending())
+        tracker.enterMeasure("furniture-2")
+        tracker.onScanSaved()
+        assertTrue(tracker.leaveMeasure("furniture-2"))
+        assertTrue(tracker.consumePending())
+        // Leaving the picker without saving arms nothing.
+        tracker.enterMeasure("furniture-3")
+        assertFalse(tracker.leaveMeasure("furniture-3"))
+        assertFalse(tracker.consumePending())
+    }
 }

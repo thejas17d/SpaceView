@@ -39,13 +39,19 @@ interface FeatureGate {
     /**
      * One-shot check before starting a new action. Waits at most ~1 s for a cold-start entitlement,
      * so a Pro user is not shown the paywall in the first second after launch.
+     *
+     * @param itemId the item for an [Allowance.Only] feature (the template id for [ProFeature.FURNITURE_TEMPLATES]).
      */
-    suspend fun check(feature: ProFeature, currentUsage: Int = 0): GateState
+    suspend fun check(feature: ProFeature, currentUsage: Int = 0, itemId: String? = null): GateState
 }
 
 /** The pure gate table. */
 object FeatureRules {
-    fun evaluate(feature: ProFeature, entitlement: Entitlement, usage: Int): GateState {
+    /**
+     * @param itemId for an [Allowance.Only] feature: the item asked for. Without one (a picker deciding which badges to
+     *   show) the answer is [GateState.Limited] with the number of free items, i.e. "some are free".
+     */
+    fun evaluate(feature: ProFeature, entitlement: Entitlement, usage: Int, itemId: String? = null): GateState {
         val rule = ProCatalog.rule(feature)
         val allowance = if (entitlement is Entitlement.Pro) rule.pro else rule.free
         return when (allowance) {
@@ -54,6 +60,11 @@ object FeatureRules {
             is Allowance.Count -> {
                 val remaining = allowance.max - usage.coerceAtLeast(0)
                 if (remaining > 0) GateState.Limited(remaining, allowance.max) else GateState.NeedsPro(allowance.max)
+            }
+            is Allowance.Only -> when {
+                itemId == null -> GateState.Limited(allowance.itemIds.size, allowance.itemIds.size)
+                itemId in allowance.itemIds -> GateState.Allowed
+                else -> GateState.NeedsPro(allowance.itemIds.size)
             }
         }
     }
@@ -68,11 +79,11 @@ class EntitlementFeatureGate(
     override fun observe(feature: ProFeature, usage: Flow<Int>): Flow<GateState> =
         combine(entitlement, usage) { e, n -> FeatureRules.evaluate(feature, e, n) }.distinctUntilChanged()
 
-    override suspend fun check(feature: ProFeature, currentUsage: Int): GateState {
+    override suspend fun check(feature: ProFeature, currentUsage: Int, itemId: String?): GateState {
         val e = entitlement.value.takeIf { it !is Entitlement.Unknown }
             ?: withTimeoutOrNull(unknownWaitMillis) { entitlement.first { it !is Entitlement.Unknown } }
             ?: Entitlement.Free
-        return FeatureRules.evaluate(feature, e, currentUsage)
+        return FeatureRules.evaluate(feature, e, currentUsage, itemId)
     }
 
     companion object {

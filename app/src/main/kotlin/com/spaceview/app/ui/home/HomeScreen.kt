@@ -53,6 +53,7 @@ fun HomeScreen(
     onScan: () -> Unit,
     onGallery: () -> Unit,
     modifier: Modifier = Modifier,
+    onFurniture: () -> Unit = {},
 ) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -79,6 +80,7 @@ fun HomeScreen(
             ModeRow(R.string.home_height, R.string.home_height_detail) { onMeasure(MeasureMode.HEIGHT) }
             ModeRow(R.string.home_rectangle, R.string.home_rectangle_detail) { onMeasure(MeasureMode.RECTANGLE) }
             ModeRow(R.string.home_scan_object, R.string.home_scan_object_detail, onClick = onScan)
+            ModeRow(R.string.home_furniture, R.string.home_furniture_detail, onClick = onFurniture)
             ModeRow(R.string.home_gallery, R.string.home_gallery_detail, onClick = onGallery)
             Spacer(Modifier.height(4.dp))
             CalibrationRow(onCalibrate)

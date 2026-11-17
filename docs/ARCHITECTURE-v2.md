@@ -110,7 +110,7 @@ These four seams are the whole architectural change. Everything in §3–§8 han
 - **Main-thread work.** On main, at most every `1/rateHz`, it runs `acquireCameraImage` → copies **only the Y plane, decimated during the copy** into one of 2 preallocated `ByteArray`s → `close()`.
   - At 320×240 that is 77 KB, an estimated 0.5–1 ms.
   - Optional small **full-resolution windows** (for example 4 × 48×48 around corner hints) are copied into a preallocated buffer.
-- **Hand-off.** The buffers go to the listener's worker. A buffer is reused only after the worker releases it (2-slot ring, DROP_OLDEST).
+- **Hand-off.** The buffers go to the listener's worker. A buffer is reused only after the worker releases it (2 pooled slots; `trySend`; if both are busy the frame is dropped and counted as backlog, which also steps the governor down).
 - **Fixes R3 for Smart Measure:** no NV21, no `Bitmap` and no allocation per frame. The only native call is the one ARCore requires on the GL/main thread.
 - **`DepthFrameTap`** is the same pattern for the 3D scan: the depth (16-bit), confidence and decimated YUV, with the pose and intrinsics, in two pooled slots. Spec in §7.1.3.
 
@@ -329,7 +329,7 @@ All of this lives in `:app`, in the packages `com.spaceview.app.pro` (domain, pu
 enum class ProFeature { NO_ADS, GALLERY_UNLIMITED, EXPORT_GLB, EXPORT_PDF, SMART_RECTANGLE, FURNITURE_TEMPLATES,
                         DEVICE_SCAN, CLOUD_SCAN /* …added by research */ }
 data class FeatureRule(val feature: ProFeature, val free: Allowance, val pro: Allowance)
-sealed interface Allowance { data object Unlimited : Allowance; data object None : Allowance; data class Count(val max: Int) : Allowance }
+sealed interface Allowance { data object Unlimited : Allowance; data object None : Allowance; data class Count(val max: Int) : Allowance; data class Only(val itemIds: Set<String>) : Allowance /* T: core templates */ }
 object ProCatalog {            // values from pro-monetization.md §1 and §8
     const val CATALOG_VERSION = 1
     const val SUBSCRIPTION_ID = "pro"                                   // one subscription, several base plans
@@ -585,6 +585,8 @@ object PurchaseVerifier { fun verify(base64PublicKey: String, signedData: String
 
 ## 6. Item 3: Furniture templates
 
+> **Template immutability (added 2026-11-16, T-D0 review MINOR 4):** shipped template geometry is frozen. `TemplateGoldenTest` pins a SHA-256 of each id's parts for 39 parameter cases. A different look or range ships as a new id (`sofa_v2`) with its own constants object; `PartBuilder.box/row` and `cornerLegs` are frozen infrastructure.
+
 ### 6.1 Design (ADR-010)
 
 **Problem:** "Will this sofa fit?" needs a recognisable 3D shape at true size, not a box, built from a few guided measurements. The design is parametric and deterministic: no ML and no assets, so APK size stays flat.
@@ -617,7 +619,7 @@ object Templates { val all = listOf(Sofa, LSofa, Bed, Wardrobe, Table) }
 ### 6.2 Flow, persistence, verdict
 
 - **Flow:**
-  - Gallery FAB → "Add furniture" → pick a template.
+  - Home "Furniture" row, or the empty Gallery's "Add furniture" button → pick a template. (A Gallery FAB is deferred.)
   - A guided list of parameters, each with a small line illustration (a vector drawable, no bitmaps) and **Measure** (it opens Measure in DISTANCE or HEIGHT mode as a one-shot that returns its value) or **Type**.
   - A live 3D preview, then Save → Place.
 - **Persistence (Room v3, §9):**
@@ -887,13 +889,13 @@ fun GlbWriter.writeMesh(mesh: TriMesh, origin: BoxOrigin = BOTTOM_CENTER, unlit:
 
 #### 7.1.6 Thermal, memory, frame rate, process death
 - **Rate governor** (`ShapeScanGovernor`, pure, in `:ar`): starts at **5 Hz** integration and steps down to 3 Hz, then 2 Hz, when any of these happens:
-  - the frame time p90 over the last 2 s exceeds 33 ms (from frame timestamps)
+  - camera frames are being dropped: the p90 of the camera-timestamp intervals over the last 2 s exceeds 1.5× the locked frame period (50 ms at 30 fps, 25 ms at 60 fps). A plain "p90 > 33 ms" rule would fire on every healthy 30 fps session, whose nominal interval is 33.3 ms (T-D0 review BLOCKER 1)
   - the fusion worker has a backlog (a slot is still busy at the next copy)
   - thermal status reaches MODERATE (`PowerManager.addThermalStatusListener`, API 29+; on API 24–28 only the frame-time rule applies)
 
   At thermal **SEVERE**, capture stops. With ≥ 50% coverage it offers "Finish with what was captured"; otherwise "Your phone is too warm. Let it cool for a few minutes." Colour integration is dropped first, before the rate.
 - **30 fps:**
-  - ARCore and the camera keep running every frame. Only integration is rate-limited. A 1-slot channel with DROP_OLDEST between the tap and the worker means the AR loop never waits on fusion.
+  - ARCore and the camera keep running every frame. Only integration is rate-limited. 2 pooled depth slots handed to the worker with `trySend` (as built): a busy worker means the frame is skipped and counted as backlog, which steps the governor down. The AR loop never waits on fusion. The step-down trigger is dropped frames (p90 interval above 1.5 × the 30 fps-clamped frame period), not raw frame time.
   - Rendering during capture is only the box wireframe and the coverage overlay (the existing Canvas overlay approach). No mesh is rendered live.
 - **Time limit:** a 45–90 s target with a 90 s hard cap (thermal and battery). Processing then runs with the session **paused**, with a target of ≤ 3 s (marching cubes plus clustering, [est.]; desktop JVM 0.3–1.3 s, §7.1.4) and a progress bar.
 - **Memory:**
@@ -952,7 +954,7 @@ fun GlbWriter.writeMesh(mesh: TriMesh, origin: BoxOrigin = BOTTOM_CENTER, unlit:
 - **Size:** <0.1 MB of dex [est.], with **no native library**. The marching-cubes tables are about 4 KB.
 
 #### 7.1.10 Spike first (Builder A, the first 1–2 days of the D milestone), with hard exit criteria
-On the bench depth phone (and on a smoothed-only depth phone, if one is available), release build:
+On the bench depth phone (and on a smoothed-only depth phone, if one is available). **Build policy (orchestrator decision 2026-11-16, ratified by the T-D0 gate):** the spike runs on the **debug** build, which carries the 3D Scan Lab. A debug PASS is conclusive as the table below says. Any FAIL of criteria 2–4 is re-run on a release-signed `lab` build type before acting on it.
 1. A 60×40×40 cm carton gives mesh extents within their ± of the measured box on all three axes, in 4 of 5 scans. **Run it at two distances (≈ 0.7 m and ≈ 1.5 m, 5 scans each)** and compare each against a tape as well as the box. This tests the revised C5 ± (scale term rel·L, no height inflation) against a depth-scale bias that doesn't come from VIO scale; a distance-dependent error means C5 must be widened again (M4-P1 gate R2).
 2. AR frame time p95 ≤ 33 ms during capture at ≥ 3 Hz integration (`gfxinfo`), and fusion ≤ 15 ms per integrated frame (trace markers).
 3. 90 s of capture does not reach thermal SEVERE from a cool start, and the peak extra PSS is ≤ 40 MB (`dumpsys meminfo`).
@@ -961,6 +963,39 @@ On the bench depth phone (and on a smoothed-only depth phone, if one is availabl
 Also run the research's bench addition (3d-capture.md §7.6): a known box, an armchair and a 2–3-seat sofa, on 2 phones, 5 scans each. Record the mesh-extent error against a tape, the hole area, the scan time and the thermal state.
 
 **If 1 fails:** ship only to ToF/raw-depth phones, or defer. **If 2 or 3 fail:** first lower `N_MAX` and the rate; the GLES 3.1 compute escalation (ADR-013) needs a separate decision.
+
+**What a debug build can and cannot conclude** (from `docs/reviews/T-D0-gate.md` §4):
+
+A debuggable runtime JITs with fewer optimisations, has no AOT or baseline profile, and keeps locals alive to the end of each method. That makes CPU-bound work slower and memory lifetimes longer, but leaves array sizes and the ARCore and VIO data the same.
+
+| Criterion | Columns | Debug **PASS** | Debug **FAIL** |
+|---|---|---|---|
+| **1 + R2: accuracy** | `c1_mesh_within_pm_of_box`, `mesh_minus_tape_*`, `mean_range_m` | **Conclusive** | **Conclusive** if the run integrated normally (no `BACKLOG` event, `governor_final_hz` ≥ 3). If a debug-only backlog starved it of frames, re-run on `lab`. Before blaming depth, check `aspect_mismatch`. |
+| **2: fusion** | `c2_fusion_le_15ms` | **Conclusive** (release is faster) | **Not conclusive**: re-run on `lab`. |
+| **2: AR frame time at ≥ 3 Hz** | `c2_ar_p95_le_33ms` (after R1), `c2_rate_ge_3hz`, `governor_final_hz` | **Conclusive** only if `c2_rate_ge_3hz = true` and there is no `BACKLOG` event; otherwise the pass was bought by a lower rate | **Not conclusive**: re-run on `lab`. |
+| **3: thermal** | `c3_no_severe` (`unknown` below API 29) | **Conclusive** (debug burns more CPU) | **Not conclusive**: re-run on `lab`. |
+| **3: memory** | `c3_extra_pss_le_40mb`, `pss_extra_processing_incl_volume_mb` | **Conclusive** if G3's settle check passes. Debug over-counts: the whole volume is added back, plus JIT cache growth and longer local lifetimes. | **Probably real**, but re-run on `lab` before lowering `N_MAX`. |
+| **4: processing** | `c4_processing_le_5s` | **Conclusive** | **Not conclusive**: re-run on `lab`. |
+
+**When a release-signed `lab` build is required:**
+1. **Before acting on any FAIL** of the criterion-2, criterion-3 or criterion-4 rows above, and in particular before taking the §7.1.10 "If 2 or 3 fail" branch (lower `N_MAX` and the rate, or open the GLES-compute ADR).
+2. **Always, before D's user-facing timing promises ship.** That covers the ≤ 3 s processing target with its progress bar, and the 30 fps capture claim. The Phase 3 release candidate re-measures criteria 2 and 4 on the release build itself (§8, P3-4).
+
+**Building the lab build type when it is needed:**
+- **Build type:**
+  - `create("lab") { initWith(getByName("release")); applicationIdSuffix = ".lab"; versionNameSuffix = "-lab"; signingConfig = signingConfigs.getByName("debug"); matchingFallbacks += "release" }`
+  - The `sourceSets["lab"]` source set points at `src/debug/kotlin`, `src/debug/res` and `src/debug/AndroidManifest.xml`. Today `src/debug` holds only the lab.
+- **Entry point:** add `buildConfigField("boolean", "LAB", …)` (true for lab, false for the others), and gate the Settings link on `BuildConfig.DEBUG || BuildConfig.LAB`.
+  - The link is needed because the activity is not exported, so `adb am start` cannot reach it on a non-debuggable build.
+- **Profiling:** add `<profileable android:shell="true"/>` in the lab manifest so `gfxinfo` and Perfetto work.
+- **Release safety:** never upload `lab`. CI keeps checking that the **release** dex has 0 `scan3d_lab` (R3).
+- **Telling builds apart:** the `-lab` suffix shows in the `app_version` column, so lab rows and debug rows stay separate.
+
+**Analysis rules for the lab CSV/JSON (gate G3, G4):**
+- **G3, PSS settle:** a run's processing memory figure counts only if the JSON `noise` stage `pss_mb` is at least the processing baseline − 1 MB. Otherwise the baseline didn't settle; re-run.
+- **G4, frame period:** the governor's period is clamped to 30 fps. On a variable or 60 fps camera range, judge the AR frame-time column against the logged range, not against 33 ms alone.
+- **R2, error vs distance:** use `mean_range_m` (the real stand-off), not the label.
+- **Timing claims:** user-facing timing claims always come from a release-signed build (lab or the release candidate).
 
 #### 7.1.11 Tests (§4.C)
 

@@ -135,6 +135,9 @@ fun SettingsRoute(
             if (BuildConfig.FAKE_BILLING) {
                 (container.billing as? FakeBillingGateway)?.let { fake -> FakeBillingControls(fake, onChanged = restore) }
             }
+            // The 3D Scan Lab lives in the debug source set only (ARCHITECTURE-v2 §7.1.10 spike); BuildConfig.DEBUG is
+            // a constant false in release, so R8 drops this branch and nothing here names a lab class.
+            if (BuildConfig.DEBUG) Scan3dLabLink()
         },
         banner = { BannerAd(adsManager = ads) },
     )
@@ -568,3 +571,17 @@ private fun SettingsPreview() {
         )
     }
 }
+
+/** Debug builds only: opens the 3D Scan Lab activity (declared in `src/debug/AndroidManifest.xml`). */
+@Composable
+private fun Scan3dLabLink() {
+    val context = LocalContext.current
+    androidx.compose.material3.OutlinedButton(
+        onClick = {
+            runCatching { context.startActivity(android.content.Intent().setClassName(context, SCAN3D_LAB_ACTIVITY)) }
+        },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+    ) { Text(stringResource(R.string.settings_scan3d_lab)) }
+}
+
+private const val SCAN3D_LAB_ACTIVITY = "com.spaceview.app.scan3d.Scan3dLabActivity"

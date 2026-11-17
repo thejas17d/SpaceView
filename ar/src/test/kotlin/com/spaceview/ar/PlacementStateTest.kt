@@ -212,4 +212,55 @@ class PlacementStateTest {
         c.onFrame(t, true, camera, floorHit.position, null, null)
         assertEquals(PlacementState.Searching, c.state)
     }
+
+    /**
+     * M4-P1 gate N1: one mirrored feature point 6 cm below a polished floor (seen for a whole second at one spot) must
+     * not become the floor. The old "lowest hit" rule then rejected every genuine wall–floor tap (> 3 cm above it).
+     */
+    @Test fun aMirroredPointBelowThePolishedFloorDoesNotRejectGenuineFloorTaps() {
+        val c = frameItem()
+        c.frame(floorHit) // the floor plane at y = −1.4
+        repeat(30) { c.frame(SurfaceHit(Vec3(0.2, -1.46, -2.5), Vec3.UP, onPlane = false)) }
+        c.startFallback()
+        c.frame(SurfaceHit(Vec3(-0.5, -1.4, -3.0), Vec3.UP)); assertTrue(c.addFallbackPoint())
+        c.frame(SurfaceHit(Vec3(0.6, -1.39, -3.0), Vec3.UP)); assertTrue(c.addFallbackPoint())
+        assertFalse(c.status.fallbackRejected)
+        assertEquals(SurfaceTarget.WALL_FALLBACK, c.status.target)
+        // The wall height readout uses the real floor: the centre at camera height is 1.4 m above it.
+        c.frame(null)
+        assertEquals(1.4, c.status.centreHeightM!!, 0.01)
+    }
+
+    /** N1: point / depth hits alone make a floor once they are many and spread out (a plain floor with no plane yet). */
+    @Test fun spreadPointHitsMakeAFloorButOneSpotDoesNot() {
+        val c = frameItem()
+        c.frame(wallHit)
+        c.drop(); c.onAnchored(true)
+        repeat(20) { c.frame(SurfaceHit(Vec3(0.3, -1.5, -2.0), Vec3.UP, onPlane = false), anchor = null) }
+        assertNull("one spot is not a floor", c.status.centreHeightM)
+        for (k in 0 until 10) c.frame(SurfaceHit(Vec3(-0.5 + 0.1 * k, -1.4, -2.0 - 0.05 * k), Vec3.UP, onPlane = false))
+        // Placed on the wall at y = 0 with a 0.4 m tall item centred there: 1.4 m above the spread floor.
+        assertEquals(1.4, c.status.centreHeightM!!, 0.011)
+    }
+
+    /** M4-P1 gate N5: a steady placed item keeps the same pose instance (nothing rebuilt, nothing re-set on the node). */
+    @Test fun aSteadyPlacedItemKeepsItsPoseInstance() {
+        val c = sofa()
+        c.frame(floorHit)
+        val req = c.drop()!!
+        c.onAnchored(true)
+        val anchor = Pose(req.surfacePose.translation, req.surfacePose.rotation)
+        c.frame(null, anchor)
+        val p = c.modelPose!!
+        val state = c.state
+        repeat(10) { c.frame(null, anchor) }
+        assertTrue("same pose instance", c.modelPose === p)
+        assertTrue("same state instance", c.state === state)
+        // A refined anchor or a command rebuilds it.
+        c.frame(null, Pose(anchor.translation + Vec3(0.0, 0.0, 0.01), anchor.rotation))
+        assertFalse(c.modelPose === p)
+        val q = c.modelPose!!
+        c.rotate90()
+        assertFalse(c.modelPose === q)
+    }
 }

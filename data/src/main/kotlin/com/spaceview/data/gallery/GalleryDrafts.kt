@@ -92,6 +92,8 @@ class MeshDraft(
  * @property width / [height] / [depth] the row's dimensions with their sources: what the fit verdict uses.
  * @property modelKind the row's kind (a fallback box keeps the mesh kind here).
  * @property meshFallback true when a mesh was unusable and [file] is the measured box instead.
+ * @property centre the rendered GLB's own bounding-box centre in its frame when the GLB declares one (a 3D scan kept in
+ *   its measured-box frame, whose box is not centred on [origin]; M4-P1 gate N3), else null (centre = the [origin] rule).
  */
 class PlacementModel(
     val id: Long,
@@ -107,6 +109,7 @@ class PlacementModel(
     val modelKind: ModelKind,
     val meshFallback: Boolean,
     val label: String?,
+    val centre: com.spaceview.engine.Vec3? = null,
 )
 
 /**
@@ -130,6 +133,12 @@ sealed interface PlacementResult {
  */
 fun interface TemplateModelSource {
     fun parts(templateId: String, params: Map<String, Double>): List<Part>?
+
+    /**
+     * The colours the item was saved with (Builder B, T: the palette index is stored among the parameters), so a
+     * regenerated model keeps them. Null = [Palette.DEFAULT].
+     */
+    fun palette(templateId: String, params: Map<String, Double>): Palette? = null
 
     companion object {
         val NONE = TemplateModelSource { _, _ -> null }

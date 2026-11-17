@@ -282,6 +282,37 @@ class GlbWriterV2Test {
         }
     }
 
+    /** M4-P1 gate N3: a mesh kept in its input frame declares its own bounding-box centre; others declare none. */
+    @Test fun keepInputOriginDeclaresTheBoundingBoxCentre() {
+        // Off-centre like a partial scan above a floor cut: the box is not centred on the BOTTOM_CENTER origin.
+        val m = sphere(0.2, Vec3(0.05, 0.21, -0.03), 8, 16, rgba = false)
+        val glb = GlbWriter.writeMesh(m, keepInputOrigin = true)
+        val g = parse(glb)
+        val pos = g.floats(0)
+        val c = DoubleArray(3) { a ->
+            var lo = Float.MAX_VALUE; var hi = -Float.MAX_VALUE
+            for (i in a until pos.size step 3) { lo = minOf(lo, pos[i]); hi = maxOf(hi, pos[i]) }
+            (lo.toDouble() + hi) / 2
+        }
+        assertEquals(c[0], g.node0Extras[GlbWriter.AABB_CX] as Double, 1e-9)
+        assertEquals(c[1], g.node0Extras[GlbWriter.AABB_CY] as Double, 1e-9)
+        assertEquals(c[2], g.node0Extras[GlbWriter.AABB_CZ] as Double, 1e-9)
+        val info = GlbReader.readInfo(glb)!!
+        assertTrue(info.centre!!.approxEquals(Vec3(c[0], c[1], c[2]), 1e-9))
+        assertEquals(0.05, info.centre!!.x, 0.01)
+        // A re-centred mesh (and every box / parts model) declares no centre: it is origin.centreOffset.
+        assertNull(GlbReader.readInfo(GlbWriter.writeMesh(m))!!.centre)
+        assertNull(GlbReader.readInfo(GlbWriter.writeBox(0.6, 0.4, 0.4, null))!!.centre)
+        // The keys are reserved: a caller cannot forge them.
+        for (k in listOf(GlbWriter.AABB_CX, GlbWriter.AABB_CY, GlbWriter.AABB_CZ)) {
+            try {
+                GlbWriter.writeMesh(m, extras = MeshExtras(values = mapOf(k to 0.0)), keepInputOrigin = true)
+                throw AssertionError("accepted reserved key $k")
+            } catch (expected: IllegalArgumentException) {
+            }
+        }
+    }
+
     @Test fun boxOriginCentreOffsetIsTheSingleRule() {
         assertTrue(BoxOrigin.CENTER.centreOffset(1.0, 2.0, 3.0).approxEquals(Vec3.ZERO))
         assertTrue(BoxOrigin.BOTTOM_CENTER.centreOffset(1.0, 2.0, 3.0).approxEquals(Vec3(0.0, 1.0, 0.0)))

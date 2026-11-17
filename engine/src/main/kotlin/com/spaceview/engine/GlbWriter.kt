@@ -65,7 +65,20 @@ object GlbWriter {
     const val MAX_MESH_VERTICES = 4_000_000
 
     private val EXTRA_KEY = Regex("[A-Za-z][A-Za-z0-9_]*")
-    private val RESERVED_KEYS = setOf("widthM", "heightM", "depthM", "origin", "glbVersion", "modelKind")
+    private val RESERVED_KEYS = setOf("widthM", "heightM", "depthM", "origin", "glbVersion", "modelKind", AABB_CX, AABB_CY, AABB_CZ)
+
+    /**
+     * Extras keys of a [writeMesh] `keepInputOrigin` mesh's bounding-box centre in the GLB frame (M4-P1 gate N3). Such
+     * a mesh's box is not centred on its declared origin (the floor cut, a partial scan), so a reader must not derive
+     * the centre from the origin. Absent on every other model, whose centre is [BoxOrigin.centreOffset].
+     */
+    const val AABB_CX = "aabbCx"
+
+    /** See [AABB_CX]. */
+    const val AABB_CY = "aabbCy"
+
+    /** See [AABB_CX]. */
+    const val AABB_CZ = "aabbCz"
 
     // ---- box (M3 proxy) -------------------------------------------------------------------------------
 
@@ -285,6 +298,9 @@ object GlbWriter {
         }
         val (w, h, d) = if (keepInputOrigin) extents(pos) else recentre(pos, origin)
         for (s in doubleArrayOf(w, h, d)) require(s > 0 && s <= MAX_SIDE_M) { "Mesh sides must be in (0, $MAX_SIDE_M] m, got $s" }
+        // N3: a mesh kept in its input frame declares its own bounding-box centre (placement must not assume the
+        // centre sits on the declared origin).
+        val values = if (keepInputOrigin) extras.values + aabbCentre(pos) else extras.values
         if (keepInputOrigin) {
             // The origin must lie near the mesh: a stray frame would place the scan metres away.
             for (a in 0 until 3) {
@@ -315,7 +331,7 @@ object GlbWriter {
         if (unlit) j.append("\"extensionsUsed\":[\"").append(UNLIT).append("\"],")
         j.append("\"scene\":0,\"scenes\":[{\"nodes\":[0]}],")
         j.append("\"nodes\":[{\"mesh\":0,\"name\":").append(jsonString(extras.name)).append(",\"extras\":")
-        writeExtras(j, w, h, d, origin, extras.modelKind, extras.values)
+        writeExtras(j, w, h, d, origin, extras.modelKind, values)
         j.append("}],")
         j.append("\"meshes\":[{\"name\":").append(jsonString(extras.name)).append(",\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1")
         if (colourStride != 0) j.append(",\"COLOR_0\":2")
@@ -415,6 +431,20 @@ object GlbWriter {
         )
         if (anchor.any { it != 0.0 }) for (i in pos.indices) pos[i] = pos[i] - anchor[i % 3] + 0.0
         return Triple(max[0] - min[0], max[1] - min[1], max[2] - min[2])
+    }
+
+    /** The bounding-box centre of [pos] (x, y, z triples) as the [AABB_CX] / [AABB_CY] / [AABB_CZ] extras. */
+    private fun aabbCentre(pos: DoubleArray): Map<String, Double> {
+        val min = DoubleArray(3) { Double.POSITIVE_INFINITY }
+        val max = DoubleArray(3) { Double.NEGATIVE_INFINITY }
+        for (i in pos.indices) {
+            val a = i % 3
+            // The float that is written, so the centre matches the GLB's own POSITION min/max exactly.
+            val v = pos[i].toFloat().toDouble()
+            if (v < min[a]) min[a] = v
+            if (v > max[a]) max[a] = v
+        }
+        return mapOf(AABB_CX to (min[0] + max[0]) / 2, AABB_CY to (min[1] + max[1]) / 2, AABB_CZ to (min[2] + max[2]) / 2)
     }
 
     /** Extents (W, H, D) of [pos] without moving it. */

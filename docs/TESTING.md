@@ -228,5 +228,97 @@ Install the M4 APK **over M3**, without uninstalling, so the v2→v3 database up
     - The Gallery shows "Approximate 3D shape · measured size".
 19. **Free caps:** with 3 saved 3D scans on Free, the next 3D scan opens the paywall **before** the camera. The 20-item cap behaves as in TESTING §17 items 8–10.
 
+## 19. Furniture templates + 3D Scan Lab spike (from `docs/reviews/T-D0-gate.md` §7)
+
+**T: Furniture templates** (release or debug app; Free first, then Pro through FakeBilling on debug or a licence tester on release)
+
+1. **Entry:**
+   - Home → **Furniture** opens the picker.
+   - An **empty** gallery shows "Add furniture".
+   - A non-empty gallery has no furniture entry (known, N-c).
+2. **Free versus Pro templates:**
+   - On Free, **sofa, bed and wardrobe** start.
+   - **L-sofa, dining table, dining chair, TV unit, bookshelf and study table** open the paywall **before** any camera.
+   - On Pro, all nine start.
+3. **Guided measure:**
+   - Each W/D/H **Measure** opens a one-shot AR measure and returns its value with ±.
+   - **Type** enters an exact value with no ±.
+   - Untouched defaults show "typical".
+   - Save stays disabled until W, H and D are each measured or typed.
+   - Invalid values (seat above the height, for example) show an inline error.
+4. **Preview:**
+   - The 3D preview follows the options: seats, doors, shelves, chaise side.
+   - The L-sofa's left and right are mirror images.
+   - The overall size matches the entered W×H×D.
+5. **Review and Save:**
+   - Review shows the "overall box" note. Save → Saved.
+   - Placing the item stands it on the floor with a W×D footprint.
+   - Next to the real sofa or bed, the outline matches within the item's ±.
+6. **Verdict:** an L-sofa against a measured gap says "Checked against the overall box (width × depth × height)".
+7. **Gallery cap:**
+   - On Free with 20 items, the picker opens the paywall before AR.
+   - At 19 items, start a template, then make the account lapse (FakeBilling) before Save. Save shows the needs-Pro card and keeps the draft. After upgrading, Save works.
+8. **Process death** (Developer options → "Don't keep activities"):
+   - Background the app mid-measure, at Review and at Saved.
+   - Step, values (with ±), options, preset, palette and name are restored. Saved does not save twice.
+9. **Stability:** a saved template looks identical after an app restart and after placing it twice.
+10. **Lapse never hides data (ADR-005 rule 2):** save an L-sofa as Pro, then lapse. It still opens, places, shares and deletes.
+11. **Ads:**
+    - Save → Saved → Done: at most one ad, and only on a non-AR screen.
+    - Saved → Place → Back: no ad.
+    - Never an ad over the camera.
+12. **Hindi, TalkBack and 200% font:**
+    - The picker, guided measure and Review are in Hindi with nothing truncated.
+    - TalkBack reads each parameter row, with its value and source.
+    - Targets are ≥ 48 dp.
+
+**3D Scan Lab spike** (debug APK `builds/SpaceView-TD0-debug.apk` from R3: package `com.spaceview.app.debug`, which installs **beside** the release app; depth phone)
+
+13. **Setup:**
+    - Install the APK, then open Settings → the debug panel → **3D Scan Lab**.
+    - Depth must show a source (RAW, HARDWARE or SMOOTHED). Note which.
+    - Start each block cool, in good even light.
+    - Tape the carton (about 60×40×40 cm) and type its W/H/D on the intro screen.
+14. **Carton at about 0.7 m, 5 scans** (label `carton-0.7m`):
+    - Mark the box: 3 base corners, then the top.
+    - Tap Start, walk slowly all the way round for 45–90 s, then Finish.
+    - Record `c1_mesh_within_pm_of_box` and `mesh_minus_tape_*`.
+15. **Carton at about 1.5 m, 5 scans** (label `carton-1.5m`), with the same tape values (R2).
+16. **Armchair, 5 scans,** and **a 2–3-seat sofa about 5 cm from a wall, 5 scans,** each taped. Check:
+    - there is no wall patch in the mesh viewer;
+    - D is not inflated;
+    - `c4_processing_le_5s`.
+17. **One full 90 s scan from a cool start:**
+    - `stop_reason = TIME_CAP`;
+    - record `thermal_max` and `c3_no_severe`;
+    - record `peak_extra_pss_mb`.
+18. **A second phone,** ideally a smoothed-depth-only one: repeat items 14 and 15.
+19. **Harness edge cases:**
+    - **Back during "Starting…":** the next run's numbers are clean (`ar_frames` is about 90 s worth, not doubled).
+    - **Start while the phone is hot:** "too warm" is shown, with no dead capture.
+    - **App switch mid-capture:** the capture stops with `SESSION_PAUSED` and processes what it captured.
+20. **Save one sofa scan from the lab:**
+    - the item is ≤ 0.5 MB;
+    - it places on the floor at the measured footprint (bottom about 1 cm up);
+    - it shows in the **debug** app's gallery only.
+21. **Share all results:** send `spaceview-scan3d-runs.csv`, plus 2 or 3 `metrics.json` files and GLBs.
+22. **Glossy floor (G2 and N1)** (release app, Place):
+    - On a polished vitrified or marble floor, do the plain-wall fallback twice: once with a coffee table in view, once without.
+    - Note any wrongly rejected wall–floor taps and the centre-height readout.
+
+**How to read the CSV** (orchestrator or FRIDAY; this goes into ARCH §7.1.10 under R2):
+- **Valid run:**
+  - `stop_reason` is `USER` or `TIME_CAP` (a `THERMAL_SEVERE` run counts for criterion 3 only);
+  - `capture_s` ≥ 45;
+  - `glb_error` is empty.
+- **Criterion 1:** a set passes if 4 of 5 valid runs at one distance have `c1_mesh_within_pm_of_box = true`.
+- **R2:** plot `mesh_minus_tape_*` against `mean_range_m`. If the error grows with range beyond the ±, add the per-`DepthSource` range term.
+- **Debug versus `lab`:** apply the §4 table.
+- **Camera-side drops (G4):** a `FRAME_TIME` event with a healthy `ar_frame_ms_p95` and `camera_frame_ms_p95` ≈ 66 ms is a light problem, not app load.
+- **Unsettled baseline (G3):** if the JSON's `noise` stage `pss_mb` is below the processing baseline − 1 MB, ignore that run's c3.
+- **Intrinsics before depth:** `aspect_mismatch = true` combined with a c1 failure means check intrinsics before blaming depth.
+
+---
+
 ## Values to tune from results
 Aim error 2 px, motion gates, RANSAC limits, Good/Fair/Rough thresholds, device-tier ± floors (1 cm / 5 mm), calibration acceptance.

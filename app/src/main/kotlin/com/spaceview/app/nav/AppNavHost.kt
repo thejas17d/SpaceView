@@ -32,6 +32,8 @@ import com.spaceview.app.history.HistoryViewModel
 import com.spaceview.app.measure.MeasureRoute
 import com.spaceview.app.measure.MeasureViewModel
 import com.spaceview.app.onboarding.OnboardingScreen
+import com.spaceview.app.furniture.furnitureDestination
+import com.spaceview.app.furniture.openFurniture
 import com.spaceview.app.place.openPlace
 import com.spaceview.app.place.placeDestination
 import com.spaceview.app.pro.openPaywall
@@ -90,8 +92,12 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
     var scanCheck by remember { mutableStateOf<Job?>(null) }
     val startScan: () -> Unit = {
         if (scanCheck?.isActive != true) {
+            // M4-P1 gate N4: the check suspends (up to ~1 s), so the user may leave Home / Gallery meanwhile (e.g.
+            // tap Settings). Navigate only if the screen that asked is still on top.
+            val origin = navController.currentBackStackEntry
             scanCheck = scope.launch {
                 val gate = container.gallerySaveGate.checkItem()
+                if (navController.currentBackStackEntry !== origin) return@launch
                 if (gate.allowed) navController.navigate(Routes.SCAN) else navController.openPaywall(ProFeature.GALLERY_UNLIMITED)
             }
         }
@@ -125,6 +131,8 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                 onSettings = { navController.navigate(Routes.SETTINGS) },
                 onScan = startScan,
                 onGallery = { navController.navigate(Routes.GALLERY) },
+                // T (Builder B): the picker gates each template before any AR.
+                onFurniture = { navController.openFurniture() },
             )
         }
         composable(Routes.SCAN) { entry ->
@@ -223,6 +231,7 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                 onOpen = { navController.navigate(Routes.galleryItem(it)) },
                 onBack = { navController.popBackStack() },
                 onScan = startScan,
+                onAddFurniture = { navController.openFurniture() },
             )
         }
         composable(
@@ -247,6 +256,17 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
             )
         }
         // M4 Place in room (Builder A): AR screen with its own ArScreenAdGuard; Free (K2/K5/D7).
+        // T furniture templates (Builder B): picker → guided measure → preview → review → saved; ads as the scan flow.
+        furnitureDestination(
+            navController = navController,
+            onDone = { navController.navigate(Routes.GALLERY) { popUpTo(Routes.HOME) } },
+            onPlace = { id ->
+                // Item screen underneath, so Back from Place returns to the saved item (as the scan flow).
+                navController.navigate(Routes.galleryItem(id)) { popUpTo(Routes.HOME) }
+                navController.openPlace(id)
+            },
+            onOpenPaywall = { navController.openPaywall(it) },
+        )
         placeDestination(
             onBack = { navController.popBackStack() },
             onOpenPaywall = { navController.openPaywall(it) },

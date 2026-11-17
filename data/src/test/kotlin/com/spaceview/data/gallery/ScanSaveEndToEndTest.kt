@@ -105,6 +105,10 @@ class ScanSaveEndToEndTest {
         assertFalse(p.meshFallback)
         assertEquals(item.modelFile, p.file)
         assertEquals(BoxOrigin.BOTTOM_CENTER, p.origin)
+        // N3: the scan's own box is not centred on its origin (floor cut), and placement is told where it is.
+        val c = p.centre!!
+        assertEquals(info.centre!!.y, c.y, 0.0)
+        assertTrue("centre ${c.y} above the declared ${info.heightM / 2}", c.y > info.heightM / 2)
         assertEquals(0.601, p.width.meters, 0.0) // the verdict uses the measured box
         // Placement height and footprint: the BOTTOM_CENTER origin goes on the floor hit, so the scan's bottom is the
         // floor cut above the floor (not dropped, not lifted) and its footprint is centred on the measured box.

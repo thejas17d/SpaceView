@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- फ़र्नीचर टेम्पलेट (T)। अंग्रेज़ी values/strings_furniture.xml के साथ मिलाकर रखें। -->
+<resources>
+    <!-- Entry points -->
+    <string name="home_furniture">फ़र्नीचर</string>
+    <string name="home_furniture_detail">सोफ़ा, बेड, अलमारी… असली साइज़ का 3D मॉडल</string>
+    <string name="gallery_add_furniture">फ़र्नीचर जोड़ें</string>
+
+    <!-- Picker -->
+    <string name="furniture_title">फ़र्नीचर</string>
+    <string name="furniture_picker_intro">एक आकार चुनें, फिर अपना फ़र्नीचर नापें। 3D मॉडल ठीक उसी साइज़ का बनता है जो आप नापते हैं।</string>
+    <string name="furniture_badge_pro">Pro</string>
+    <string name="furniture_badge_free">मुफ़्त</string>
+    <string name="furniture_checking">जाँच रहे हैं…</string>
+    <string name="furniture_drawing_of">%1$s का चित्र</string>
+    <string name="furniture_step">चरण %1$d / %2$d</string>
+
+    <!-- Templates -->
+    <string name="furniture_t_sofa">सोफ़ा</string>
+    <string name="furniture_t_sofa_detail">2 या 3 सीट</string>
+    <string name="furniture_t_lsofa">L-आकार का सोफ़ा</string>
+    <string name="furniture_t_lsofa_detail">कोना बाईं या दाईं ओर</string>
+    <string name="furniture_t_bed">बेड</string>
+    <string name="furniture_t_bed_detail">सिंगल से किंग तक, सिरहाने के साथ या बिना</string>
+    <string name="furniture_t_wardrobe">अलमारी</string>
+    <string name="furniture_t_wardrobe_detail">2 या 3 दरवाज़े</string>
+    <string name="furniture_t_dining_table">डाइनिंग टेबल</string>
+    <string name="furniture_t_dining_table_detail">चौकोर टॉप। कुर्सियाँ अलग से जोड़ें।</string>
+    <string name="furniture_t_dining_chair">डाइनिंग कुर्सी</string>
+    <string name="furniture_t_dining_chair_detail">एक कुर्सी नापें</string>
+    <string name="furniture_t_tv_unit">टीवी यूनिट</string>
+    <string name="furniture_t_tv_unit_detail">2 से 4 खानों वाली नीची कैबिनेट</string>
+    <string name="furniture_t_bookshelf">किताबों की शेल्फ़</string>
+    <string name="furniture_t_bookshelf_detail">खुली शेल्फ़</string>
+    <string name="furniture_t_study_table">स्टडी टेबल</string>
+    <string name="furniture_t_study_table_detail">डेस्क, दराज़ यूनिट के साथ या बिना</string>
+
+    <!-- Parameters -->
+    <string name="furniture_p_width">चौड़ाई</string>
+    <string name="furniture_p_depth">गहराई</string>
+    <string name="furniture_p_length">लंबाई</string>
+    <string name="furniture_p_height">ऊँचाई</string>
+    <string name="furniture_p_seats">सीटें</string>
+    <string name="furniture_p_side">कोने की तरफ़</string>
+    <string name="furniture_p_leg_height">पाये की ऊँचाई</string>
+    <string name="furniture_p_seat_height">सीट की ऊँचाई</string>
+    <string name="furniture_p_arm_height">हत्थे की ऊँचाई</string>
+    <string name="furniture_p_arm_width">हत्थे की चौड़ाई</string>
+    <string name="furniture_p_back_thickness">पीठ की मोटाई</string>
+    <string name="furniture_p_main_depth">सीट की गहराई (सीधा हिस्सा)</string>
+    <string name="furniture_p_return_width">कोने की चौड़ाई</string>
+    <string name="furniture_p_headboard">सिरहाना</string>
+    <string name="furniture_p_bed_height">बेड की ऊँचाई</string>
+    <string name="furniture_p_mattress">गद्दे की मोटाई</string>
+    <string name="furniture_p_headboard_thickness">सिरहाने की मोटाई</string>
+    <string name="furniture_p_doors">दरवाज़े</string>
+    <string name="furniture_p_plinth">बेस की ऊँचाई</string>
+    <string name="furniture_p_top_thickness">टॉप की मोटाई</string>
+    <string name="furniture_p_leg_size">पाये की मोटाई</string>
+    <string name="furniture_p_leg_inset">पाया किनारे से कितना अंदर</string>
+    <string name="furniture_p_seat_thickness">सीट की मोटाई</string>
+    <string name="furniture_p_compartments">खाने</string>
+    <string name="furniture_p_shelves">शेल्फ़</string>
+    <string name="furniture_p_pedestal">दराज़ यूनिट</string>
+    <string name="furniture_p_pedestal_width">दराज़ यूनिट की चौड़ाई</string>
+
+    <!-- How to measure each one -->
+    <string name="furniture_h_width">बाएँ बाहरी किनारे से दाएँ बाहरी किनारे तक।</string>
+    <string name="furniture_h_depth">पीछे से आगे के किनारे तक, जहाँ सबसे ज़्यादा बाहर निकला हो।</string>
+    <string name="furniture_h_depth_lsofa">पीछे से कोने वाले हिस्से के आगे तक।</string>
+    <string name="furniture_h_length">सिरहाने वाले सिरे से पैरों वाले सिरे तक।</string>
+    <string name="furniture_h_height">फ़र्श से सबसे ऊँची जगह तक।</string>
+    <string name="furniture_h_seat_height">फ़र्श से सीट के ऊपर तक।</string>
+    <string name="furniture_h_arm_height">फ़र्श से हत्थे के ऊपर तक।</string>
+    <string name="furniture_h_arm_width">एक हत्थे के आर-पार, बाहरी से भीतरी किनारे तक।</string>
+    <string name="furniture_h_main_depth">सीधे हिस्से के पीछे से आगे तक, कोने का नहीं।</string>
+    <string name="furniture_h_return_width">कोने वाले हिस्से के आर-पार, एक तरफ़ से दूसरी तरफ़।</string>
+    <string name="furniture_h_bed_height">फ़र्श से गद्दे के ऊपर तक।</string>
+    <string name="furniture_h_mattress">फ़्रेम के ऊपर से गद्दे के ऊपर तक।</string>
+    <string name="furniture_h_plinth">फ़र्श से वहाँ तक जहाँ बेस ख़त्म होता है।</string>
+    <string name="furniture_h_leg_inset">टेबल के किनारे से पाये के बाहरी तरफ़ तक।</string>
+    <string name="furniture_h_leg_height">फ़र्श से कैबिनेट के नीचे तक।</string>
+    <string name="furniture_h_pedestal_width">दराज़ यूनिट के आर-पार, एक तरफ़ से दूसरी तरफ़।</string>
+
+    <!-- Options and presets -->
+    <string name="furniture_start_from">यहाँ से शुरू करें</string>
+    <string name="furniture_preset_note">शुरुआती साइज़ आम साइज़ हैं। इसके बाद आप अपना नापेंगे।</string>
+    <string name="furniture_o_left">बाएँ</string>
+    <string name="furniture_o_right">दाएँ</string>
+    <string name="furniture_o_yes">हाँ</string>
+    <string name="furniture_o_no">नहीं</string>
+    <string name="furniture_o_none">कोई नहीं</string>
+    <string name="furniture_preset_two_seat">2-सीटर</string>
+    <string name="furniture_preset_three_seat">3-सीटर</string>
+    <string name="furniture_preset_left">कोना बाईं ओर</string>
+    <string name="furniture_preset_right">कोना दाईं ओर</string>
+    <string name="furniture_preset_single">सिंगल</string>
+    <string name="furniture_preset_double">डबल</string>
+    <string name="furniture_preset_queen">क्वीन</string>
+    <string name="furniture_preset_king">किंग</string>
+    <string name="furniture_preset_two_door">2-दरवाज़े</string>
+    <string name="furniture_preset_three_door">3-दरवाज़े</string>
+    <string name="furniture_preset_four_seat">4-सीटर</string>
+    <string name="furniture_preset_six_seat">6-सीटर</string>
+    <string name="furniture_measure_start">कैमरे से नापें</string>
+    <string name="furniture_type_instead">इसके बजाय साइज़ टाइप करें</string>
+
+    <!-- Guided measure -->
+    <string name="furniture_measure_title">%1$s नापें</string>
+    <string name="furniture_use_this">यही लें</string>
+    <string name="furniture_measure_again">फिर से नापें</string>
+    <string name="furniture_type">टाइप करें</string>
+    <string name="furniture_use_typical">आम साइज़ लें</string>
+    <string name="furniture_next">आगे</string>
+    <string name="furniture_now">अभी: %1$s</string>
+    <string name="furniture_too_small">इस आकार के लिए %1$s कम से कम %2$s होनी चाहिए।</string>
+    <string name="furniture_too_large">इस आकार के लिए %1$s ज़्यादा से ज़्यादा %2$s होनी चाहिए।</string>
+    <string name="furniture_invalid">%1$s के लिए सही मान चाहिए।</string>
+
+    <!-- Preview -->
+    <string name="furniture_preview_title">झलक</string>
+    <string name="furniture_preview_hint">घुमाने के लिए खींचें, ज़ूम के लिए दो उँगलियाँ फैलाएँ।</string>
+    <string name="furniture_preview_invalid">कुछ साइज़ इस आकार में नहीं बैठते। मॉडल देखने के लिए अगली स्क्रीन पर उन्हें ठीक करें।</string>
+    <string name="furniture_preview_desc">%1$s की 3D झलक</string>
+    <string name="furniture_preview_open">3D झलक</string>
+
+    <!-- Review -->
+    <string name="furniture_review_title">जाँचें</string>
+    <string name="furniture_overall">कुल साइज़</string>
+    <string name="furniture_overall_box_note">फ़िट की जाँच इसी पूरे बॉक्स (चौड़ाई × गहराई × ऊँचाई) से होती है।</string>
+    <string name="furniture_details">बारीकियाँ</string>
+    <string name="furniture_colours">रंग</string>
+    <string name="furniture_name">नाम</string>
+    <string name="furniture_typical">आम साइज़</string>
+    <string name="furniture_typed">आपने टाइप किया</string>
+    <string name="furniture_still_needed">नापें या टाइप करें: %1$s</string>
+    <string name="furniture_save">गैलरी में सेव करें</string>
+    <string name="furniture_save_failed">सेव नहीं हो पाया। फिर से कोशिश करें।</string>
+    <string name="furniture_needs_pro_template">यह आकार Pro का हिस्सा है। आपके साइज़ रखे गए हैं।</string>
+    <string name="furniture_needs_pro_gallery">आपकी मुफ़्त गैलरी भर गई है। आपके साइज़ रखे गए हैं।</string>
+    <string name="furniture_see_pro">Pro देखें</string>
+    <string name="furniture_palette_stone">स्टोन</string>
+    <string name="furniture_palette_walnut">अख़रोट</string>
+    <string name="furniture_palette_indigo">नील</string>
+    <string name="furniture_palette_oak">ओक और सफ़ेद</string>
+    <string name="furniture_palette_charcoal">चारकोल</string>
+
+    <!-- Edit -->
+    <string name="furniture_edit_title">%1$s तय करें</string>
+    <string name="furniture_edit_hint">टाइप किया साइज़ अनुमान के रूप में दिखता है, ± के बिना।</string>
+    <string name="furniture_clear">हटाएँ</string>
+
+    <!-- Leave / saved -->
+    <string name="furniture_discard_title">यह चीज़ छोड़ दें?</string>
+    <string name="furniture_discard_body">इसके लिए आपने जो नापा है, वह मिट जाएगा।</string>
+    <string name="furniture_discard">छोड़ें</string>
+    <string name="furniture_saved_title">आपकी गैलरी में सेव हो गया</string>
+    <string name="furniture_done">हो गया</string>
+</resources>

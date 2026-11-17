@@ -59,6 +59,7 @@ import com.spaceview.app.common.InstrumentCard
 import com.spaceview.app.common.hintRes
 import com.spaceview.app.ui.theme.SpaceViewTheme
 import com.spaceview.data.gallery.GalleryItem
+import com.spaceview.engine.ModelKind
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.DateFormat
@@ -211,11 +212,15 @@ private fun ItemContent(
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                 shape = MaterialTheme.shapes.medium,
             ) { Text(stringResource(R.string.gallery_share)) }
-            OutlinedButton(
-                onClick = onEdit,
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                shape = MaterialTheme.shapes.medium,
-            ) { Text(stringResource(R.string.gallery_edit_dimensions), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            // A furniture template's size is one of its parameters (the repository refuses a size edit): resize it by
+            // making it again in the furniture flow.
+            if (item.modelKind != ModelKind.TEMPLATE) {
+                OutlinedButton(
+                    onClick = onEdit,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    shape = MaterialTheme.shapes.medium,
+                ) { Text(stringResource(R.string.gallery_edit_dimensions), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
         }
         HorizontalDivider(color = SpaceViewTheme.colors.hairline)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

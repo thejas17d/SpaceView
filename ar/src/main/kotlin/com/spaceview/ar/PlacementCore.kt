@@ -44,8 +44,12 @@ data class PlacementStatus(
     val pauses: Int = 0,
 )
 
-/** One frame's surface under the reticle (copied out of ARCore). */
-class SurfaceHit(val position: Vec3, val normal: Vec3)
+/**
+ * One frame's surface under the reticle (copied out of ARCore).
+ *
+ * @property onPlane the hit lies on a tracked ARCore plane (the floor estimate trusts these more than single points).
+ */
+class SurfaceHit(val position: Vec3, val normal: Vec3, val onPlane: Boolean = true)
 
 /** What the controller must anchor for a drop: the **surface** pose (touching point, surface frame). */
 class DropRequest(val surfacePose: Pose)
@@ -74,8 +78,8 @@ class PlacementCore(val item: PlacedItem, initialTarget: SurfaceTarget) {
     private var localOffset = Vec3.ZERO
     private var placedSurface: SurfaceTarget = initialTarget
 
-    /** Lowest horizontal surface seen this session (the floor), for the wall height readout and the fallback. */
-    private var floorY: Double? = null
+    /** The floor (robust lowest horizontal surface, N1), for the wall height readout and the fallback. */
+    private val floor = FloorEstimator()
     private var lastHitPos: Vec3? = null
     private var lastHitNormal: Vec3? = null
     private var pauses = 0
@@ -85,6 +89,12 @@ class PlacementCore(val item: PlacedItem, initialTarget: SurfaceTarget) {
     private var fallbackRejected = false
     private val fallbackPoints = ArrayList<Vec3>(2)
     private var fallbackPlane: Plane? = null
+
+    /**
+     * N5: the placed model pose is recomputed only when its inputs change (a new anchor pose, a command), so a steady
+     * placed item costs no allocation per frame and [modelPose] keeps the same instance (the node is not re-set).
+     */
+    private var placedCache: Pose? = null
 
     /** The pose to render now, or null to hide the item. */
     var modelPose: Pose? = null
@@ -114,10 +124,21 @@ class PlacementCore(val item: PlacedItem, initialTarget: SurfaceTarget) {
      * when it is tracked (null otherwise). Returns false (and changes nothing) for a repeated timestamp.
      */
     fun onFrame(timestampNs: Long, tracking: Boolean, camera: Pose, hit: SurfaceHit?, anchorPose: Pose?): Boolean =
-        onFrame(timestampNs, tracking, camera, hit?.position, hit?.normal, anchorPose)
+        onFrame(timestampNs, tracking, camera, hit?.position, hit?.normal, anchorPose, hit?.onPlane ?: false)
 
-    /** [onFrame] without a [SurfaceHit] wrapper (the per-frame path: no allocation for the hit, R3). */
-    fun onFrame(timestampNs: Long, tracking: Boolean, camera: Pose, hitPos: Vec3?, hitNormal: Vec3?, anchorPose: Pose?): Boolean {
+    /**
+     * [onFrame] without a [SurfaceHit] wrapper (the per-frame path: no allocation for the hit, R3). [hitOnPlane]: the
+     * hit lies on a tracked ARCore plane. Pass the same [anchorPose] instance while the anchor has not moved (N5).
+     */
+    fun onFrame(
+        timestampNs: Long,
+        tracking: Boolean,
+        camera: Pose,
+        hitPos: Vec3?,
+        hitNormal: Vec3?,
+        anchorPose: Pose?,
+        hitOnPlane: Boolean = false,
+    ): Boolean {
         if (timestampNs == lastTimestamp) return false
         lastTimestamp = timestampNs
         cameraTracking = tracking
@@ -125,15 +146,17 @@ class PlacementCore(val item: PlacedItem, initialTarget: SurfaceTarget) {
         val usable = tracking && hitPos != null && hitNormal != null
         lastHitPos = if (usable) hitPos else null
         lastHitNormal = if (usable) hitNormal else null
-        if (usable && PlacementMath.isHorizontal(hitNormal!!)) {
-            floorY = floorY?.let { minOf(it, hitPos!!.y) } ?: hitPos!!.y
-        }
+        if (usable && PlacementMath.isHorizontal(hitNormal!!)) floor.add(hitPos!!.x, hitPos.y, hitPos.z, hitOnPlane)
         when (val s = currentState) {
             is PlacementState.Placed -> {
-                if (anchorPose != null) this.anchorPose = anchorPose
+                if (anchorPose != null && anchorPose !== this.anchorPose) {
+                    this.anchorPose = anchorPose
+                    placedCache = null
+                }
                 val visible = s.anchored && anchorPose != null && tracking
-                val pose = placedPose()
-                currentState = s.copy(pose = pose ?: s.pose, tracking = visible)
+                val pose = placedCache ?: placedPose()?.also { placedCache = it } ?: s.pose
+                // Allocation-free when nothing moved (N5): same pose instance, same visibility.
+                if (pose !== s.pose || visible != s.tracking) currentState = s.copy(pose = pose, tracking = visible)
                 modelPose = if (visible) pose else null
             }
             is PlacementState.FallbackLine -> {
@@ -206,6 +229,7 @@ class PlacementCore(val item: PlacedItem, initialTarget: SurfaceTarget) {
         localOffset = Vec3.ZERO
         placedSurface = target
         val pose = PlacementMath.modelPose(surface, item, target, spinRad)
+        placedCache = pose
         currentState = PlacementState.Placed(pose, anchored = false, surface = target, tracking = true)
         modelPose = pose
         return DropRequest(surface)
@@ -291,17 +315,18 @@ class PlacementCore(val item: PlacedItem, initialTarget: SurfaceTarget) {
         }
         val a = fallbackPoints[0]; val b = fallbackPoints[1]
         fallbackPoints.clear()
-        // The floor is the lowest horizontal surface seen this session, not the first tap (M4 review MINOR 4): two
-        // taps on a table edge are more than MAX_OFF_FLOOR_M above it and are rejected.
-        val floor = Plane.fromPointNormal(Vec3(a.x, floorY ?: a.y, a.z), Vec3.UP)
-        val plane = Plane.verticalThroughFloorLine(a, b, cam.translation, floor)
+        // The floor is the robust floor estimate (N1), not the first tap (M4 review MINOR 4): two taps on a table edge
+        // are more than MAX_OFF_FLOOR_M above it and are rejected, and a stray point below the floor cannot reject
+        // genuine floor taps.
+        val floorPlane = Plane.fromPointNormal(Vec3(a.x, floor.floorY() ?: a.y, a.z), Vec3.UP)
+        val plane = Plane.verticalThroughFloorLine(a, b, cam.translation, floorPlane)
         if (plane == null) {
             fallbackRejected = true
             currentState = PlacementState.FallbackLine(0)
             return true
         }
         fallbackPlane = plane
-        floorY = floorY?.let { minOf(it, a.y) } ?: a.y
+        floor.confirm((a.y + b.y) / 2)
         target = SurfaceTarget.WALL_FALLBACK
         currentState = PlacementState.Searching
         return true
@@ -340,13 +365,14 @@ class PlacementCore(val item: PlacedItem, initialTarget: SurfaceTarget) {
     /** A new ARCore session (new world frame): as [onPaused], and the floor is forgotten. */
     fun onSessionCreated() {
         onPaused()
-        floorY = null
+        floor.reset()
         lastTimestamp = Long.MIN_VALUE
         wallSearchSinceNs = Long.MIN_VALUE
     }
 
     private fun clearPlacement() {
         anchorPose = null
+        placedCache = null
         localOffset = Vec3.ZERO
         previewSurface = null
         if (currentState is PlacementState.Placed) currentState = PlacementState.Searching
@@ -363,6 +389,7 @@ class PlacementCore(val item: PlacedItem, initialTarget: SurfaceTarget) {
         val s = currentState
         if (s is PlacementState.Placed) {
             val pose = placedPose() ?: return
+            placedCache = pose
             currentState = s.copy(pose = pose)
             if (modelPose != null) modelPose = pose
         } else if (s is PlacementState.Preview) {
@@ -375,7 +402,7 @@ class PlacementCore(val item: PlacedItem, initialTarget: SurfaceTarget) {
 
     /** Centre height of a wall item above the floor (m), when both are known. */
     private fun centreHeight(): Double? {
-        val y0 = floorY ?: return null
+        val y0 = floor.floorY() ?: return null
         val pose = when (val s = currentState) {
             is PlacementState.Placed -> s.pose.takeIf { placedSurface.isWall }
             is PlacementState.Preview -> s.pose.takeIf { s.surface.isWall }

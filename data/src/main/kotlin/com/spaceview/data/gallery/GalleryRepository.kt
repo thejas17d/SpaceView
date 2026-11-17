@@ -671,21 +671,25 @@ class GalleryRepository(
         modelKind = item.modelKind,
         meshFallback = fallback,
         label = item.label,
+        centre = info.centre,
     )
 
     /** A fresh model for a regenerable item, or null for a template whose parts are unknown. */
     private fun regenerate(item: GalleryItem, photo: File?): ByteArray? = when (item.modelKind) {
         ModelKind.TEMPLATE -> {
-            val parts = item.templateId?.let { id -> item.templateParams?.let { templates.parts(id, it) } }
-            parts?.let { buildTemplateGlb(it, item.label) }
+            val id = item.templateId
+            val params = item.templateParams
+            val parts = if (id != null && params != null) templates.parts(id, params) else null
+            val palette = if (id != null && params != null) templates.palette(id, params) else null
+            parts?.let { buildTemplateGlb(it, palette ?: Palette.DEFAULT, item.label) }
                 ?.takeIf { glb -> GlbReader.readInfo(glb)?.let { matches(it, item.width.meters, item.height.meters, item.depth.meters) } == true }
         }
         ModelKind.PROXY_BOX -> buildGlb(item.kind, item.width, item.height, item.depth, photo?.readBytes(), item.label)
         else -> null
     }
 
-    private fun buildTemplateGlb(parts: List<Part>, label: String?): ByteArray? = runCatching {
-        GlbWriter.writeParts(parts, Palette.DEFAULT, BoxOrigin.BOTTOM_CENTER, displayName(ObjectKind.FURNITURE, label), ModelKind.TEMPLATE)
+    private fun buildTemplateGlb(parts: List<Part>, palette: Palette, label: String?): ByteArray? = runCatching {
+        GlbWriter.writeParts(parts, palette, BoxOrigin.BOTTOM_CENTER, displayName(ObjectKind.FURNITURE, label), ModelKind.TEMPLATE)
     }.getOrNull()
 
     // ---- internals ------------------------------------------------------------------------------

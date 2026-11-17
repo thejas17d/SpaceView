@@ -147,6 +147,17 @@ jobs:
             exit 1
           fi
 
+      - name: Debug-only code absent from release (3D Scan Lab, fake billing UI)
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          # The lab lives only in src/debug; R8 must also strip the fake billing panel. Any hit means it shipped.
+          HITS=$(unzip -p "$APK" 'classes*.dex' | grep -a -c -E 'Scan3dLab|scan3d_lab|FakeBillingControls' || true)
+          echo "Debug-only references in release dex: $HITS"
+          if [ "$HITS" != "0" ]; then
+            echo "::error::Debug-only code (3D Scan Lab / fake billing UI) found in the release APK."
+            exit 1
+          fi
+
       - name: Size budget (arm64)
         run: |
           curl -sSfL -o "$RUNNER_TEMP/bundletool.jar" \

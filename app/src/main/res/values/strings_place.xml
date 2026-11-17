@@ -65,7 +65,7 @@
     <string name="place_fit_typed">Using your typed size</string>
     <string name="place_fit_width_only">Width checked; height not checked</string>
     <string name="place_fit_rotated">Fits only if turned</string>
-    <string name="place_fit_bounding">Checked against the overall size</string>
+    <string name="place_fit_bounding">Checked against the overall box (width × depth × height)</string>
     <string name="place_fit_axis_width">Limited by the width</string>
     <string name="place_fit_axis_height">Limited by the height</string>
     <string name="place_fit_axis_depth">Limited by the depth</string>

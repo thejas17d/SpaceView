@@ -115,7 +115,7 @@ private fun PlaceArScreen(loaded: LoadedModel, vm: PlaceViewModel, onBack: () ->
         val session = remember { MeasureSession(MeasureMode.DISTANCE, depthWanted = false) }
         val controller = remember {
             PlacementController(
-                PlacedItem(model.widthM, model.heightM, model.depthM, model.origin),
+                PlacedItem(model.widthM, model.heightM, model.depthM, model.origin, model.centre),
                 savedTarget ?: PlaceViewModel.defaultTarget(model.origin),
                 session,
             )
@@ -233,17 +233,25 @@ private fun PlaceArScreen(loaded: LoadedModel, vm: PlaceViewModel, onBack: () ->
 private class NodeHolder {
     private var node: Node? = null
 
+    /** The pose last set on the node: a steady placed item passes the same instance every frame (N5). */
+    private var shown: Pose? = null
+
     fun set(n: Node) {
         node = n
         n.isVisible = false
+        shown = null
     }
 
     fun show(pose: Pose?) {
         val n = node ?: return
         if (pose == null) {
             n.isVisible = false
+            shown = null
             return
         }
+        // N5: nothing moved, so skip the per-frame Float3 / Quaternion allocations and the transform update.
+        if (pose === shown) return
+        shown = pose
         val t = pose.translation
         val q = pose.rotation
         n.worldPosition = Float3(t.x.toFloat(), t.y.toFloat(), t.z.toFloat())

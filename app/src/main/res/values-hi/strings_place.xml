@@ -65,7 +65,7 @@
     <string name="place_fit_typed">आपका टाइप किया हुआ साइज़ इस्तेमाल हुआ</string>
     <string name="place_fit_width_only">चौड़ाई जाँची गई; ऊँचाई नहीं जाँची गई</string>
     <string name="place_fit_rotated">घुमाने पर ही फ़िट होता है</string>
-    <string name="place_fit_bounding">कुल साइज़ से जाँचा गया</string>
+    <string name="place_fit_bounding">पूरे बॉक्स (चौड़ाई × गहराई × ऊँचाई) से जाँचा गया</string>
     <string name="place_fit_axis_width">चौड़ाई से सीमित</string>
     <string name="place_fit_axis_height">ऊँचाई से सीमित</string>
     <string name="place_fit_axis_depth">गहराई से सीमित</string>

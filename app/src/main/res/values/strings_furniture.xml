@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Furniture templates (T, Builder B). Hindi in values-hi/strings_furniture.xml: keep both in step. -->
+<resources>
+    <!-- Entry points -->
+    <string name="home_furniture">Furniture</string>
+    <string name="home_furniture_detail">Sofa, bed, wardrobe… as a 3D model at its real size</string>
+    <string name="gallery_add_furniture">Add furniture</string>
+
+    <!-- Picker -->
+    <string name="furniture_title">Furniture</string>
+    <string name="furniture_picker_intro">Choose a shape, then measure your piece. The 3D model is built at exactly the size you measure.</string>
+    <string name="furniture_badge_pro">Pro</string>
+    <string name="furniture_badge_free">Free</string>
+    <string name="furniture_checking">Checking…</string>
+    <string name="furniture_drawing_of">Drawing of %1$s</string>
+    <string name="furniture_step">Step %1$d of %2$d</string>
+
+    <!-- Templates -->
+    <string name="furniture_t_sofa">Sofa</string>
+    <string name="furniture_t_sofa_detail">2 or 3 seats</string>
+    <string name="furniture_t_lsofa">L-shaped sofa</string>
+    <string name="furniture_t_lsofa_detail">Corner on the left or right</string>
+    <string name="furniture_t_bed">Bed</string>
+    <string name="furniture_t_bed_detail">Single to king, with or without a headboard</string>
+    <string name="furniture_t_wardrobe">Wardrobe</string>
+    <string name="furniture_t_wardrobe_detail">2 or 3 doors</string>
+    <string name="furniture_t_dining_table">Dining table</string>
+    <string name="furniture_t_dining_table_detail">Rectangular top. Add the chairs as their own item.</string>
+    <string name="furniture_t_dining_chair">Dining chair</string>
+    <string name="furniture_t_dining_chair_detail">Measure one chair</string>
+    <string name="furniture_t_tv_unit">TV unit</string>
+    <string name="furniture_t_tv_unit_detail">Low cabinet with 2 to 4 fronts</string>
+    <string name="furniture_t_bookshelf">Bookshelf</string>
+    <string name="furniture_t_bookshelf_detail">Open shelves</string>
+    <string name="furniture_t_study_table">Study table</string>
+    <string name="furniture_t_study_table_detail">Desk, with or without a drawer unit</string>
+
+    <!-- Parameters -->
+    <string name="furniture_p_width">Width</string>
+    <string name="furniture_p_depth">Depth</string>
+    <string name="furniture_p_length">Length</string>
+    <string name="furniture_p_height">Height</string>
+    <string name="furniture_p_seats">Seats</string>
+    <string name="furniture_p_side">Corner side</string>
+    <string name="furniture_p_leg_height">Leg height</string>
+    <string name="furniture_p_seat_height">Seat height</string>
+    <string name="furniture_p_arm_height">Arm height</string>
+    <string name="furniture_p_arm_width">Arm width</string>
+    <string name="furniture_p_back_thickness">Back thickness</string>
+    <string name="furniture_p_main_depth">Seat depth (straight part)</string>
+    <string name="furniture_p_return_width">Corner width</string>
+    <string name="furniture_p_headboard">Headboard</string>
+    <string name="furniture_p_bed_height">Bed height</string>
+    <string name="furniture_p_mattress">Mattress thickness</string>
+    <string name="furniture_p_headboard_thickness">Headboard thickness</string>
+    <string name="furniture_p_doors">Doors</string>
+    <string name="furniture_p_plinth">Base height</string>
+    <string name="furniture_p_top_thickness">Top thickness</string>
+    <string name="furniture_p_leg_size">Leg thickness</string>
+    <string name="furniture_p_leg_inset">Leg inset</string>
+    <string name="furniture_p_seat_thickness">Seat thickness</string>
+    <string name="furniture_p_compartments">Compartments</string>
+    <string name="furniture_p_shelves">Shelves</string>
+    <string name="furniture_p_pedestal">Drawer unit</string>
+    <string name="furniture_p_pedestal_width">Drawer unit width</string>
+
+    <!-- How to measure each one -->
+    <string name="furniture_h_width">From the outer left edge to the outer right edge.</string>
+    <string name="furniture_h_depth">From the back to the front edge, where it sticks out most.</string>
+    <string name="furniture_h_depth_lsofa">From the back to the front of the corner part.</string>
+    <string name="furniture_h_length">From the head end to the foot end.</string>
+    <string name="furniture_h_height">From the floor to the highest point.</string>
+    <string name="furniture_h_seat_height">From the floor to the top of the seat.</string>
+    <string name="furniture_h_arm_height">From the floor to the top of an arm.</string>
+    <string name="furniture_h_arm_width">Across one arm, outer edge to inner edge.</string>
+    <string name="furniture_h_main_depth">From the back to the front of the straight part, not the corner.</string>
+    <string name="furniture_h_return_width">Across the corner part, side to side.</string>
+    <string name="furniture_h_bed_height">From the floor to the top of the mattress.</string>
+    <string name="furniture_h_mattress">From the top of the frame to the top of the mattress.</string>
+    <string name="furniture_h_plinth">From the floor to where the base ends.</string>
+    <string name="furniture_h_leg_inset">From the table edge to the outside of a leg.</string>
+    <string name="furniture_h_leg_height">From the floor to the bottom of the cabinet.</string>
+    <string name="furniture_h_pedestal_width">Across the drawer unit, side to side.</string>
+
+    <!-- Options and presets -->
+    <string name="furniture_start_from">Start from</string>
+    <string name="furniture_preset_note">Starting sizes are typical. You measure yours next.</string>
+    <string name="furniture_o_left">Left</string>
+    <string name="furniture_o_right">Right</string>
+    <string name="furniture_o_yes">Yes</string>
+    <string name="furniture_o_no">No</string>
+    <string name="furniture_o_none">None</string>
+    <string name="furniture_preset_two_seat">2-seater</string>
+    <string name="furniture_preset_three_seat">3-seater</string>
+    <string name="furniture_preset_left">Corner on the left</string>
+    <string name="furniture_preset_right">Corner on the right</string>
+    <string name="furniture_preset_single">Single</string>
+    <string name="furniture_preset_double">Double</string>
+    <string name="furniture_preset_queen">Queen</string>
+    <string name="furniture_preset_king">King</string>
+    <string name="furniture_preset_two_door">2-door</string>
+    <string name="furniture_preset_three_door">3-door</string>
+    <string name="furniture_preset_four_seat">4-seater</string>
+    <string name="furniture_preset_six_seat">6-seater</string>
+    <string name="furniture_measure_start">Measure with the camera</string>
+    <string name="furniture_type_instead">Type the sizes instead</string>
+
+    <!-- Guided measure -->
+    <string name="furniture_measure_title">Measure the %1$s</string>
+    <string name="furniture_use_this">Use this</string>
+    <string name="furniture_measure_again">Measure again</string>
+    <string name="furniture_type">Type</string>
+    <string name="furniture_use_typical">Use typical</string>
+    <string name="furniture_next">Next</string>
+    <string name="furniture_now">Now: %1$s</string>
+    <string name="furniture_too_small">%1$s must be at least %2$s for this shape.</string>
+    <string name="furniture_too_large">%1$s must be at most %2$s for this shape.</string>
+    <string name="furniture_invalid">%1$s needs a valid value.</string>
+
+    <!-- Preview -->
+    <string name="furniture_preview_title">Preview</string>
+    <string name="furniture_preview_hint">Drag to turn it, pinch to zoom.</string>
+    <string name="furniture_preview_invalid">Some sizes don\'t fit this shape. Fix them on the next screen to see the model.</string>
+    <string name="furniture_preview_desc">3D preview of %1$s</string>
+    <string name="furniture_preview_open">3D preview</string>
+
+    <!-- Review -->
+    <string name="furniture_review_title">Review</string>
+    <string name="furniture_overall">Overall size</string>
+    <string name="furniture_overall_box_note">Fit checks use this overall box (width × depth × height).</string>
+    <string name="furniture_details">Details</string>
+    <string name="furniture_colours">Colours</string>
+    <string name="furniture_name">Name</string>
+    <string name="furniture_typical">typical</string>
+    <string name="furniture_typed">typed by you</string>
+    <string name="furniture_still_needed">Measure or type: %1$s</string>
+    <string name="furniture_save">Save to Gallery</string>
+    <string name="furniture_save_failed">Couldn\'t save it. Try again.</string>
+    <string name="furniture_needs_pro_template">This shape is part of Pro. Your sizes are kept.</string>
+    <string name="furniture_needs_pro_gallery">Your Free gallery is full. Your sizes are kept.</string>
+    <string name="furniture_see_pro">See Pro</string>
+    <string name="furniture_palette_stone">Stone</string>
+    <string name="furniture_palette_walnut">Walnut</string>
+    <string name="furniture_palette_indigo">Indigo</string>
+    <string name="furniture_palette_oak">Oak and white</string>
+    <string name="furniture_palette_charcoal">Charcoal</string>
+
+    <!-- Edit -->
+    <string name="furniture_edit_title">Set %1$s</string>
+    <string name="furniture_edit_hint">A typed size is shown as an estimate, without ±.</string>
+    <string name="furniture_clear">Clear</string>
+
+    <!-- Leave / saved -->
+    <string name="furniture_discard_title">Leave this item?</string>
+    <string name="furniture_discard_body">What you measured for it will be lost.</string>
+    <string name="furniture_discard">Leave</string>
+    <string name="furniture_saved_title">Saved to Gallery</string>
+    <string name="furniture_done">Done</string>
+</resources>

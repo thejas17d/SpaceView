@@ -103,6 +103,8 @@ class MeshExtras(
  * @property glbVersion 1 when the key is absent (M3 models).
  * @property modelKind null when absent (M3 models, which are always [ModelKind.PROXY_BOX]).
  * @property origin null when absent or unknown.
+ * @property centre the bounding-box centre in the GLB frame when the GLB declares it (a `keepInputOrigin` mesh,
+ *   [GlbWriter.AABB_CX]; M4-P1 gate N3); null otherwise, when the centre is `origin.centreOffset(w, h, d)`.
  */
 class GlbInfo(
     val widthM: Double,
@@ -111,4 +113,5 @@ class GlbInfo(
     val origin: BoxOrigin?,
     val glbVersion: Int,
     val modelKind: ModelKind?,
+    val centre: Vec3? = null,
 )

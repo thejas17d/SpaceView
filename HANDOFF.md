@@ -2,7 +2,7 @@
 
 Living context file so any new session/LLM can continue. Updated after every step of work.
 
-_Last updated: 2026-11-16 — M4 + P1 Pro + recon core GATE PASSED (with conditions) and committed; CI running; next: M4 APK, then D (3D-scan spike + app) ∥ T (templates)._
+_Last updated: 2026-11-17 — T templates + D0 3D Scan Lab GATE PASSED (conditions closed except R3 in progress); next: user runs the spike on the TD0 debug APK; D step 2 after spike._
 
 ## What SpaceView is
 Android-first (Google Play) AR app: measure anything precisely; scan an object (e.g. photo frame in a café) → save to "AR Gallery" with exact dimensions → place it in your room at true size. Later: B2B for Indian retailers (Croma, Reliance Digital, furniture), iOS (ARKit/LiDAR).
@@ -193,6 +193,66 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
   - **R2 closed:** the two-distance carton bench was added to ARCH §7.1.10, and gate §7 was merged into TESTING.md §18.
   - **R3 OPEN:** the first CI run must show SpaceViewMigrationTest 3/3, the size gate and the 16 KB check. Then the user installs M4 over M3. **The Room v3 amendment window closes when the M4 APK leaves the team.**
   - **Full build evidence:** engine 262, ar 106, data 65, app 242, all green; `:engine:test --rerun-tasks` green (determinism); release universal 19.99 MB.
+- **R3 CI part CLOSED:** CI run 43846146989 for de63706 is GREEN.
+  - `SpaceViewMigrationTest` 3/3 passed on Linux (v1 row survives all migrations, 1→2, 2→3).
+  - arm64 Play download is **10.37 MiB**, installed 18.15 MiB, and all 14 native libraries pass the 16 KB check.
+  - **M4 APKs:** `builds/SpaceView-M4-{debug,release}.apk`, built from a clean worktree at de63706.
+  - **The user was told to install over M3** (R3 device part, TESTING §18 item 1). **From this point the Room v3 amendment window is CLOSED: any schema change needs v4.**
+- **Phase 2 started (2026-11-16), fresh agents:**
+  - **Builder B → T furniture templates:**
+    - `engine/furniture` parametric templates; registry wired as TemplateModelSource (M4 MINOR 11)
+    - ProCatalog core-template fix (gate T1)
+    - `app/furniture` picker → guided measure → preview → review → save, gated
+    - Home entry; `strings_furniture`
+  - **Builder A → D spike harness ONLY:** a debug-only "3D Scan Lab" (capture → recon pipeline in ReconMemoryTest order → metrics CSV/JSON + mesh viewer), plus MINORs N1/N3/N4/N5. Per gate §8 D1, the user-facing D screens wait until the spike passes on the user's phone.
+  - **Open user decisions:** (1) 3D-scan Free rule: "3 saved at a time" (as built) vs "3 lifetime"; (2) phone models for the spike; (3) M4 install over M3 + TESTING §18 item 1.
+- **Builder A: D spike harness DONE (uncommitted).**
+  - **Lab:** a debug-only 3D Scan Lab (`app/src/debug/.../scan3d`, `Scan3dLabActivity`; Settings → debug panel).
+    - `:ar` pieces: DepthCaptureListener (RAW/HARDWARE/SMOOTHED, pooled slots, ≤5 Hz worker), ShapeScanGovernor, ShapeScanPipeline (ReconMemoryTest order), FloorEstimator.
+    - Metrics go to `files/scan3d_lab/runs.csv` + `<runId>/metrics.json` + `mesh.glb`, shareable.
+    - The spike protocol text is in the lab.
+    - Release contains no lab code (verified via dex + usage.txt).
+  - **MINORs:** N1 (FloorEstimator), N3 (aabbC extras → wall placement uses the real centre), N4 (startScan back-stack check) done; N5 partial.
+  - **Tests:** engine 281, ar 125, data 65, app 282.
+  - **Orchestrator decision:** the spike runs on the DEBUG build. Debug is slower than release, so passing timing on debug is conservative. If the timing criteria (§7.1.10 items 2–4) FAIL on debug, add a release-signed `lab` build type and rerun them before concluding. Accuracy and coverage (item 1, R2) are build-independent.
+  - **D integration must add the mesh path** to the production gated store (B's `GatedGalleryStore` is template-only).
+- **Builder B: T furniture templates DONE (uncommitted).**
+  - **Templates:** sofa / bed / wardrobe (Free); L-sofa, dining table, dining chair, TV unit, bookshelf, study table (Pro). All in `engine/furniture`, with property tests showing the union = W×H×D.
+  - **Gating and wiring:** `Allowance.Only` (core templates); `GatedGalleryStore` (template gate → checkItem → saveTemplate); registry wired (M4 MINOR 11); `TemplateModelSource.palette()`.
+  - **App flow:** picker → guided measure → 3D preview → review → save → Saved; Home "Furniture" row.
+  - **Tests:** engine 281, app 282.
+  - B's final lint was killed by low memory, so the orchestrator is re-running the full build.
+  - **Note:** builders share one scratchpad, and A rewrote B's build.sh, so the lock-owner labels are unreliable. Fresh agents should use their own script names.
+  - **Reviewer running** → `docs/reviews/T-D0-review.md`.
+- **Phase 2 full build: GREEN.** engine 281 / ar 125 / data 65 / app 282 (0 failures); koverVerify OK; app lint 0 errors, 6 warnings; ar and data lint clean; release universal 20.12 MB (+134 KB vs M4).
+- **T-D0 review DONE** → `docs/reviews/T-D0-review.md`: 1 BLOCKER, 1 MAJOR, 7 MINOR.
+  - **BLOCKER:** the governor's 33.0 ms threshold sits below the 30 fps 33.33 ms period, so every scan drops to 2 Hz.
+  - **MAJOR:** the processing PSS baseline excludes the volume, under-reporting by up to 12.6 MB.
+  - **Templates (T):** APPROVED WITH WARNINGS; all gate §8 T1–T6 requirements met.
+  - **Fix rounds running:** Builder A on the B1 + M2 + MINORs 3/5/6/7/8/9 (lab); Builder B on MINOR 4 (golden tests per template id).
+  - **The user's spike run must wait for the B1 fix.**
+- **Builder B MINOR 4 DONE:** `TemplateGoldenTest` (39 SHA-256 pinned cases, captured before the refactor and still matching); per-template constants objects. Engine 282, app 286. The immutability rule was added to ARCH §6.
+- **Builder A T-D0 fixes DONE.**
+  - **B1:** the governor steps down only on dropped frames (1.5 × the configured frame period).
+  - **M2:** PSS adds the volume back, the baseline is taken after AR closes, and the local `vol` is gone.
+  - **MINORs:** 3 (plane-backed floor first), 5 (too warm to start), 6 (the c2/c3 columns), 7 (image sizes plus `aspect_mismatch`), 8 (Back during Starting…) and 9 (KDoc).
+  - **Orchestrator verification on 2026-11-17, run in the FOREGROUND in two steps to avoid the low-memory reaper:**
+    - Tests: engine 282 / ar 129 / data 65 / app 286, 0 failures.
+    - Kover, assembleDebug/Release and lint pass (app lint: 0 errors, 6 warnings).
+    - Release dex has 0 "Scan3dLab" refs; debug has 16.
+    - Release universal APK: 20.12 MB.
+  - **FRIDAY gate running** → `docs/reviews/T-D0-gate.md`.
+- **T-D0 GATE: PASS WITH CONDITIONS** (`docs/reviews/T-D0-gate.md`).
+  - **Templates:** APPROVED. **Lab:** approved for the spike after G1.
+  - **R1 CLOSED (orchestrator):**
+    - G1: `MAX_AR_P95_MS = 1000/30 + 0.5`; `JANK_NS = 33_833_333`; new test `arFrameTimeCheckAcceptsASteady30fpsSession` (LabMetricsTest 10/10).
+    - G4: the governor frame period is clamped to 30 fps.
+  - **R2 CLOSED:** ARCH §7.1.10 now has the build policy, the debug-vs-lab table and the analysis rules (G3/G4/R2). G6 drift fixed (§7.1.6 slots/trySend, §4.3 `Allowance.Only`, §6.2 entry points). TESTING §19 added. HTML regenerated.
+  - **R3:**
+    - CI step added: "Debug-only code absent from release" (greps the release dex for Scan3dLab/scan3d_lab/FakeBillingControls; locally release 0, debug 32).
+    - Commit + push + CI.
+    - Then build `builds/SpaceView-TD0-debug.apk` from a clean worktree and record its SHA-256 + commit here.
+  - **Open MINORs:** G2 (a table plane can beat an untracked glossy floor; decide from device item), G5 (nit).
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
 ## Log

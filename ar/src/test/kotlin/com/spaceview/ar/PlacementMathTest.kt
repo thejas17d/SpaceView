@@ -135,4 +135,32 @@ class PlacementMathTest {
             close(b.rotate(Vec3(0.1, 0.2, 0.3)), p.rotate(Vec3(0.1, 0.2, 0.3)), 1e-12)
         }
     }
+
+    /**
+     * M4-P1 gate N3: a 3D scan kept in its measured-box frame (GLB origin = the measured base centre) whose own box is
+     * lifted by the 1 cm floor cut and shifted by a partial scan. On a wall its real back face is flush and its real
+     * centre is on the reticle; on the floor it still stands on its measured base (unchanged).
+     */
+    @Test fun scanMeshUsesItsRealBoxOnAWallAndItsMeasuredBaseOnTheFloor() {
+        val centre = Vec3(0.04, 0.01 + 0.39 / 2, -0.03) // AABB 0.6 × 0.39 × 0.4, bottom at the 1 cm cut
+        val scan = PlacedItem(0.6, 0.39, 0.4, BoxOrigin.BOTTOM_CENTER, centre)
+        close(scan.centre, centre)
+        close(scan.declaredCentre, Vec3(0.0, 0.195, 0.0))
+        // Floor: the GLB origin (measured base centre) on the hit, exactly as before N3.
+        val floorHit = Vec3(0.5, -1.4, -2.0)
+        val f = PlacementMath.modelPose(PlacementMath.horizontalSurfacePose(floorHit, Vec3.ZERO), scan, SurfaceTarget.FLOOR, 0.3)
+        close(f.translation, floorHit)
+        // Wall: the real box's back-face centre on the hit and its back face in the wall plane.
+        val wallHit = Vec3(0.0, 0.2, -3.0)
+        val w = PlacementMath.wallSurfacePose(wallHit, Vec3.UNIT_Z, Vec3.ZERO)!!
+        for (spin in listOf(0.0, PI / 2)) {
+            val m = PlacementMath.modelPose(w, scan, SurfaceTarget.WALL, spin)
+            close(m.transformPoint(centre - Vec3(0.0, 0.0, 0.2)), wallHit)
+            close(m.transformPoint(centre), wallHit + Vec3(0.0, 0.0, 0.2))
+        }
+        // Without a declared centre (proxy boxes, templates) nothing changes.
+        val proxy = PlacedItem(0.6, 0.39, 0.4, BoxOrigin.BOTTOM_CENTER)
+        close(proxy.centre, proxy.declaredCentre)
+        close(PlacementMath.attachOffset(proxy, SurfaceTarget.WALL), Vec3(0.0, -0.195, 0.2))
+    }
 }

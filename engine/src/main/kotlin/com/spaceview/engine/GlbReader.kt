@@ -72,8 +72,17 @@ object GlbReader {
             origin = (extras["origin"] as? String)?.let { o -> BoxOrigin.entries.firstOrNull { it.name == o } },
             glbVersion = (extras["glbVersion"] as? Double)?.toInt() ?: 1,
             modelKind = (extras["modelKind"] as? String)?.let { k -> ModelKind.entries.firstOrNull { it.name == k } },
+            centre = centreOf(extras),
         )
     }.getOrNull()
+
+    /** The declared bounding-box centre (N3): all three keys present and finite, else null. */
+    private fun centreOf(extras: Map<String, Any?>): Vec3? {
+        val x = extras[GlbWriter.AABB_CX] as? Double ?: return null
+        val y = extras[GlbWriter.AABB_CY] as? Double ?: return null
+        val z = extras[GlbWriter.AABB_CZ] as? Double ?: return null
+        return if (x.isFinite() && y.isFinite() && z.isFinite()) Vec3(x, y, z) else null
+    }
 }
 
 /**

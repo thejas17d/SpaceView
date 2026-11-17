@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 3D Scan Lab (debug builds only; ARCHITECTURE-v2 §7.1.10 device spike). Hindi in values-hi. -->
+<resources>
+    <string name="scan3d_title">3D Scan Lab</string>
+    <string name="scan3d_subtitle">Device spike harness for the on-device 3D scan. Debug builds only; it is not in the release app.</string>
+    <string name="scan3d_close">Close</string>
+    <string name="scan3d_protocol_title">Spike protocol</string>
+    <string name="scan3d_protocol_body">Before you start: let the phone cool down, use good even light, and keep Depth on. Timing numbers from a debug build are only approximate.\n\n1. Carton (about 60 × 40 × 40 cm) at about 0.7 m: 5 scans. Measure the carton with a tape first and type W, H and D below. Label: carton-0.7m.\n2. The same carton at about 1.5 m: 5 scans, same tape values. Label: carton-1.5m.\n3. An armchair: 5 scans (tape it). Label: armchair.\n4. A 2–3-seat sofa: 5 scans (tape it). Label: sofa.\n\nEach scan: mark the box (3 base corners, then a point on top), tap Start 3D capture, and walk slowly all the way round the object at the stated distance for 45–90 s. Capture stops by itself at 90 s; otherwise tap Finish. Note any holes or odd results.\n\nDo at least one full 90 s scan from a cool start (thermal check). Repeat on a second phone if you have one, ideally one with smoothed-only depth.\n\nWhen all runs are done, tap Share all results and send the CSV.</string>
+    <string name="scan3d_label">Run label</string>
+    <string name="scan3d_tape_title">Tape measure (optional, cm)</string>
+    <string name="scan3d_tape_w">Width</string>
+    <string name="scan3d_tape_h">Height</string>
+    <string name="scan3d_tape_d">Depth</string>
+    <string name="scan3d_start">Start a scan</string>
+    <string name="scan3d_runs_saved">Runs saved: %1$d</string>
+    <string name="scan3d_share_all">Share all results (CSV)</string>
+    <string name="scan3d_share_chooser">Share 3D scan results</string>
+    <string name="scan3d_share_failed">Nothing could be shared.</string>
+    <string name="scan3d_source">Depth: %1$s</string>
+    <string name="scan3d_source_none">Depth: not available</string>
+    <string name="scan3d_box_ready">Box measured</string>
+    <string name="scan3d_start_capture">Start 3D capture</string>
+    <string name="scan3d_capturing">Walk slowly around the object</string>
+    <string name="scan3d_capture_status">Time %1$d/90 s · Frames: %2$d · Rate: %3$d Hz</string>
+    <string name="scan3d_capture_detail">Fusion %1$s ms · coverage %2$d%% · thermal %3$s</string>
+    <string name="scan3d_finish">Finish</string>
+    <string name="scan3d_err_bad_box">The box outline is not usable. Undo and mark it again.</string>
+    <string name="scan3d_err_too_big">Too big for a 3D scan (a side is over 2.5 m).</string>
+    <string name="scan3d_err_no_depth">This phone or session has no ARCore Depth.</string>
+    <string name="scan3d_err_no_memory">Not enough memory for the scan volume.</string>
+    <string name="scan3d_err_too_warm">The phone is too warm to scan. Let it cool for a few minutes.</string>
+    <string name="scan3d_processing">Processing the scan…</string>
+    <string name="scan3d_processing_stage">Stage: %1$s</string>
+    <string name="scan3d_result_title">Result</string>
+    <string name="scan3d_error">Processing problem: %1$s</string>
+    <string name="scan3d_badge_ok">The 3D shape agrees with the measured box (approximate)</string>
+    <string name="scan3d_badge_rough">The 3D shape and the measured box differ (rough), worst on %1$s</string>
+    <string name="scan3d_sizes">Sizes in cm: box ± / 3D shape ± / tape</string>
+    <string name="scan3d_view_mesh">View 3D shape</string>
+    <string name="scan3d_save">Save to gallery</string>
+    <string name="scan3d_saved">Saved to the gallery.</string>
+    <string name="scan3d_save_needs_pro">The free 3D-scan or gallery limit is reached. Nothing was saved.</string>
+    <string name="scan3d_save_failed">The scan could not be saved.</string>
+    <string name="scan3d_share_run">Share results</string>
+    <string name="scan3d_share_mesh">Share with 3D shape</string>
+    <string name="scan3d_new_scan">New scan</string>
+    <string name="scan3d_done">Done</string>
+    <string name="scan3d_all_metrics">All metrics</string>
+    <string name="scan3d_viewer_hint">Drag to turn, pinch to zoom</string>
+</resources>

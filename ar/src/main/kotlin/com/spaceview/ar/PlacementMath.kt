@@ -26,14 +26,29 @@ enum class SurfaceTarget {
     val isWall: Boolean get() = this == WALL || this == WALL_FALLBACK
 }
 
-/** The item as placement sees it: its GLB extents (metres) and where the GLB's origin sits. */
-class PlacedItem(val widthM: Double, val heightM: Double, val depthM: Double, val origin: BoxOrigin) {
+/**
+ * The item as placement sees it: its GLB extents (metres), where the GLB's origin sits and, for a mesh kept in its
+ * measured-box frame, its own bounding-box centre.
+ *
+ * @param aabbCentre the GLB's declared bounding-box centre (`GlbInfo.centre`, M4-P1 gate N3), or null when the box is
+ *   centred on the declared [origin] (every proxy box and template, and re-centred meshes).
+ */
+class PlacedItem(val widthM: Double, val heightM: Double, val depthM: Double, val origin: BoxOrigin, aabbCentre: Vec3? = null) {
     init {
         require(listOf(widthM, heightM, depthM).all { it.isFinite() && it > 0 }) { "Item extents must be > 0" }
+        require(aabbCentre == null || (aabbCentre.x.isFinite() && aabbCentre.y.isFinite() && aabbCentre.z.isFinite())) {
+            "Item centre must be finite"
+        }
     }
 
-    /** The item's bounding-box centre in its own (GLB) frame: [BoxOrigin.centreOffset], the one origin rule. */
-    val centre: Vec3 = origin.centreOffset(widthM, heightM, depthM)
+    /** Where the declared [origin] says the box centre is: [BoxOrigin.centreOffset], the one origin rule. */
+    val declaredCentre: Vec3 = origin.centreOffset(widthM, heightM, depthM)
+
+    /**
+     * The item's real bounding-box centre in its own (GLB) frame. For a 3D scan it differs from [declaredCentre] by the
+     * floor cut and any asymmetry of a partial scan (N3); for everything else the two are equal.
+     */
+    val centre: Vec3 = aabbCentre ?: declaredCentre
 }
 
 /**
@@ -103,12 +118,20 @@ object PlacementMath {
         Quaternion.fromAxisAngle(if (target.isWall) Vec3.UNIT_Z else Vec3.UNIT_Y, spinRad)
 
     /**
-     * Offset (item frame) from the touching point to the GLB origin: on a horizontal surface the touching point is
-     * the centre of the bottom face, on a wall the centre of the back face.
+     * Offset (item frame) from the touching point to the GLB origin.
+     * - On a horizontal surface the touching point is the centre of the bottom face of the **declared** box. For a 3D
+     *   scan that is the measured box's base centre (its GLB origin): the scan stands where the measured object stood,
+     *   its open bottom the floor cut above the floor, and its footprint is the one the verdict uses (§7.1.8).
+     * - On a wall it is the centre of the back face of the item's **real** bounding box ([PlacedItem.centre]), so a
+     *   scan hangs flush and centred on the reticle whatever the floor cut or a partial scan did to its box (N3).
+     * For proxy boxes and templates the two boxes are the same.
      */
     fun attachOffset(item: PlacedItem, target: SurfaceTarget): Vec3 {
-        val centre = item.centre
-        val touch = if (target.isWall) centre - Vec3(0.0, 0.0, item.depthM / 2) else centre - Vec3(0.0, item.heightM / 2, 0.0)
+        val touch = if (target.isWall) {
+            item.centre - Vec3(0.0, 0.0, item.depthM / 2)
+        } else {
+            item.declaredCentre - Vec3(0.0, item.heightM / 2, 0.0)
+        }
         return -touch
     }
 

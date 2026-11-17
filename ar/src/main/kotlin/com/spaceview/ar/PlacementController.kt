@@ -47,10 +47,18 @@ class PlacementController(
     private var lastHit: ArHit? = null
     private var lastPublishMs = 0L
 
+    // N5: the anchor's engine pose is rebuilt only when ARCore moves the anchor (scratch arrays, no per-frame copy).
+    private val anchorT = FloatArray(3)
+    private val anchorQ = FloatArray(4)
+    private val scratchT = FloatArray(3)
+    private val scratchQ = FloatArray(4)
+    private var anchorEngine: Pose? = null
+
     @MainThread
     override fun onSessionCreated(session: Session) {
         if (closed) return
         anchor = null // released with the previous session
+        anchorEngine = null
         this.session = session
         core.onSessionCreated()
         publish(force = true)
@@ -84,7 +92,7 @@ class PlacementController(
         val hit = hits.latestCentreHit
         lastHit = hit
         val a = anchor
-        val anchorPose = if (a != null && a.trackingState == TrackingState.TRACKING) a.pose.toEngine() else null
+        val anchorPose = if (a != null && a.trackingState == TrackingState.TRACKING) anchorPoseOf(a) else null
         val changed = core.onFrame(
             timestampNs = frame.timestamp,
             tracking = tracking,
@@ -92,6 +100,7 @@ class PlacementController(
             hitPos = hit?.position,
             hitNormal = hit?.normal,
             anchorPose = anchorPose,
+            hitOnPlane = hit?.kind == HitKind.PLANE,
         )
         if (!changed) return
         onModelPose?.invoke(core.modelPose)
@@ -196,9 +205,22 @@ class PlacementController(
         publish(force = true)
     }
 
+    /** The anchor's pose as the same engine [Pose] instance until ARCore moves it (N5). */
+    private fun anchorPoseOf(a: Anchor): Pose {
+        val p = a.pose
+        p.getTranslation(scratchT, 0)
+        p.getRotationQuaternion(scratchQ, 0)
+        val cached = anchorEngine
+        if (cached != null && scratchT.contentEquals(anchorT) && scratchQ.contentEquals(anchorQ)) return cached
+        scratchT.copyInto(anchorT)
+        scratchQ.copyInto(anchorQ)
+        return p.toEngine().also { anchorEngine = it }
+    }
+
     private fun detachAnchor() {
         val a = anchor ?: return
         anchor = null
+        anchorEngine = null
         if (live && !closed) runCatching { a.detach() }
     }
 

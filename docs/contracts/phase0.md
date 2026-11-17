@@ -73,6 +73,10 @@ object GlbReader {
 - **Node-0 extras:** `widthM`, `heightM`, `depthM` = the GLB's own bounding box (for parts: the union of all parts,
   which templates guarantee equals W×H×D; for meshes: the extents of every vertex), plus `origin`,
   `glbVersion` (= `GLB_VERSION`) and `modelKind`. `writeMesh` adds `MeshExtras.values` after these.
+  A `keepInputOrigin` mesh also declares its own bounding-box centre in the GLB frame as `aabbCx`, `aabbCy`, `aabbCz`
+  (reserved keys; M4-P1 gate N3), read back as `GlbInfo.centre` → `PlacementModel.centre` → `PlacedItem`. Placement
+  uses it for wall targets and the wall centre-height readout; floor and table placement keep the declared origin
+  (the measured base). Absent on every other model, whose centre is `origin.centreOffset(w, h, d)`.
 - **Validation:** `IllegalArgumentException` on bad input (non-finite numbers, sides ≤ 0, a bounding-box side over
   50 m, malformed mesh arrays, an index out of range, bad extras keys).
 
