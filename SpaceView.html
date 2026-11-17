@@ -116,7 +116,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   <header class="hero" id="top">
     <h1>SpaceView Build Book</h1>
     <p>Every SpaceView document in one place: status, plan, architecture, testing checklist, all research reports, every milestone review, and the FRIDAY engineering skill. 24 documents, in reading order.</p>
-    <div class="meta">Last commit: de63706 · M4 place in room, Pro foundation, on-device 3D recon core; review fixes · 16 Nov 2026<br>Generated 17 Nov 2026, 10:47 from the Markdown sources by <code>python docs/build_html.py</code>. Edit the .md files, not this page.</div>
+    <div class="meta">Last commit: 2ed9923 · Furniture templates, 3D Scan Lab spike harness, review and gate fixes · 17 Nov 2026<br>Generated 17 Nov 2026, 11:02 from the Markdown sources by <code>python docs/build_html.py</code>. Edit the .md files, not this page.</div>
     <ol class="milestones" aria-label="Milestones"><li class="ms ms-done"><span class="ms-id">M0</span><span class="ms-name">Scaffold + CI</span><span class="ms-state">Done</span></li><li class="ms ms-done"><span class="ms-id">M1</span><span class="ms-name">Measurement engine</span><span class="ms-state">Done</span></li><li class="ms ms-done"><span class="ms-id">M2</span><span class="ms-name">Measure mode</span><span class="ms-state">Done</span></li><li class="ms ms-done"><span class="ms-id">M3</span><span class="ms-name">Scan → Gallery</span><span class="ms-state">Done</span></li><li class="ms ms-done"><span class="ms-id">M4</span><span class="ms-name">Place in room + Pro base</span><span class="ms-state">Done</span></li><li class="ms ms-active"><span class="ms-id">M5</span><span class="ms-name">Templates + ads, Hindi</span><span class="ms-state">Partly done</span></li><li class="ms ms-next"><span class="ms-id">M6</span><span class="ms-name">Perf, size, release</span><span class="ms-state">Next</span></li></ol>
   </header>
   <section class="doc" id="doc-project-guide"><header class="doc-head"><span class="doc-group">Start here</span><span class="doc-path">docs/PROJECT-GUIDE.md · updated 06 Nov 2026, 11:22</span></header><h2 id="doc-project-guide--spaceview-project-guide-plain-english" class="doc-h1">SpaceView: Project guide (plain English)</h2>
@@ -1537,7 +1537,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 </tr>
 </tbody>
 </table></div>
-</section><section class="doc" id="doc-handoff"><header class="doc-head"><span class="doc-group">Status</span><span class="doc-path">HANDOFF.md · updated 17 Nov 2026, 10:47</span></header><h2 id="doc-handoff--spaceview-handoff-read-this-first" class="doc-h1">SpaceView — Handoff (read this first)</h2>
+</section><section class="doc" id="doc-handoff"><header class="doc-head"><span class="doc-group">Status</span><span class="doc-path">HANDOFF.md · updated 17 Nov 2026, 11:02</span></header><h2 id="doc-handoff--spaceview-handoff-read-this-first" class="doc-h1">SpaceView — Handoff (read this first)</h2>
 <p>Living context file so any new session/LLM can continue. Updated after every step of work.</p>
 <p><em>Last updated: 2026-11-17 — T templates + D0 3D Scan Lab GATE PASSED (conditions closed except R3 in progress); next: user runs the spike on the TD0 debug APK; D step 2 after spike.</em></p>
 <h2 id="doc-handoff--what-spaceview-is">What SpaceView is</h2>
@@ -1908,6 +1908,27 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
 </ul>
 </li>
 <li><strong>Open MINORs:</strong> G2 (a table plane can beat an untracked glossy floor; decide from device item), G5 (nit).</li>
+</ul>
+</li>
+<li><strong>TD0 APKs</strong> (clean worktree at <strong>2ed9923</strong>):
+<ul>
+<li><code>builds/SpaceView-TD0-debug.apk</code> sha256 <code>70eca3fcaae51342146c7c23daf0fa15b7611dc5adc3853223cf7610c1621771</code>: has the 3D Scan Lab; installs beside the release app as <code>.debug</code>.</li>
+<li><code>builds/SpaceView-TD0-release.apk</code> sha256 <code>f92ec1afa458ac8ee6157c0764a002d2c070b3358f6e5dd9da07559db224be41</code>: 20.12 MB.</li>
+<li><strong>CI for 2ed9923 is running</strong> (R3: size gate + the new debug-only-code check).</li>
+</ul>
+</li>
+<li><strong>R3 CLOSED:</strong> CI for 2ed9923 is GREEN. The arm64 Play download is 10.47 MiB; all 14 native libraries pass the 16 KB check; debug-only references in the release dex = 0. The user was given the go to install TD0.</li>
+<li><strong>NEXT:</strong>
+<ul>
+<li>(1) The user runs the spike (TESTING §19) and sends the CSV → the orchestrator analyses it against the ARCH §7.1.10 rules → D step 2 (user-facing 3D scan screens) or the Beta / ToF-only decision.</li>
+<li>(2) Meanwhile, the remaining Phase 3/4 work that needs no device data:
+<ul>
+<li>SM1: hands-free point drop + ML Kit naming</li>
+<li>M5 remainder: UMP consent, in-app review, help/FAQ, delete-my-data, accessibility pass</li>
+<li>G2 and the other MINORs</li>
+</ul>
+</li>
+<li>(3) User items still open: the 3D-scan Free rule, phone models, Play Console (D12), a privacy-policy URL + support email.</li>
 </ul>
 </li>
 <li>If resuming after a crash: run <code>git status</code> to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.</li>

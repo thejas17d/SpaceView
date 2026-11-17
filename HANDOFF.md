@@ -253,6 +253,18 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
     - Commit + push + CI.
     - Then build `builds/SpaceView-TD0-debug.apk` from a clean worktree and record its SHA-256 + commit here.
   - **Open MINORs:** G2 (a table plane can beat an untracked glossy floor; decide from device item), G5 (nit).
+- **TD0 APKs** (clean worktree at **2ed9923**):
+  - `builds/SpaceView-TD0-debug.apk` sha256 `70eca3fcaae51342146c7c23daf0fa15b7611dc5adc3853223cf7610c1621771`: has the 3D Scan Lab; installs beside the release app as `.debug`.
+  - `builds/SpaceView-TD0-release.apk` sha256 `f92ec1afa458ac8ee6157c0764a002d2c070b3358f6e5dd9da07559db224be41`: 20.12 MB.
+  - **CI for 2ed9923 is running** (R3: size gate + the new debug-only-code check).
+- **R3 CLOSED:** CI for 2ed9923 is GREEN. The arm64 Play download is 10.47 MiB; all 14 native libraries pass the 16 KB check; debug-only references in the release dex = 0. The user was given the go to install TD0.
+- **NEXT:**
+  - (1) The user runs the spike (TESTING §19) and sends the CSV → the orchestrator analyses it against the ARCH §7.1.10 rules → D step 2 (user-facing 3D scan screens) or the Beta / ToF-only decision.
+  - (2) Meanwhile, the remaining Phase 3/4 work that needs no device data:
+    - SM1: hands-free point drop + ML Kit naming
+    - M5 remainder: UMP consent, in-app review, help/FAQ, delete-my-data, accessibility pass
+    - G2 and the other MINORs
+  - (3) User items still open: the 3D-scan Free rule, phone models, Play Console (D12), a privacy-policy URL + support email.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
 ## Log
