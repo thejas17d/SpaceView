@@ -48,6 +48,19 @@ config("PLAY_LICENSE_KEY")?.let { key ->
     }
 }
 
+// A malformed support address or policy URL would build fine and then silently disappear from the app: AppLinks
+// shows only an https URL and a plausible address. Any build given one checks it with the same rules (SM1-M5 review
+// MINOR 13; keep in sync with AppLinks.isPlausibleEmail / privacyPolicyUrl).
+config("SUPPORT_EMAIL")?.trim()?.let { email ->
+    val plausible = email.length in 6..254 && email.count { it == '@' } == 1 &&
+        email.substringAfter('@').contains('.') && email.none { it.isWhitespace() || it == '"' }
+    if (!plausible) throw GradleException("SUPPORT_EMAIL is not a valid e-mail address: '$email'")
+}
+config("PRIVACY_POLICY_URL")?.trim()?.let { url ->
+    val valid = url.startsWith("https://") && url.length > "https://".length + 3 && url.none { it.isWhitespace() || it == '"' }
+    if (!valid) throw GradleException("PRIVACY_POLICY_URL must be an https:// URL, got '$url'")
+}
+
 // Store builds (CI sets REQUIRE_RELEASE_CONFIG=true on version tags) must never ship test ads,
 // a debug signature or a placeholder support address.
 if (config("REQUIRE_RELEASE_CONFIG") == "true") {
@@ -209,6 +222,13 @@ dependencies {
     // (already on the release classpath through other AndroidX libraries; declared because it is used).
     implementation(libs.billing.ktx)
     implementation(libs.androidx.lifecycle.process)
+
+    // M5 remainder (Builder B): Play In-App Review (review 2.0.2 + core-common 2.0.4, ~38 KB of classes before R8).
+    implementation(libs.play.review)
+
+    // SM1b (Builder A): object-name suggestions at scan Review. The *unbundled* ML Kit image labeller: Play services
+    // downloads the model (manifest meta-data "ica"), so the APK carries only the thin client.
+    implementation(libs.play.services.mlkit.image.labeling)
 
     // M2 (Builder A): navigation host, ViewModels for the measure / history features.
     implementation(libs.androidx.navigation.compose)

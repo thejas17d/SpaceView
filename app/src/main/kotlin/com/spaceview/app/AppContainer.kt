@@ -22,7 +22,11 @@ import com.spaceview.app.pro.FeatureGate
 import com.spaceview.app.pro.GallerySaveGate
 import com.spaceview.app.pro.GatedGalleryStore
 import com.spaceview.app.pro.RefreshReason
+import com.spaceview.app.review.DataStoreReviewRecordStore
+import com.spaceview.app.review.PlayReviewLauncher
+import com.spaceview.app.review.ReviewPrompter
 import com.spaceview.app.settings.SettingsRepository
+import com.spaceview.app.settings.UserDataEraser
 import com.spaceview.data.gallery.GalleryRepository
 import com.spaceview.data.history.MeasurementRepository
 import com.spaceview.data.settings.MeasureSettingsRepository
@@ -122,18 +126,22 @@ class AppContainer(context: Context) {
     }
 
     /** Contract K1: features ask this, never billing. */
-    val featureGate: FeatureGate by lazy { EntitlementFeatureGate(entitlements.entitlement) }
+    val featureGate: FeatureGate by lazy {
+        // N2: a cold-start "needs Pro" from a stale cache waits (≤ 5 s) for Play to settle before it stands.
+        EntitlementFeatureGate(entitlements.entitlement, settled = entitlements.settled)
+    }
 
     /**
-     * The Free gallery cap (20) and 3D-scan cap (3), checked before a scan starts and again at Save (P1
+     * The Free gallery cap (20) and 3D-scan quota (5 in total), checked before a scan starts and again at Save (P1
      * review MAJOR 3). Every new gallery item goes through it: scans, templates (`saveTemplate`) and
-     * on-device meshes (`saveMesh`).
+     * on-device meshes (`saveMesh`). The 3D count is the lifetime counter, never below the saved MESH_DEVICE rows;
+     * the D save path must call `SettingsRepository.recordDeviceScanSaved()` after each successful `saveMesh`.
      */
     val gallerySaveGate: GallerySaveGate by lazy {
         GallerySaveGate(
             gate = featureGate,
             galleryCount = { galleryRepository.count() },
-            deviceScanCount = { galleryRepository.countDeviceScans() },
+            deviceScanCount = { maxOf(appSettings.deviceScansUsed(), galleryRepository.countDeviceScans()) },
         )
     }
 
@@ -152,6 +160,37 @@ class AppContainer(context: Context) {
             sdk = GoogleAdsSdk(appContext) { Log.w("AdsSdk", it) },
             entitlement = entitlements.entitlement,
             settled = entitlements.settled,
+            // Every successful save also counts toward the review prompt's "3rd save" moment.
+            onSaveCompleted = { reviewPrompter.onSaveCompleted() },
+        )
+    }
+
+    /**
+     * The Play in-app review prompt (M5): after a positive moment, on a non-AR screen, never next to an
+     * interstitial, at most once per 90 days. Touches no Play API until it actually asks.
+     */
+    val reviewPrompter: ReviewPrompter by lazy {
+        ReviewPrompter(
+            store = DataStoreReviewRecordStore.get(appContext),
+            launcher = PlayReviewLauncher(appContext) { Log.w("Review", it) },
+            arInForeground = { ads.arInForeground },
+            adBusy = { ads.interstitialBusy },
+            lastInterstitialAtMillis = { DataStoreAdCounterStore.get(appContext).read().lastInterstitialAtMillis },
+            isResumed = AdsManager.ActivityState.Platform::isResumed,
+            clock = clock,
+        )
+    }
+
+    /**
+     * Settings → Delete my data (M5): History, Gallery (with its share and Place caches), calibration and measuring settings, app settings.
+     * Never the Play subscription or the cached entitlement.
+     */
+    val userDataEraser: UserDataEraser by lazy {
+        UserDataEraser(
+            history = history,
+            gallery = galleryRepository,
+            measureSettings = measureSettings,
+            appSettings = appSettings,
         )
     }
 

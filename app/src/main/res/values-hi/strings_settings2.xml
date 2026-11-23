@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- सेटिंग्स में जोड़ (M5)। हर key values/strings_settings2.xml में भी है। मूल हिंदी भाषी की समीक्षा बाकी (PLAN §9)। -->
+<resources>
+    <string name="settings_help">सहायता और FAQ</string>
+    <string name="settings_help_detail">नापने के सुझाव, ± का मतलब, Pro, निजता</string>
+    <string name="settings_help_detail_spoken">नापने के सुझाव, कम या ज़्यादा का मतलब, Pro, निजता</string>
+    <string name="settings_about">SpaceView के बारे में</string>
+    <string name="settings_about_detail">वर्ज़न, लाइसेंस, निजता नीति</string>
+
+    <string name="settings_delete_data">मेरा डेटा मिटाएँ</string>
+    <string name="settings_delete_data_detail">इस फ़ोन पर हिस्ट्री, गैलरी, कैलिब्रेशन और सेटिंग्स</string>
+    <string name="settings_delete_data_title">आपका पूरा डेटा मिटाएँ?</string>
+    <string name="settings_delete_data_body">इससे इस फ़ोन से ये हमेशा के लिए मिट जाएँगे: आपकी हिस्ट्री, गैलरी की हर चीज़ अपनी फ़ोटो और 3D मॉडल के साथ, आपका कैलिब्रेशन और आपकी सेटिंग्स (यूनिट, आवाज़, डेप्थ, हैंड्स-फ़्री)। यह वापस नहीं हो सकता।\n\nबने रहेंगे: आपकी SpaceView Pro खरीदारी की स्थिति (सब्सक्रिप्शन Google Play मैनेज करता है; उसे रद्द करने के लिए \"सब्सक्रिप्शन मैनेज करें\" का उपयोग करें), आपके विज्ञापन निजता के विकल्प, और विज्ञापन व रिव्यू अनुरोध कितनी बार दिखें यह सीमित करने वाले काउंटर।</string>
+    <string name="settings_delete_data_confirm">सब कुछ मिटाएँ</string>
+    <string name="settings_delete_data_running">मिटाया जा रहा है…</string>
+    <string name="settings_delete_data_done">आपका डेटा मिटा दिया गया।</string>
+    <string name="settings_delete_data_partial">कुछ डेटा नहीं मिटाया जा सका। कृपया फिर से कोशिश करें।</string>
+    <string name="settings_accuracy_note_spoken">आम तौर पर 2 प्रतिशत के अंदर, 1 मीटर पर लगभग 1 से 2 सेंटीमीटर। हर नतीजा अपना कम या ज़्यादा दायरा दिखाता है। बिल्कुल सही काम के लिए टेप से जाँच लें।</string>
+
+    <string name="a11y_plus_or_minus">कम या ज़्यादा</string>
+    <string name="a11y_about">लगभग</string>
+    <string name="a11y_by">गुणा</string>
+    <string name="a11y_unit_square_metres">वर्ग मीटर</string>
+    <string name="a11y_unit_square_feet">वर्ग फ़ुट</string>
+    <!-- SpokenText के लिए एकवचन इकाइयाँ और भिन्न। हिंदी में एकवचन और बहुवचन एक जैसे हैं; भिन्न "5 बटा 8" की तरह पढ़े जाते हैं। -->
+    <string name="a11y_unit_mm_one">मिलीमीटर</string>
+    <string name="a11y_unit_cm_one">सेंटीमीटर</string>
+    <string name="a11y_unit_m_one">मीटर</string>
+    <string name="a11y_unit_inch_one">इंच</string>
+    <string name="a11y_unit_foot_one">फ़ुट</string>
+    <string name="a11y_unit_square_metre_one">वर्ग मीटर</string>
+    <string name="a11y_unit_square_foot_one">वर्ग फ़ुट</string>
+    <string name="a11y_fraction_half_one">बटा 2</string>
+    <string name="a11y_fraction_half">बटा 2</string>
+    <string name="a11y_fraction_quarter_one">बटा 4</string>
+    <string name="a11y_fraction_quarter">बटा 4</string>
+    <string name="a11y_fraction_eighth_one">बटा 8</string>
+    <string name="a11y_fraction_eighth">बटा 8</string>
+    <string name="a11y_fraction_sixteenth_one">बटा 16</string>
+    <string name="a11y_fraction_sixteenth">बटा 16</string>
+    <string name="a11y_mixed_number">%1$s सही %2$s</string>
+    <string name="a11y_fraction_over">%1$s बटा %2$s</string>
+</resources>

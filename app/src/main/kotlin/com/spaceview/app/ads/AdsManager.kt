@@ -75,6 +75,8 @@ class AdsManager(
     private val activityState: ActivityState = ActivityState.Platform,
     private val log: (String) -> Unit = { Log.w(TAG, it) },
     private val settleWaitMs: Long = SETTLE_WAIT_MS,
+    /** Called once per successful save, after [recordCompletedScan] (the in-app review prompt counts saves). */
+    private val onSaveCompleted: () -> Unit = {},
 ) {
     /** Lifecycle questions about an [Activity], injectable for JVM tests. */
     interface ActivityState {
@@ -117,10 +119,22 @@ class AdsManager(
     private var interstitialLoading = false
     private var showing = false
 
+    /** [maybeShowAfterSave] calls still deciding (the counters are read asynchronously) or showing. */
+    private var afterSaveInFlight = 0
+
     /** "Saved this visit", the pending after-measure chance and AR-foreground tracking. */
     private val visits = MeasureVisitTracker(clock = clock)
     private val arForeground = MutableStateFlow(false)
     private var pendingShowJob: Job? = null
+
+    /** True while an AR/camera destination is composed (the review prompt never asks then). */
+    val arInForeground: Boolean get() = visits.arInForeground
+
+    /**
+     * True while an after-save interstitial is owed for the current resume, being decided, or on screen. The
+     * in-app review prompt waits for it ("never right after an interstitial").
+     */
+    val interstitialBusy: Boolean get() = pendingShowJob?.isActive == true || afterSaveInFlight > 0 || showing
 
     /**
      * Call from `MainActivity.onCreate` (after `setContent`). Defers all ads work until just after the
@@ -172,14 +186,23 @@ class AdsManager(
         updateCanShowAds()
     }
 
-    /** UMP consent: once per process, and only when ads are allowed. Shows a form only where required. */
+    /**
+     * UMP consent: once per process, and only when ads are allowed. Shows a form only where required.
+     *
+     * Never while an AR/camera screen is composed (SM1-M5 review MINOR 10): the form is a dialog over the activity,
+     * so the AR session (and hands-free point drops) would keep running behind it. A request skipped for that reason,
+     * or one that failed (offline), is retried by the next non-AR screen to resume ([onNonArScreenResumed]).
+     */
     fun gatherConsent(activity: Activity) {
         if (!adsAllowed) return
         // A previous launch may already allow requests: start without waiting for the network.
         startSdkIfAllowed()
+        if (visits.arInForeground) return
         if (!consentRequested.compareAndSet(false, true)) return
-        sdk.requestConsent(activity) { result ->
-            // Offline, misconfigured or the activity finished: ask again with the next activity.
+        // The AR check is repeated when the update arrives, right before the form (gate G1).
+        sdk.requestConsent(activity, canShowForm = { !visits.arInForeground }) { result ->
+            // Offline, misconfigured, the activity finished, or AR came to the front (DEFERRED): ask again on the
+            // next non-AR resume.
             if (result != ConsentResult.UPDATED) consentRequested.set(false)
             updatePrivacyOptionsRequired()
             startSdkIfAllowed()
@@ -254,6 +277,7 @@ class AdsManager(
      */
     fun recordCompletedScan() {
         visits.onScanSaved()
+        onSaveCompleted()
         scope.launch {
             try {
                 policy.recordCompletedScan()
@@ -307,6 +331,9 @@ class AdsManager(
      * interstitial if an upcoming exit could be eligible. Pair with [onNonArScreenPaused].
      */
     fun onNonArScreenResumed(activity: Activity) {
+        // A natural break: retry a consent request that was deferred (AR in front) or failed (offline). No-op once
+        // resolved, and for Pro.
+        if (adsAllowed && entitlementJob != null) gatherConsent(activity)
         pendingShowJob?.cancel()
         if (!visits.consumePending()) {
             scope.launch { preloadIfUseful() }
@@ -353,6 +380,9 @@ class AdsManager(
         nextAction: NextAction = NextAction.DONE,
         onContinue: () -> Unit,
     ) {
+        afterSaveInFlight++
+        val release = AtomicBoolean(false)
+        val done: () -> Unit = { if (release.compareAndSet(false, true)) afterSaveInFlight-- }
         scope.launch {
             val screen = if (visits.arInForeground) AdScreen.CAMERA_AR else AdScreen.NON_CAMERA
             val decision = try {
@@ -365,6 +395,7 @@ class AdsManager(
             val ready = ad != null && adsAllowed && !isStale() && !showing && _canShowAds.value && activityState.isResumed(activity)
             if (decision != AdDecision.SHOW || !ready) {
                 if (BuildConfig.DEBUG) log("No interstitial: $decision, ready=$ready")
+                done()
                 onContinue()
                 return@launch
             }
@@ -385,11 +416,12 @@ class AdsManager(
                 onClosed = {
                     if (finished.compareAndSet(false, true)) {
                         showing = false
+                        done()
                         onContinue()
                     }
                 },
             )
-        }
+        }.invokeOnCompletion { cause -> if (cause != null) done() } // never leave the review prompt blocked
     }
 
     companion object {

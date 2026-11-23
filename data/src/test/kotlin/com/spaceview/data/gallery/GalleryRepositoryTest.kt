@@ -83,6 +83,12 @@ internal open class FakeGalleryDao : GalleryDao {
         rows.value = rows.value.filterNot { it.id == id }
         return before - rows.value.size
     }
+
+    override suspend fun deleteAll(): Int {
+        val before = rows.value.size
+        rows.value = emptyList()
+        return before
+    }
 }
 
 /** Rolls back the fake DAO when the block throws (like a Room transaction). */
@@ -688,6 +694,45 @@ class GalleryRepositoryTest {
         assertFalse(other.exists())
         assertNull(repo.shareCopy(b, "../escape.jpg"))
         assertNull(repo.shareCopy(repo.save(draft(jpeg = null)), "SpaceView.jpg"))
+    }
+
+    /** M5 Delete my data: every row, every gallery file, share copies and Place boxes go; the gallery works afterwards. */
+    @Test
+    fun deleteAllRemovesRowsFilesShareCopiesAndPlaceBoxes() = runTest {
+        val dao = FakeGalleryDao()
+        val repo = repo(dao)
+        val a = repo.save(draft())
+        repo.save(draft(kind = ObjectKind.BOX, label = null))
+        val share = repo.shareCopy(a, "SpaceView-frame.jpg")!!
+        val placeBox = File(cacheRoot, "place/box-1.glb").apply { parentFile!!.mkdirs(); writeBytes(byteArrayOf(1, 2, 3)) }
+        File(galleryDir, ".tmp-leftover").apply { mkdirs() }
+        assertTrue(repo.totalBytes() > 0)
+
+        assertTrue(repo.deleteAll())
+
+        assertEquals(0, dao.rows.value.size)
+        assertEquals(0, repo.count())
+        assertEquals(emptyList<GalleryItem>(), repo.observeAll().first())
+        assertFalse(galleryDir.exists())
+        assertFalse(share.exists())
+        assertFalse(placeBox.exists())
+        assertEquals(0L, repo.totalBytes())
+        // Twice is harmless, and saving afterwards works (the gallery directory is recreated).
+        assertTrue(repo.deleteAll())
+        val again = repo.save(draft())
+        assertTrue(repo.get(again)!!.modelFile.isFile)
+    }
+
+    @Test
+    fun deleteAllReportsADatabaseFailure() = runTest {
+        val dao = object : FakeGalleryDao() {
+            override suspend fun deleteAll(): Int = throw IOException("disk")
+        }
+        val repo = repo(dao)
+        repo.save(draft())
+        assertFalse(repo.deleteAll())
+        assertEquals("nothing is half-deleted when the row delete fails", 1, repo.count())
+        assertTrue(galleryDir.exists())
     }
 
     private fun report(name: String, item: GalleryItem) {

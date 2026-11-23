@@ -3,8 +3,8 @@ package com.spaceview.app.pro
 import kotlinx.coroutines.CancellationException
 
 /**
- * The Free gallery cap (20 items) and the Free on-device 3D-scan cap (3), as one gate every new gallery
- * item goes through (P1 review MAJOR 3, ADR-005):
+ * The Free gallery cap (20 items) and the Free on-device 3D-scan quota (5 in total, ever: [deviceScanCount] is
+ * the lifetime count, so deleting a scan does not free a slot), as one gate every new gallery item goes through (P1 review MAJOR 3, ADR-005):
  * - **before a scan starts** (Home / Gallery "Scan object"), so the paywall never opens inside AR;
  * - **again at Save** (a lapse, or another device, between entry and Save), keeping the user's draft;
  * - before `GalleryRepository.saveTemplate` (templates) and `saveMesh` (3D scan, which also checks

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Smart Measure SM1 (Builder A), Hindi. Same keys as values/strings_smart.xml. Needs native review (PLAN §9). -->
+<resources>
+    <!-- Hands-free point drop (SM1a) -->
+    <string name="smart_hands_free_on">हैंड्स-फ़्री: चालू</string>
+    <string name="smart_hands_free_off">हैंड्स-फ़्री: बंद</string>
+    <string name="smart_point_placed">लगाया गया: पॉइंट %1$d</string>
+    <string name="smart_settings_hands_free">हैंड्स-फ़्री पॉइंट</string>
+    <string name="smart_settings_hands_free_detail">क्रॉसहेयर को किसी जगह पर स्थिर रखें, पॉइंट अपने-आप लग जाएगा। पहले जैसा करना बस एक टैप दूर है।</string>
+
+    <!-- Object naming (SM1b): the chip on the scan Review -->
+    <string name="smart_name_chip">नाम “%1$s” रखें?</string>
+    <string name="smart_name_poster">पोस्टर</string>
+    <string name="smart_name_painting">पेंटिंग</string>
+    <string name="smart_name_whiteboard">व्हाइटबोर्ड</string>
+    <string name="smart_name_blackboard">ब्लैकबोर्ड</string>
+    <string name="smart_name_clock">घड़ी</string>
+    <string name="smart_name_tv">टीवी</string>
+    <string name="smart_name_computer">कंप्यूटर</string>
+    <string name="smart_name_phone">मोबाइल फ़ोन</string>
+    <string name="smart_name_speaker">स्पीकर</string>
+    <string name="smart_name_piano">पियानो</string>
+    <string name="smart_name_instrument">वाद्य यंत्र</string>
+    <string name="smart_name_chair">कुर्सी</string>
+    <string name="smart_name_sofa">सोफ़ा</string>
+    <string name="smart_name_loveseat">दो सीट वाला सोफ़ा</string>
+    <string name="smart_name_desk">डेस्क</string>
+    <string name="smart_name_cabinet">कैबिनेट</string>
+    <string name="smart_name_drawers">दराज़ वाली अलमारी</string>
+    <string name="smart_name_shelf">शेल्फ़</string>
+    <string name="smart_name_bunk_bed">बंक बेड</string>
+    <string name="smart_name_bench">बेंच</string>
+    <string name="smart_name_pillow">तकिया</string>
+    <string name="smart_name_cushion">कुशन</string>
+    <string name="smart_name_curtain">पर्दा</string>
+    <string name="smart_name_lamp">लैंप</string>
+    <string name="smart_name_flowerpot">गमला</string>
+    <string name="smart_name_plant">पौधा</string>
+    <string name="smart_name_sink">सिंक</string>
+    <string name="smart_name_bag">बैग</string>
+    <string name="smart_name_handbag">हैंडबैग</string>
+    <string name="smart_name_toy">खिलौना</string>
+    <string name="smart_name_soft_toy">सॉफ़्ट टॉय</string>
+    <string name="smart_name_blocks">बिल्डिंग ब्लॉक</string>
+    <string name="smart_name_statue">मूर्ति</string>
+    <string name="smart_name_aquarium">एक्वेरियम</string>
+    <string name="smart_name_bicycle">साइकिल</string>
+    <string name="smart_name_shoes">जूते</string>
+    <string name="smart_name_cup">कप</string>
+    <string name="smart_name_cookware">बर्तन</string>
+    <string name="smart_name_umbrella">छाता</string>
+    <string name="smart_name_helmet">हेलमेट</string>
+    <string name="smart_name_tyre">टायर</string>
+    <string name="smart_name_skateboard">स्केटबोर्ड</string>
+
+    <!-- Accessibility (M5 pass on Builder A's screens) -->
+    <string name="smart_a11y_scan_step">चरण %1$d, कुल %2$d में से</string>
+    <string name="smart_a11y_edit_field">%1$s, %2$s में</string>
+    <string name="smart_a11y_freeze_photo">आख़िरी पॉइंट वाली रुकी हुई फ़ोटो। पॉइंट को एक बार में 1 सेंटीमीटर खिसकाने के लिए कार्रवाइयाँ इस्तेमाल करें।</string>
+    <string name="smart_a11y_move_left">पॉइंट 1 सेंटीमीटर बाएँ खिसकाएँ</string>
+    <string name="smart_a11y_move_right">पॉइंट 1 सेंटीमीटर दाएँ खिसकाएँ</string>
+    <string name="smart_a11y_move_up">पॉइंट 1 सेंटीमीटर ऊपर खिसकाएँ</string>
+    <string name="smart_a11y_move_down">पॉइंट 1 सेंटीमीटर नीचे खिसकाएँ</string>
+</resources>

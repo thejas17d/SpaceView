@@ -2,7 +2,7 @@
 
 Living context file so any new session/LLM can continue. Updated after every step of work.
 
-_Last updated: 2026-11-17 — T templates + D0 3D Scan Lab GATE PASSED (conditions closed except R3 in progress); next: user runs the spike on the TD0 debug APK; D step 2 after spike._
+_Last updated: 2026-11-23 — SM1-M5 gate R1/R2 closed (found done 11-19); user decisions: spike phone = Pixel 10a, Free 3D scans = 5 in total; R3 build → commit → CI in progress._
 
 ## What SpaceView is
 Android-first (Google Play) AR app: measure anything precisely; scan an object (e.g. photo frame in a café) → save to "AR Gallery" with exact dimensions → place it in your room at true size. Later: B2B for Indian retailers (Croma, Reliance Digital, furniture), iOS (ARKit/LiDAR).
@@ -265,6 +265,104 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
     - M5 remainder: UMP consent, in-app review, help/FAQ, delete-my-data, accessibility pass
     - G2 and the other MINORs
   - (3) User items still open: the 3D-scan Free rule, phone models, Play Console (D12), a privacy-policy URL + support email.
+- **Phase 3 prep started (2026-11-17), fresh agents:**
+  - **Builder B → M5 remainder for the RC:**
+    - UMP consent verified end to end + a Privacy options entry
+    - in-app review (gated, never on AR)
+    - Help/FAQ (EN + HI)
+    - Delete my data
+    - accessibility pass on all main screens
+    - About/licences
+    - placeholders for the support email + privacy-policy URL (user TODO)
+  - **Builder A → Smart Measure SM1:**
+    - hands-free dwell point drop (all measure flows, Settings toggle)
+    - ML Kit unbundled image labelling → curated EN/HI name chip (K6)
+    - G2 floor-estimator fix
+    - N2 settled gate, if small
+  - **Locks:** each builder has its own lock script name.
+- **Builder A: SM1 DONE (uncommitted).**
+  - **Hands-free dwell drop:**
+    - `DwellTrigger` + `HandsFreeDropper` + `SteadinessFilter`.
+    - **ON by default:** a deviation from ARCH §5.1, recorded, and justified by the user's shaky-hands complaint.
+    - Tuning: hold 700 ms, 3 cm spacing, 1 s cooldown, steady limits 0.20 rad/s and 0.10 m/s.
+    - Runs in Measure, Scan, Furniture and calibration; a ring + haptic + TalkBack signal each drop; there's a Settings and a HUD toggle.
+  - **ML Kit naming (unbundled):**
+    - curated list of 44 labels → 42 names in EN/HI; confidence ≥ 0.70; 3 s timeout; the chip never auto-applies.
+    - `MlKitInitProvider` removed (lazy init).
+    - No new permissions; release +158 KB, including B's work.
+  - **G2 fixed:** a strong point-only floor needs ≥ 30 hits, a 2-D spread ≥ 0.10 m and ≥ 2 s.
+  - **N2:** handed to B with a recipe.
+  - **Tests:** engine 282, ar 142, data 70, app 350.
+  - **Lint after A's last string tweak:** not re-run.
+- 2026-11-17 ~10:30–15:20: the usage limit paused Builder B mid-lint; it resumed at 15:21.
+- **Builder B: M5 remainder + N2 DONE (uncommitted).**
+  - **UMP consent:** `AdsConsentTest` (11 tests); consent is retried in `onStart`.
+  - **In-app review:** play review 2.0.2; asked only after a good moment, on a non-AR screen, never near an interstitial, at most once per 90 days.
+  - **New screens:** Help/FAQ (EN + HI) and About + OSS licences (`OssLicencesTest` against the dependency baseline).
+  - **Delete my data:** `UserDataEraser`; never touches Pro or the subscription.
+  - **Accessibility:** `SpokenText` helper; live regions; 48 dp targets; `ContrastTokensTest` (19 pairs, all ≥ 4.5:1).
+  - **N2:** the gate waits up to 5 s for `settled`, with a spinner on Home.
+  - **Tests and size:** app 355, data 70, lint clean; release 20.28 MB.
+  - **User TODOs:** `SUPPORT_EMAIL` and `PRIVACY_POLICY_URL` (gradle property / CI secret, or the `AppLinks` placeholders). Store builds refuse to build without them.
+  - **TESTING §20** added.
+  - **A11y leftovers in A's screens:** assigned to Builder A (resumed), plus `CaptureMethod.HANDS_FREE` if no schema change is needed.
+- **Builder A a11y leftovers + HANDS_FREE capture method DONE.** No schema change: the `capture_method` columns already existed.
+- **Orchestrator verification on 2026-11-17 (pre-review):**
+  - Tests: engine 282 / ar 142 / data 71 / app 359, 0 failures.
+  - Kover, assembleDebug/Release and lint all pass (app 0 errors, 6 warnings).
+  - Release 20.28 MB; 0 debug-only references in the release dex.
+- **Reviewer running** → `docs/reviews/SM1-M5-review.md`.
+- **SM1-M5 review DONE** → `docs/reviews/SM1-M5-review.md`: 0 BLOCKER, 3 MAJOR, 13 MINOR.
+  - **MAJOR 1:** hands-free drops points behind the calibration picker, and they reach the known-length check.
+  - **MAJOR 2:** ML Kit is missing from the Data safety plan, and the privacy text overclaims.
+  - **MAJOR 3:** no SM1 device checklist; the haptic tick is unverified.
+  - **Orchestrator decision:** the haptic tick is OFF by default (ARCore guidance); kept behind a constant for the device experiment.
+  - **Fix rounds running:**
+    - Builder A: M1, M3, the dwell/TalkBack/ML Kit MINORs, the G2 tracked-plane rule; adds TESTING §21.
+    - Builder B: M2, the SpokenText MINORs, consent retry not over AR, cache-delete scope, store-guard format validation, the Help hands-free text.
+- **Builder B's SM1-M5 fixes DONE.**
+  - **M2:** Data safety notes cover ML Kit per Google's live disclosure page (read 2026-11-17); the privacy copy is accurate in EN/HI; the delete dialog lists what is removed and what is kept.
+  - **SpokenText:** precompiled regexes, fractions in words, singular units.
+  - **Consent:** the retry only happens on non-AR screens (the onStart retry is removed).
+  - **Delete:** only SpaceView's caches; SDK and WebView caches are kept.
+  - **Build-time checks:** the email/URL format is validated.
+  - **Help:** has a hands-free section.
+  - **Tests and size:** app 372; lint clean; release 20.29 MB.
+  - Waiting on Builder A.
+- **Builder A's SM1 fixes DONE.**
+  - **M1:** hands-free is suspended when its UI is hidden, a dialog has focus, or the view is frozen/complete/failed; a calibration reference clears points; calibration starts with hands-free off.
+  - **M3:** `HAPTIC_TICK_ENABLED = false`; TESTING §21 (20 items).
+  - **MINORs:**
+    - freeze hold-off
+    - `AutoDropRules` tap guard
+    - TalkBack announcements
+    - no distance spam
+    - ML Kit failure reporting plus the public init fallback
+    - G2 `AREA_RATIO` 1.5× vs the tracked plane
+    - `HandsFreeDropperTest`
+  - **Final orchestrator verification:**
+    - Tests: engine 282 / ar 148 / data 71 / app 372, 0 failures.
+    - Kover, assembleDebug/Release and lint pass (app 0 errors, 6 warnings).
+    - Release 20.29 MB; 0 debug-only references in release.
+  - **The FRIDAY gate is running** → `docs/reviews/SM1-M5-gate.md`.
+- **SM1-M5 GATE: PASS WITH CONDITIONS** (`docs/reviews/SM1-M5-gate.md`).
+  - All 3 MAJORs and 13 MINORs verified; no new BLOCKER/MAJOR.
+  - **R1 (A):** reset the tap-guard state on undo/clear; also fix the K6 doc and the VIBRATE comment.
+  - **R2 (B):** re-check "AR in front" at consent-form show time; make TESTING §20/§21 consistent.
+  - **R3 (orchestrator):** docs, HTML, commit, green CI with the arm64 size.
+  - **Accepted warnings:** W1 hands-free on by default; W2 the G2 area-ratio risk; W3 card/A4 calibration off.
+  - **RC readiness:** feature-complete except the user's config and D step 2. Full checklist in gate §RC: A1–A7 for builders, B1–B7 for the user.
+  - **Top remaining:**
+    - (1) user secrets: AdMob IDs, keystore, licence key, support email, privacy-policy URL
+    - (2) AdMob GDPR message + Play Console products/testers/Data safety/rating/listing
+    - (3) device passes on low- and mid-range phones
+    - (4) M6 polish: EmojiCompat, SceneView skybox, plurals lint, release notes, EN/HI listing text, R8 mapping upload
+    - (5) native Hindi review; decisions W1/W3/D2; internal track → 12-tester × 14-day closed test
+- **2026-11-23 resume:**
+  - GitHub CI was green for every pushed commit (last: 13f3740, run 44024813191). The SM1/M5 work was still uncommitted.
+  - **R1 and R2 were already done** (files dated 11-19): `TapGuard` in `HandsFreeDropper.kt` reset on undo/clear with test `aTapAfterUndoingAHandsFreeDropIsAccepted`; `AdsSdk.requestConsent(canShowForm)` + `ConsentResult.DEFERRED`. G3/G4/G5 doc fixes also present. A stale `.build.lock` from 11-19 was removed.
+  - **User decisions:** (1) spike phone = **Google Pixel 10a** (on Google's ARCore list with Depth API; no ToF → the non-ToF case); (2) Free 3D scans = **5 in total** (lifetime). Built: `ProCatalog.FREE_DEVICE_SCANS = 5`; `SettingsRepository.deviceScansUsed()/recordDeviceScanSaved()` (key `device_scans_used`, kept by Delete my data); `AppContainer` gate count = max(lifetime counter, saved MESH_DEVICE rows); paywall EN/HI says deleting doesn't give one back; tests updated/added. **D step 2 must call `recordDeviceScanSaved()` after each successful `saveMesh`.** Docs: ARCH §7.1.7 + D17, TESTING §18 item 19 + §19 phone note, pro-monetization §1.
+  - Orchestrator full build running → then commit, push, CI (R3), record arm64 size.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
 ## Log

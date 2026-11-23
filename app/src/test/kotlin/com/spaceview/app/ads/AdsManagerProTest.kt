@@ -25,7 +25,7 @@ class FakeAdsSdk : AdsSdk {
 
     override fun privacyOptionsRequired(): Boolean = false
 
-    override fun requestConsent(activity: Activity, onResult: (ConsentResult) -> Unit) {
+    override fun requestConsent(activity: Activity, canShowForm: () -> Boolean, onResult: (ConsentResult) -> Unit) {
         consentRequests++
         onResult(ConsentResult.UPDATED)
     }

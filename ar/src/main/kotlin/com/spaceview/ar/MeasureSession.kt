@@ -88,7 +88,8 @@ enum class CommitFailure {
 
 /** One-off events (sounds, snackbars). */
 sealed class MeasureEvent {
-    data class PointAdded(val index: Int, val complete: Boolean) : MeasureEvent()
+    /** [auto]: dropped hands-free ([HandsFreeDropper]), not by a tap on "+". */
+    data class PointAdded(val index: Int, val complete: Boolean, val auto: Boolean = false) : MeasureEvent()
     data class CommitRejected(val reason: CommitFailure) : MeasureEvent()
     data object FreezeUnavailable : MeasureEvent()
 }
@@ -234,6 +235,9 @@ class MeasureSession(
     private val projMatrix = FloatArray(16)
     private var lastPlaneHit: ArHit? = null
     private var commitRequestedAtMs = -1L
+    private var commitAuto = false
+    private var framePointsOk = true
+    private val tapGuard = TapGuard()
     private var freezeRequested = false
     private var frozenCapture: FrozenCaptureState? = null
     private var pendingAdjust: Vec3? = null
@@ -315,6 +319,7 @@ class MeasureSession(
         // were detached in onSessionPaused (or released by Session.close()); only drop references.
         if (endpoints.isNotEmpty()) {
             endpoints.clear()
+            tapGuard.onPointsRemoved()
             bumpGeneration()
             _state.update { it.copy(pointCount = 0, isComplete = false, reading = null, tip = null, pendingCommit = false) }
         }
@@ -357,6 +362,7 @@ class MeasureSession(
         val incomplete = endpoints.isNotEmpty() && endpoints.size < mode.requiredPoints
         if (incomplete) {
             endpoints.clear()
+            tapGuard.onPointsRemoved()
             bumpGeneration()
         }
         _state.update {
@@ -426,6 +432,7 @@ class MeasureSession(
             }
         }
 
+        framePointsOk = allTracking && !anyUnanchored
         processCommitRequest(session, tracking)
         if (freezeRequested) captureFreeze(frame, vp, tracking)
         if (capture.isArmed) processFrontCapture(frame, cameraPose, tracking == CameraTracking.TRACKING && allTracking, !anyUnanchored)
@@ -472,6 +479,14 @@ class MeasureSession(
      */
     @MainThread
     fun addPoint() {
+        // SM1 review MINOR 5: a tap just after a hands-free drop on the same spot is a confirmation, not a "same
+        // spot" error, and a tap just after completion must not clear the result it completed.
+        val complete = endpoints.size >= mode.requiredPoints
+        if (tapGuard.ignoreTap(SystemClock.elapsedRealtime(), candidate?.data?.point?.position, complete)) return
+        requestCommit()
+    }
+
+    private fun requestCommit() {
         if (closed || frozenCapture != null) return
         if (endpoints.size >= mode.requiredPoints) clear()
         if (!live || lastTracking != CameraTracking.TRACKING) {
@@ -479,8 +494,46 @@ class MeasureSession(
             return
         }
         commitRequestedAtMs = SystemClock.elapsedRealtime()
+        commitAuto = false
         _state.update { it.copy(pendingCommit = true) }
     }
+
+    // ---- hands-free (SM1a): read by HandsFreeDropper through [autoDropSource], main thread ----
+
+    /** This session as the dropper's [AutoDropSource] (the seam its JVM tests fake). */
+    internal val autoDropSource: AutoDropSource = object : AutoDropSource {
+        override val cameraTrackingOk: Boolean get() = !closed && live && lastTracking == CameraTracking.TRACKING
+        override val lastFramePose: com.spaceview.engine.Pose? get() = lastCameraPose
+        override val committedCount: Int get() = endpoints.size
+        override val frozen: Boolean get() = frozenCapture != null || freezeRequested
+
+        override fun autoDropTarget(): EndpointData? {
+            val allowed = AutoDropRules.allowed(
+                closed = closed, live = live, frozen = frozenCapture != null || freezeRequested,
+                commitPending = commitRequestedAtMs >= 0, points = endpoints.size, required = mode.requiredPoints,
+                pointsOk = framePointsOk,
+            )
+            if (!allowed) return null
+            val c = candidate ?: return null
+            return c.data.takeIf { c.locked && SystemClock.elapsedRealtimeNanos() - c.wallNs < STALE_NS }
+        }
+
+        override fun distanceToNearestPoint(p: Vec3): Double {
+            var d = Double.POSITIVE_INFINITY
+            for (i in endpoints.indices) d = minOf(d, endpoints[i].data.point.position.distanceTo(p))
+            return d
+        }
+
+        override fun addPointHandsFree() {
+            requestCommit()
+            commitAuto = commitRequestedAtMs >= 0
+        }
+    }
+
+    /** True when any committed point was dropped hands-free (saved as `CaptureMethod.HANDS_FREE`). */
+    @MainThread
+    fun anyHandsFreePoint(): Boolean = endpoints.any { it.auto }
+
 
     /** Removes the last point (all of them when a pause left them unanchored). */
     @MainThread
@@ -493,6 +546,7 @@ class MeasureSession(
         commitRequestedAtMs = -1L
         cancelFrontCapture()
         endpoints.removeLastOrNull()?.let { detach(it) }
+        tapGuard.onPointsRemoved()
         bumpGeneration()
         _state.update { it.copy(pointCount = endpoints.size, isComplete = false, tip = null, reading = null, pendingCommit = false) }
     }
@@ -505,6 +559,7 @@ class MeasureSession(
         cancelFrontCapture()
         for (e in endpoints) detach(e)
         endpoints.clear()
+        tapGuard.onPointsRemoved()
         bumpGeneration()
         _state.update { it.copy(pointCount = 0, isComplete = false, tip = null, reading = null, pendingCommit = false) }
     }
@@ -629,7 +684,7 @@ class MeasureSession(
             val anchor = runCatching { s.createAnchor(translationPose(p)) }.getOrNull()
             if (anchor != null) {
                 detach(last)
-                endpoints[endpoints.size - 1] = Endpoint(anchor, adjustedEndpoint(last.data, p, cap))
+                endpoints[endpoints.size - 1] = Endpoint(anchor, adjustedEndpoint(last.data, p, cap), last.auto)
                 bumpGeneration()
             }
         }
@@ -685,12 +740,13 @@ class MeasureSession(
                 return
             }
             val anchor = createAnchor(session, data) ?: run { finishCommit(CommitFailure.NOT_TRACKING); return }
-            endpoints += Endpoint(anchor, data)
+            endpoints += Endpoint(anchor, data, commitAuto)
             bumpGeneration()
             commitRequestedAtMs = -1L
             val complete = endpoints.size >= mode.requiredPoints
+            tapGuard.onCommitted(SystemClock.elapsedRealtime(), data.point.position, auto = commitAuto, complete = complete)
             _state.update { it.copy(pendingCommit = false, pointCount = endpoints.size, isComplete = complete) }
-            _events.tryEmit(MeasureEvent.PointAdded(endpoints.size - 1, complete))
+            _events.tryEmit(MeasureEvent.PointAdded(endpoints.size - 1, complete, auto = commitAuto))
             return
         }
         if (now - requested > COMMIT_TIMEOUT_MS) {
@@ -975,7 +1031,7 @@ class MeasureSession(
     // ---- types ------------------------------------------------------------------------------------
 
     /** A committed point. [anchor] is null once a pause detached it (the data is then frozen). */
-    private class Endpoint(var anchor: Anchor?, var data: EndpointData)
+    private class Endpoint(var anchor: Anchor?, var data: EndpointData, val auto: Boolean = false)
 
     private class FrozenCaptureState(
         val projection: ViewProjection,

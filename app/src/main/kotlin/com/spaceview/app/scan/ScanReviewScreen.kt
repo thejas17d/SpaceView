@@ -3,6 +3,7 @@ package com.spaceview.app.scan
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,6 +24,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,8 +38,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -46,6 +51,9 @@ import com.spaceview.app.R
 import com.spaceview.app.common.AccuracyBadge
 import com.spaceview.app.common.InstrumentCard
 import com.spaceview.app.common.hintRes
+import com.spaceview.app.common.spokenLength
+import com.spaceview.app.common.spokenText
+import com.spaceview.app.common.spokenUnit
 import com.spaceview.app.gallery.GalleryFormatter
 import com.spaceview.app.pro.GalleryFullCard
 import com.spaceview.app.gallery.labelRes
@@ -139,7 +147,22 @@ internal fun ScanReviewScreen(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (state.saveFailed) Text(stringResource(R.string.scan_save_failed), color = MaterialTheme.colorScheme.error)
+            // SM1b: a curated name for what the photo shows; applied only when the user taps it (never automatically).
+            // The container is always there and polite, so TalkBack announces the chip when it appears up to 3 s after
+            // the photo (SM1 review MINOR 6).
+            Box(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+                state.nameSuggestion?.let { s ->
+                    val name = stringResource(s.nameRes)
+                    if (!state.saving && state.label != name) {
+                        SuggestionChip(
+                            onClick = { vm.setLabel(name) },
+                            label = { Text(stringResource(R.string.smart_name_chip, name)) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        )
+                    }
+                }
+            }
+            if (state.saveFailed) Text(stringResource(R.string.scan_save_failed), color = MaterialTheme.colorScheme.error, modifier = Modifier.announced())
             // Free gallery cap (Builder B): the scan stays here; Upgrade, Share or Discard.
             if (state.galleryFull) {
                 GalleryFullCard(
@@ -151,7 +174,7 @@ internal fun ScanReviewScreen(
                     onDiscard = onDiscard,
                 )
             }
-            if (!values.isSavable) Text(stringResource(R.string.scan_invalid_size), color = MaterialTheme.colorScheme.error)
+            if (!values.isSavable) Text(stringResource(R.string.scan_invalid_size), color = MaterialTheme.colorScheme.error, modifier = Modifier.announced())
             Button(
                 onClick = { vm.save(suggested) },
                 enabled = values.isSavable && !state.saving && !state.photoBusy,
@@ -204,18 +227,22 @@ private fun DimRow(
     onEdit: (() -> Unit)?,
 ) {
     val f = Units.formatForContext(Measurement(d.meters, if (d.isEstimate) 0.0 else d.bound95 / Uncertainty.K95), context, units)
+    val name = stringResource(label)
+    val p = f.primary
+    val estimateText = if (p.unit == com.spaceview.engine.LengthUnit.FEET_INCHES) p.value else "${p.value} ${p.unitSymbol}"
+    val note = stringResource(if (edited || d.source == DimensionSource.TYPED) R.string.gallery_edited_by_you else R.string.scan_estimate)
+    // M5 a11y: one node per size with units and "±" in words ("Width, 61.0 centimetres plus or minus 0.5 centimetres").
+    val spoken = if (d.isEstimate) {
+        "$name, ${spokenText("${GalleryFormatter.ESTIMATE_MARK}$estimateText")}, $note"
+    } else {
+        listOfNotNull(name, spokenLength(p), f.secondary?.let { spokenText(it) }).joinToString(", ")
+    }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(label), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(80.dp))
-        Column(Modifier.weight(1f)) {
+        Text(name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(80.dp).clearAndSetSemantics { })
+        Column(Modifier.weight(1f).clearAndSetSemantics { contentDescription = spoken }) {
             if (d.isEstimate) {
-                val p = f.primary
-                val v = if (p.unit == com.spaceview.engine.LengthUnit.FEET_INCHES) p.value else "${p.value} ${p.unitSymbol}"
-                Text("${GalleryFormatter.ESTIMATE_MARK}$v", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    stringResource(if (edited || d.source == DimensionSource.TYPED) R.string.gallery_edited_by_you else R.string.scan_estimate),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text("${GalleryFormatter.ESTIMATE_MARK}$estimateText", style = MaterialTheme.typography.titleLarge)
+                Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 Text(f.primary.text, style = MaterialTheme.typography.titleLarge)
                 f.secondary?.let { Text("($it)", style = MaterialTheme.typography.bodySmall) }
@@ -259,15 +286,26 @@ private fun EditDialog(
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it.take(16) },
+                    // M5 a11y: the field says what it edits (and the unit, in words).
+                    label = { Text(stringResource(R.string.smart_a11y_edit_field, name, spokenUnit(unit.symbol))) },
                     singleLine = true,
                     suffix = { Text(unit.symbol) },
                     isError = parsed == null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
                 )
-                if (parsed == null) Text(stringResource(R.string.gallery_edit_invalid), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                if (parsed == null) {
+                    Text(
+                        stringResource(R.string.gallery_edit_invalid),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.announced(),
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (u in GalleryFormatter.EditUnit.entries) {
+                        val unitName = spokenUnit(u.symbol)
                         FilterChip(
+                            modifier = Modifier.semantics { contentDescription = unitName },
                             selected = u == unit,
                             onClick = {
                                 // Convert what is typed so switching units never changes the length.
@@ -275,7 +313,8 @@ private fun EditDialog(
                                 unit = u
                                 if (m != null) text = GalleryFormatter.editText(m, u)
                             },
-                            label = { Text(u.symbol) },
+                            // The chip is read as "centimetres" / "inches", never "c m" / "in".
+                            label = { Text(u.symbol, modifier = Modifier.clearAndSetSemantics { }) },
                         )
                     }
                 }
@@ -292,3 +331,6 @@ private fun EditDialog(
         },
     )
 }
+
+/** M5 a11y: an error or status line that TalkBack reads when it appears. */
+private fun Modifier.announced(): Modifier = semantics { liveRegion = LiveRegionMode.Polite }

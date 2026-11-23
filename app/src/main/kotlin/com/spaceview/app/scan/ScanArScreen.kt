@@ -41,6 +41,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -48,6 +49,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spaceview.app.R
+import com.spaceview.app.common.spokenText
 import com.spaceview.app.ads.AdsManager
 import com.spaceview.app.ads.ArScreenAdGuard
 import com.spaceview.app.common.AccuracyBadge
@@ -67,6 +69,8 @@ import com.spaceview.app.measure.instructionRes
 import com.spaceview.app.measure.messageRes
 import com.spaceview.app.ui.theme.SpaceViewTheme
 import com.spaceview.ar.CaptureHint
+import com.spaceview.app.smart.HandsFreeUi
+import com.spaceview.app.smart.rememberHandsFree
 import com.spaceview.ar.CommitFailure
 import com.spaceview.ar.FrontCaptureStatus
 import com.spaceview.ar.FrontPhoto
@@ -95,7 +99,7 @@ internal fun ScanArScreen(
     outline: ScanOutline?,
     settings: ScanSettings,
     onBack: () -> Unit,
-    onOutline: (ScanOutline, ImprovementTip?, DeviceTier) -> Unit,
+    onOutline: (ScanOutline, ImprovementTip?, DeviceTier, Boolean) -> Unit,
     onPhoto: (FrontPhoto) -> Unit,
     onSkipPhoto: () -> Unit,
     onRemeasure: () -> Unit,
@@ -120,6 +124,12 @@ internal fun ScanArScreen(
 
         val state by session.state.collectAsStateWithLifecycle()
         val frozen by session.frozen.collectAsStateWithLifecycle()
+        // Hands-free only while the outline reticle is on screen (not the photo step, a result card or a freeze).
+        val handsFree = rememberHandsFree(
+            session,
+            settings.handsFreeEnabled,
+            suspended = step != ScanStep.OUTLINE || sessionFailed || frozen != null || state.isComplete,
+        )
         val capture by session.frontCapture.collectAsStateWithLifecycle()
         val photoReady by session.frontPhoto.collectAsStateWithLifecycle()
 
@@ -168,7 +178,12 @@ internal fun ScanArScreen(
                 .background(Color.Black)
                 .onSizeChanged { session.setViewSize(it.width, it.height) },
         ) {
-            ArCameraView(session, planeRenderer = frozen == null && step == ScanStep.OUTLINE, onSessionFailed = { sessionFailed = true })
+            ArCameraView(
+                session,
+                planeRenderer = frozen == null && step == ScanStep.OUTLINE,
+                onSessionFailed = { sessionFailed = true },
+                handsFree = handsFree,
+            )
             val f = frozen
             if (f != null) {
                 FreezeOverlay(
@@ -195,12 +210,15 @@ internal fun ScanArScreen(
                     onUndo = session::undo,
                     onFreeze = session::freeze,
                     outlineOf = { reading -> session.scanOutline(shape, reading) },
-                    onNext = { outline -> onOutline(outline, state.tip, state.capabilities?.tier ?: DeviceTier.NO_DEPTH) },
+                    onNext = { outline ->
+                        onOutline(outline, state.tip, state.capabilities?.tier ?: DeviceTier.NO_DEPTH, session.anyHandsFreePoint())
+                    },
                     onSkipPhoto = onSkipPhoto,
                     onRemeasure = {
                         session.clear()
                         onRemeasure()
                     },
+                    handsFree = handsFree,
                 )
             }
         }
@@ -226,6 +244,7 @@ private fun ScanHud(
     onNext: (ScanOutline) -> Unit,
     onSkipPhoto: () -> Unit,
     onRemeasure: () -> Unit,
+    handsFree: HandsFreeUi,
 ) {
     val coaching = state.tracking == TrackingStatus.INITIALIZING || !state.sessionRunning
     // Flat objects: no surface under the reticle for ~5 s while tracking → wall hint (the wall–floor-line
@@ -246,7 +265,8 @@ private fun ScanHud(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ChromeIconButton(onClick = onBack, description = R.string.common_back) { CloseGlyph(it) }
                 Spacer(Modifier.weight(1f))
-                ChromePill(stepText(step))
+                // M5 a11y: "Step 2 of 4" in words, and announced when the step changes.
+                ChromePill(stepText(step), spoken = stringResource(R.string.smart_a11y_scan_step, step.number, ScanStep.COUNT), announce = true)
                 Spacer(Modifier.weight(1f))
                 Spacer(Modifier.width(48.dp))
             }
@@ -272,7 +292,7 @@ private fun ScanHud(
         if (step == ScanStep.OUTLINE && !sessionFailed && finished == null) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(64.dp))
-                Reticle(state)
+                Reticle(state, handsFree::progress)
                 Spacer(Modifier.height(8.dp))
                 LiveReadout(state, units, showLength = true)
             }
@@ -286,7 +306,7 @@ private fun ScanHud(
                     val outline = remember(finished) { outlineOf(finished) }
                     OutlineCard(kind, outline, units, enabled = state.pointsTracking, onUndo = onUndo, onNext = { outline?.let(onNext) })
                 }
-                else -> Controls(state, onAddPoint, onUndo, onFreeze)
+                else -> Controls(state, onAddPoint, onUndo, onFreeze, handsFree)
             }
         }
     }
@@ -336,9 +356,13 @@ private fun OutlineCard(kind: ObjectKind, outline: ScanOutline?, units: UnitPref
 
 @Composable
 private fun ArValueRow(@StringRes label: Int, d: Dimension, kind: ObjectKind, units: UnitPreference) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(label), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(72.dp))
-        Text(GalleryFormatter.dimension(d, kind, units).primary.text, style = MaterialTheme.typography.titleLarge)
+    val name = stringResource(label)
+    val value = GalleryFormatter.dimension(d, kind, units).primary.text
+    val spoken = spokenText(value)
+    // M5 a11y: one node, "Width, 61.0 centimetres plus or minus 0.5 centimetres".
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clearAndSetSemantics { contentDescription = "$name, $spoken" }) {
+        Text(name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(72.dp))
+        Text(value, style = MaterialTheme.typography.titleLarge)
     }
 }
 

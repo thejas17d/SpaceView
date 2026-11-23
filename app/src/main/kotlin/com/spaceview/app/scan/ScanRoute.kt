@@ -1,5 +1,7 @@
 package com.spaceview.app.scan
 
+import com.spaceview.app.common.spokenText
+import androidx.compose.ui.semantics.contentDescription
 import com.spaceview.app.pro.ProFeature
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
@@ -245,7 +247,9 @@ private fun SavedScreen(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 280.dp),
                 )
                 Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(GalleryFormatter.shareDims(item, units), style = MaterialTheme.typography.bodyMedium)
+                val dims = GalleryFormatter.shareDims(item, units)
+                val dimsSpoken = spokenText(dims)
+                Text(dims, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.semantics { contentDescription = dimsSpoken })
             }
             Spacer(Modifier.heightIn(min = 8.dp))
             Button(

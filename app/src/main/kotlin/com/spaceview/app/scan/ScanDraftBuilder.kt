@@ -4,6 +4,7 @@ import com.spaceview.app.gallery.GalleryFormatter
 import com.spaceview.ar.ImprovementTip
 import com.spaceview.ar.ScanOutline
 import com.spaceview.ar.ScanShape
+import com.spaceview.data.gallery.CaptureMethod
 import com.spaceview.data.gallery.Dimension
 import com.spaceview.data.gallery.DimensionSource
 import com.spaceview.data.gallery.GalleryRepository
@@ -155,6 +156,7 @@ object ScanDraftBuilder {
         label: String,
         tier: DeviceTier,
         arcoreVersion: String?,
+        handsFree: Boolean = false,
     ): ScanDraft = ScanDraft(
         kind = kind,
         width = values.width,
@@ -168,5 +170,7 @@ object ScanDraftBuilder {
         arcoreVersion = arcoreVersion,
         // A scan never applies a calibration (it only lives inside the AR session that made it).
         calibrationFactor = 1.0,
+        // v3 column (no schema change): at least one outline point was dropped hands-free (SM1a).
+        captureMethod = if (handsFree) CaptureMethod.HANDS_FREE else CaptureMethod.MANUAL,
     )
 }

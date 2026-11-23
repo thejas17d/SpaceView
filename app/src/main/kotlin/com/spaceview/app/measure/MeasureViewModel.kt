@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.spaceview.app.settings.SettingsRepository
 import com.spaceview.ar.CalibrationCheck
 import com.spaceview.ar.Reading
+import com.spaceview.data.gallery.CaptureMethod
 import com.spaceview.data.history.MeasurementRepository
 import com.spaceview.data.settings.CalibrationRecord
 import com.spaceview.data.settings.MeasureSettingsRepository
@@ -33,6 +34,8 @@ data class MeasureUiSettings(
     val depthEnabled: Boolean = false,
     val calibration: CalibrationRecord? = null,
     val safetyNoticeShown: Boolean = true,
+    /** Smart Measure hands-free point drop (SM1a), from the `spaceview_measure` store. */
+    val handsFreeEnabled: Boolean = true,
     val loaded: Boolean = false,
 )
 
@@ -86,7 +89,7 @@ class MeasureViewModel(
         appSettings.unitPreference,
         appSettings.soundsEnabled,
     ) { m, units, sounds ->
-        MeasureUiSettings(units, sounds, m.depthEnabled, m.calibration, m.safetyNoticeShown, loaded = true)
+        MeasureUiSettings(units, sounds, m.depthEnabled, m.calibration, m.safetyNoticeShown, m.handsFreeEnabled, loaded = true)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MeasureUiSettings())
 
     private val _events = MutableSharedFlow<MeasureVmEvent>(extraBufferCapacity = 4)
@@ -100,7 +103,7 @@ class MeasureViewModel(
      * Saves exactly the [reading] the user saw on the result card (M2 review minor 1); a live or
      * missing reading is never saved.
      */
-    fun save(reading: Reading, label: String?, tier: DeviceTier? = null) {
+    fun save(reading: Reading, label: String?, tier: DeviceTier? = null, handsFree: Boolean = false) {
         if (reading.isLive) return
         // The canonical record (research §3.3 item 5): the factor actually applied (1.0 when the reading
         // is not calibrated) and the raw, uncalibrated length, so results can be re-tuned later.
@@ -122,6 +125,8 @@ class MeasureViewModel(
                     arcoreVersion = version,
                     calibrationFactor = factor,
                     rawPrimaryMetres = reading.rawPrimary.value,
+                    // v3 column (no schema change): at least one point was dropped hands-free (SM1a).
+                    captureMethod = if (handsFree) CaptureMethod.HANDS_FREE else CaptureMethod.MANUAL,
                 )
             }
             _events.emit(if (ok) MeasureVmEvent.Saved else MeasureVmEvent.StorageFailed)

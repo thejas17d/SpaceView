@@ -1,5 +1,7 @@
 package com.spaceview.app.history
 
+import com.spaceview.app.common.spokenText
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.platform.LocalContext
 import com.spaceview.app.ads.BannerAd
@@ -153,8 +155,12 @@ private fun HistoryItem(row: HistoryRow, onDelete: () -> Unit) {
                     style = SpaceViewTheme.typography.caption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(row.valueText, style = MaterialTheme.typography.titleMedium)
-                row.areaText?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                val valueSpoken = spokenText(row.valueText)
+                Text(row.valueText, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = valueSpoken })
+                row.areaText?.let {
+                    val areaSpoken = spokenText(it)
+                    Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.semantics { contentDescription = areaSpoken })
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     AccuracyBadge(row.item.quality)
                     if (row.item.calibrated) {

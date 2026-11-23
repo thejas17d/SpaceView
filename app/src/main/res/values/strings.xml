@@ -152,7 +152,6 @@
     <string name="common_add_point">Add point</string>
     <string name="common_dismiss">Dismiss</string>
     <string name="common_back">Back</string>
-    <string name="common_close">Close</string>
     <!-- Onboarding -->
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_next">Next</string>
@@ -186,11 +185,8 @@
     <string name="settings_privacy_options_not_needed">No ad privacy choices are needed in your region</string>
     <string name="settings_privacy_policy">Privacy policy</string>
     <string name="settings_section_about">About</string>
-    <string name="settings_version">Version</string>
     <string name="settings_accuracy_note_title">Accuracy</string>
     <string name="settings_accuracy_note" formatted="false">Typically ±2% (about ±1–2 cm at 1 m). Each result shows its own ±. For exact work, check with a tape.</string>
-    <string name="settings_licences">Open-source licences</string>
-    <string name="settings_licences_apache">Apache License 2.0: www.apache.org/licenses/LICENSE-2.0</string>
     <string name="settings_depth">Use depth (if supported)</string>
     <string name="settings_depth_detail">Steadier points on plain walls and floors. Uses more battery.</string>
     <string name="settings_calibration_none">No calibration saved</string>
@@ -202,7 +198,6 @@
     <string name="settings_clear_calibration_body">This deletes the saved calibration record. Measurements you already saved don\'t change.</string>
     <string name="settings_clear_calibration_confirm">Clear</string>
     <string name="settings_cancel">Cancel</string>
-    <string name="settings_contact">Contact support</string>
     <!-- Ads -->
     <string name="ads_label">Ad</string>
     <string name="ads_advertisement">Advertisement</string>

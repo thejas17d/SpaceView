@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings additions (M5 remainder, Builder B): Help, About, Delete my data, spoken words for TalkBack.
+     Every key also exists in values-hi/strings_settings2.xml. -->
+<resources>
+    <string name="settings_help">Help and FAQ</string>
+    <string name="settings_help_detail">Measuring tips, what ± means, Pro, privacy</string>
+    <string name="settings_help_detail_spoken">Measuring tips, what plus or minus means, Pro, privacy</string>
+    <string name="settings_about">About SpaceView</string>
+    <string name="settings_about_detail">Version, licences, privacy policy</string>
+
+    <string name="settings_delete_data">Delete my data</string>
+    <string name="settings_delete_data_detail">History, Gallery, calibration and settings on this phone</string>
+    <string name="settings_delete_data_title">Delete all your data?</string>
+    <string name="settings_delete_data_body">This permanently deletes from this phone: your History, every Gallery item with its photos and 3D models, your calibration and your settings (units, sounds, depth, hands-free). It can\'t be undone.\n\nKept: your SpaceView Pro purchase status (the subscription is managed by Google Play; to cancel it, use Manage subscription), your ad privacy choices, and the counters that limit how often ads and review requests appear.</string>
+    <string name="settings_delete_data_confirm">Delete everything</string>
+    <string name="settings_delete_data_running">Deleting…</string>
+    <string name="settings_delete_data_done">Your data was deleted.</string>
+    <string name="settings_delete_data_partial">Some data couldn\'t be deleted. Please try again.</string>
+    <string name="settings_accuracy_note_spoken">Typically within 2 percent, about 1 to 2 centimetres at 1 metre. Each result shows its own plus or minus. For exact work, check with a tape.</string>
+
+    <!-- Spoken forms for TalkBack (SpokenText): never shown on screen. -->
+    <string name="a11y_plus_or_minus">plus or minus</string>
+    <string name="a11y_about">about</string>
+    <string name="a11y_by">by</string>
+    <string name="a11y_unit_square_metres">square metres</string>
+    <string name="a11y_unit_square_feet">square feet</string>
+    <!-- Singular units and fractions for SpokenText (review MINOR 8). The plural unit names are a11y_unit_* in strings.xml. -->
+    <string name="a11y_unit_mm_one">millimetre</string>
+    <string name="a11y_unit_cm_one">centimetre</string>
+    <string name="a11y_unit_m_one">metre</string>
+    <string name="a11y_unit_inch_one">inch</string>
+    <string name="a11y_unit_foot_one">foot</string>
+    <string name="a11y_unit_square_metre_one">square metre</string>
+    <string name="a11y_unit_square_foot_one">square foot</string>
+    <string name="a11y_fraction_half_one">half</string>
+    <string name="a11y_fraction_half">halves</string>
+    <string name="a11y_fraction_quarter_one">quarter</string>
+    <string name="a11y_fraction_quarter">quarters</string>
+    <string name="a11y_fraction_eighth_one">eighth</string>
+    <string name="a11y_fraction_eighth">eighths</string>
+    <string name="a11y_fraction_sixteenth_one">sixteenth</string>
+    <string name="a11y_fraction_sixteenth">sixteenths</string>
+    <string name="a11y_mixed_number">%1$s and %2$s</string>
+    <string name="a11y_fraction_over">%1$s over %2$s</string>
+</resources>

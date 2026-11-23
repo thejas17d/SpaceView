@@ -179,7 +179,7 @@ private fun reasonText(feature: ProFeature): String = when (feature) {
 }
 
 @StringRes
-private fun benefitRes(feature: ProFeature): Int = when (feature) {
+internal fun benefitRes(feature: ProFeature): Int = when (feature) {
     ProFeature.NO_ADS -> R.string.pro_benefit_no_ads
     ProFeature.GALLERY_UNLIMITED -> R.string.pro_benefit_gallery
     ProFeature.DEVICE_SCAN -> R.string.pro_benefit_device_scan
@@ -224,11 +224,11 @@ private fun Offers(state: PaywallUiState, onSelect: (String) -> Unit, onBuy: () 
         ) {
             CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(12.dp))
-            Text(stringResource(R.string.pro_loading), style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.pro_loading), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         }
         is OffersUi.Failed -> InstrumentCard(Modifier.testTag("paywall_problem")) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(problemRes(offers.problem)), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(problemRes(offers.problem)), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 if (offers.problem == PaywallProblem.OFFLINE || offers.problem == PaywallProblem.GENERIC) {
                     TextButton(onClick = onRetry) { Text(stringResource(R.string.pro_retry)) }
                 }

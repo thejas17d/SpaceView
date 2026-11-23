@@ -1,5 +1,9 @@
 package com.spaceview.app.gallery
 
+import com.spaceview.app.common.spokenText
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -219,7 +223,7 @@ private fun ItemContent(
                     onClick = onEdit,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                     shape = MaterialTheme.shapes.medium,
-                ) { Text(stringResource(R.string.gallery_edit_dimensions), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                ) { Text(stringResource(R.string.gallery_edit_dimensions), maxLines = 2, overflow = TextOverflow.Ellipsis) }
             }
         }
         HorizontalDivider(color = SpaceViewTheme.colors.hairline)
@@ -257,12 +261,24 @@ private fun SpecBlock(state: GalleryItemUiState, item: GalleryItem) {
                         ),
                         style = SpaceViewTheme.typography.caption,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.width(88.dp).padding(top = 3.dp),
+                        modifier = Modifier.widthIn(min = 88.dp, max = 140.dp).padding(top = 3.dp),
                     )
+                    val rowSpoken = spokenText(listOfNotNull(row.formatted.primary.text, row.formatted.secondary).joinToString(", "))
                     Column(Modifier.weight(1f)) {
-                        Text(row.formatted.primary.text, style = SpaceViewTheme.typography.spec, fontWeight = FontWeight.Medium)
+                        Text(
+                            row.formatted.primary.text,
+                            style = SpaceViewTheme.typography.spec,
+                            fontWeight = FontWeight.Medium,
+                            // M5 a11y: the secondary line is folded into this description (it says the same length).
+                            modifier = Modifier.semantics { contentDescription = rowSpoken },
+                        )
                         row.formatted.secondary?.let {
-                            Text(it, style = SpaceViewTheme.typography.spec, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                it,
+                                style = SpaceViewTheme.typography.spec,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.clearAndSetSemantics {},
+                            )
                         }
                         if (row.isEstimate) {
                             Text(

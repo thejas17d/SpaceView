@@ -1,5 +1,6 @@
 package com.spaceview.data.history
 
+import com.spaceview.data.gallery.CaptureMethod
 import com.spaceview.engine.DeviceTier
 import com.spaceview.engine.MeasureContext
 import com.spaceview.engine.Measurement
@@ -66,6 +67,7 @@ class MeasurementRepository(private val dao: MeasurementDao) {
         arcoreVersion: String? = null,
         calibrationFactor: Double? = null,
         rawPrimaryMetres: Double? = null,
+        captureMethod: CaptureMethod? = null,
     ): Long {
         val id = dao.insert(
             MeasurementEntity(
@@ -86,6 +88,7 @@ class MeasurementRepository(private val dao: MeasurementDao) {
                 arcoreVersion = arcoreVersion?.take(40),
                 calibrationFactor = calibrationFactor?.takeIf { it.isFinite() && it > 0 },
                 rawValueMetres = rawPrimaryMetres?.takeIf { it.isFinite() },
+                captureMethod = captureMethod?.name,
             ),
         )
         dao.trimTo(HISTORY_LIMIT)

@@ -67,6 +67,10 @@ interface GalleryDao {
 
     @Query("DELETE FROM gallery_items WHERE id = :id")
     suspend fun delete(id: Long): Int
+
+    /** Settings → Delete my data (M5). A query only: no schema change. */
+    @Query("DELETE FROM gallery_items")
+    suspend fun deleteAll(): Int
 }
 
 /** The file columns of one gallery row. */

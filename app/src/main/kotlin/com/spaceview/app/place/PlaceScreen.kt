@@ -1,5 +1,7 @@
 package com.spaceview.app.place
 
+import com.spaceview.app.common.spokenText
+import androidx.compose.foundation.layout.sizeIn
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Canvas
@@ -44,6 +46,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spaceview.app.R
@@ -372,7 +375,7 @@ private fun PlaceHud(
         val height = status.centreHeightM
         if (height != null && status.state is PlacementState.Placed && fitMode == FitMode.OFF) {
             ChromeNote(stringResource(R.string.place_height, MeasureFormatter.targetDistance((height * 100).toInt(), units)))
-            if (status.target.isWall) HeightSlider(height, onCentreHeight)
+            if (status.target.isWall) HeightSlider(height, units, onCentreHeight)
         }
 
         // ---- verdict ----
@@ -447,20 +450,26 @@ private fun PlacedControls(
  * vertically on its anchor; the value is saved for process death and re-applied after the next drop.
  */
 @Composable
-private fun HeightSlider(heightM: Double, onChange: (Double) -> Unit) {
+private fun HeightSlider(heightM: Double, units: UnitPreference, onChange: (Double) -> Unit) {
     val label = stringResource(R.string.place_height_slider)
+    // M5 a11y: TalkBack reads the height with its unit in words ("1.2 metres"), not a percentage.
+    val value = spokenText(MeasureFormatter.targetDistance((heightM * 100).toInt(), units))
     Slider(
         value = heightM.toFloat().coerceIn(MIN_CENTRE_HEIGHT_M, MAX_CENTRE_HEIGHT_M),
         onValueChange = { onChange(it.toDouble()) },
         valueRange = MIN_CENTRE_HEIGHT_M..MAX_CENTRE_HEIGHT_M,
-        modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp).semantics { contentDescription = label },
+        modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp).semantics {
+            contentDescription = label
+            stateDescription = value
+        },
     )
 }
 
 @Composable
 private fun NudgeButton(glyph: String, @StringRes description: Int, onClick: () -> Unit) {
     val label = stringResource(description)
-    Surface(shape = MaterialTheme.shapes.large, color = SpaceViewTheme.colors.arChrome, modifier = Modifier.size(48.dp)) {
+    // M5 a11y: at least 48 dp, and free to grow with the font so the glyph never clips at 200%.
+    Surface(shape = MaterialTheme.shapes.large, color = SpaceViewTheme.colors.arChrome, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
         TextButton(onClick = onClick, modifier = Modifier.semantics { contentDescription = label }) {
             Text(glyph, color = SpaceViewTheme.colors.onArChrome)
         }
@@ -519,7 +528,8 @@ private fun FitCard(fit: PlaceFit, space: SpaceReading, units: UnitPreference, b
     }
     Surface(shape = MaterialTheme.shapes.medium, color = colors.arChrome, modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp)) {
         Column(Modifier.padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(headline, color = accent, style = MaterialTheme.typography.titleMedium)
+            val headlineSpoken = spokenText(headline)
+            Text(headline, color = accent, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = headlineSpoken })
             val notes = buildList {
                 add(stringResource(R.string.place_fit_band, amountText(PlaceVerdict.amount(fit.bandM, units, roundUp = true))))
                 add(stringResource(when (fit.limitingAxis) {
@@ -537,12 +547,17 @@ private fun FitCard(fit: PlaceFit, space: SpaceReading, units: UnitPreference, b
                 if (fit.rotated) add(stringResource(R.string.place_fit_rotated))
                 if (fit.boundingBox) add(stringResource(R.string.place_fit_bounding))
             }
-            for (n in notes) Text(n, color = colors.onArChrome, style = MaterialTheme.typography.bodySmall)
+            for (n in notes) {
+                val noteSpoken = spokenText(n)
+                Text(n, color = colors.onArChrome, style = MaterialTheme.typography.bodySmall, modifier = Modifier.semantics { contentDescription = noteSpoken })
+            }
             val spaceText = buildString {
                 append(amountText(PlaceVerdict.amount(space.primaryM, units, roundUp = false)))
                 space.secondaryM?.let { append(" × ").append(amountText(PlaceVerdict.amount(it, units, roundUp = false))) }
             }
-            Text(stringResource(R.string.place_fit_space, spaceText), color = colors.onArChrome, style = MaterialTheme.typography.bodySmall)
+            val spaceLine = stringResource(R.string.place_fit_space, spaceText)
+            val spaceSpoken = spokenText(spaceLine)
+            Text(spaceLine, color = colors.onArChrome, style = MaterialTheme.typography.bodySmall, modifier = Modifier.semantics { contentDescription = spaceSpoken })
             Row {
                 TextButton(onClick = onAgain) { Text(stringResource(R.string.place_fit_again)) }
                 TextButton(onClick = onClear) { Text(stringResource(R.string.place_fit_clear)) }
@@ -557,13 +572,18 @@ private fun amountText(a: PlaceVerdict.Amount): String =
 
 @Composable
 private fun ChromeNote(text: String, live: Boolean = false) {
+    // M5 a11y: readings in notes ("1.20 m ± 1 cm") are spoken in words, also when announced live.
+    val spoken = spokenText(text)
     Surface(shape = MaterialTheme.shapes.small, color = SpaceViewTheme.colors.arChrome, modifier = Modifier.padding(vertical = 3.dp)) {
         Text(
             text,
             color = SpaceViewTheme.colors.onArChrome,
             modifier = Modifier
                 .padding(horizontal = 10.dp, vertical = 6.dp)
-                .then(if (live) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier),
+                .semantics {
+                    contentDescription = spoken
+                    if (live) liveRegion = LiveRegionMode.Polite
+                },
         )
     }
 }
@@ -573,7 +593,7 @@ private fun MessageCard(text: String, onBack: (() -> Unit)?, onRetry: (() -> Uni
     Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         Surface(shape = MaterialTheme.shapes.medium, color = SpaceViewTheme.colors.arChrome, modifier = Modifier.padding(24.dp)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(text, color = SpaceViewTheme.colors.onArChrome)
+                Text(text, color = SpaceViewTheme.colors.onArChrome, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (onBack != null) OutlinedButton(onClick = onBack) { Text(stringResource(R.string.place_back)) }
                     if (onRetry != null) Button(onClick = onRetry) { Text(stringResource(R.string.place_retry)) }

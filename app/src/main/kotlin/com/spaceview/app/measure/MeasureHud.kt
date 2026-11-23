@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -36,6 +38,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -43,6 +46,9 @@ import com.spaceview.app.R
 import com.spaceview.app.common.AddPointButton
 import com.spaceview.app.common.CoachingCard
 import com.spaceview.app.common.DimensionLabel
+import com.spaceview.app.common.spokenLength
+import com.spaceview.app.common.spokenText
+import com.spaceview.app.smart.HandsFreeUi
 import com.spaceview.app.ui.theme.SpaceViewTheme
 import com.spaceview.ar.CalibrationCheck
 import com.spaceview.ar.CommitFailure
@@ -50,6 +56,7 @@ import com.spaceview.ar.MeasureMode
 import com.spaceview.ar.MeasureState
 import com.spaceview.ar.Reading
 import com.spaceview.ar.TrackingStatus
+import com.spaceview.engine.FormattedLength
 import com.spaceview.engine.ReferenceObject
 import com.spaceview.engine.UnitPreference
 
@@ -77,6 +84,7 @@ internal fun MeasureHud(
     onRetryCalibration: () -> Unit,
     calibrationCheck: (ReferenceObject) -> CalibrationCheck?,
     knownLengthCheck: (Double, Double) -> CalibrationCheck?,
+    handsFree: HandsFreeUi? = null,
 ) {
     val coaching = state.tracking == TrackingStatus.INITIALIZING || !state.sessionRunning
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -106,7 +114,7 @@ internal fun MeasureHud(
         if (calibration != CalibrationStep.Choosing && !sessionFailed) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(64.dp))
-                Reticle(state)
+                Reticle(state, handsFree?.let { it::progress } ?: NoDwell)
                 Spacer(Modifier.height(8.dp))
                 // Known-length calibration: no live length at all, only the target distance (gate R2).
                 val knownLength = calibration is CalibrationStep.Measuring && calibration.reference == null
@@ -144,7 +152,7 @@ internal fun MeasureHud(
                     onNew = onNew,
                     onUndo = onUndo,
                 )
-                !sessionFailed -> Controls(state, onAddPoint, onUndo, onFreeze)
+                !sessionFailed -> Controls(state, onAddPoint, onUndo, onFreeze, handsFree)
             }
         }
     }
@@ -245,10 +253,12 @@ internal fun instructionRes(mode: MeasureMode, pointCount: Int): Int = when (mod
 /**
  * Fixed-size centre crosshair (two-tone so it reads on white walls and dark floors). The ring
  * fills as the point under it steadies; a filled centre dot means "steady, tap +". Without a
- * surface it is a dashed grey ring.
+ * surface it is a dashed grey ring. With hands-free on, an outer white ring fills with
+ * [dwellProgress] (0..1, read only while drawing: it changes every animation frame) and the point
+ * drops when it closes (SM1a).
  */
 @Composable
-internal fun Reticle(state: MeasureState) {
+internal fun Reticle(state: MeasureState, dwellProgress: () -> Float = NoDwell) {
     val signal = SpaceViewTheme.colors.signal
     val dark = Color(0xFF16181B)
     val description = stringResource(if (state.locked) R.string.measure_reticle_locked else R.string.measure_reticle)
@@ -271,6 +281,16 @@ internal fun Reticle(state: MeasureState) {
                 style = Stroke(w * 1.6f, cap = StrokeCap.Round),
             )
         }
+        val dwell = dwellProgress()
+        if (dwell > 0f) {
+            val ro = r + 7.dp.toPx()
+            drawCircle(dark, ro, c, style = Stroke(w * 2.6f))
+            drawArc(
+                color = Color.White, startAngle = -90f, sweepAngle = 360f * dwell.coerceIn(0f, 1f), useCenter = false,
+                topLeft = Offset(c.x - ro, c.y - ro), size = androidx.compose.ui.geometry.Size(2 * ro, 2 * ro),
+                style = Stroke(w * 1.6f, cap = StrokeCap.Round),
+            )
+        }
         crosshair(c, r, dark, signal)
         if (state.locked) {
             drawCircle(dark, 4.5.dp.toPx(), c)
@@ -278,6 +298,9 @@ internal fun Reticle(state: MeasureState) {
         }
     }
 }
+
+/** No hands-free ring. */
+internal val NoDwell: () -> Float = { 0f }
 
 private fun DrawScope.crosshair(c: Offset, r: Float, outline: Color, fill: Color) {
     val gap = 5.dp.toPx()
@@ -292,44 +315,69 @@ private fun DrawScope.crosshair(c: Offset, r: Float, outline: Color, fill: Color
     for ((a, b) in segs) drawLine(fill, a, b, fw, StrokeCap.Round)
 }
 
+/**
+ * The live value under the reticle and the distance to the target. They change up to 10 times a second, so they are
+ * not a live region: touch exploration reads them, and a separate polite node announces only the length once it
+ * settles ([rememberThrottledAnnouncement]). Units and "±" are spoken in full.
+ */
 @Composable
 internal fun LiveReadout(state: MeasureState, units: UnitPreference, showLength: Boolean) {
-    val reading = state.reading
+    val reading = state.reading?.takeIf { showLength && !state.isComplete }
+    // What is drawn: a single length, or a composite (rectangle / box) string.
+    var single: FormattedLength? = null
+    var composite: String? = null
+    if (reading != null) {
+        val ctx = MeasureFormatter.contextFor(reading)
+        val primary = MeasureFormatter.length(reading.primary, ctx, units).primary
+        val secondary = reading.secondary
+        val boxHeight = reading.boxHeight
+        composite = when {
+            secondary != null && boxHeight != null -> stringResource(
+                R.string.scan_box_value, primary.text,
+                MeasureFormatter.length(secondary, ctx, units).primary.text, MeasureFormatter.length(boxHeight, ctx, units).primary.text,
+            )
+            secondary != null -> stringResource(R.string.history_rect_value, primary.text, MeasureFormatter.length(secondary, ctx, units).primary.text)
+            else -> null
+        }
+        if (composite == null) single = primary
+    }
+    val distance = state.targetDistanceCm?.takeIf { !state.isComplete }?.let {
+        stringResource(R.string.measure_distance_to_target, MeasureFormatter.targetDistance(it, units))
+    }
+    val spokenLengthText = single?.let { spokenLength(it) } ?: composite?.let { spokenText(it) }
+    val spokenAll = listOfNotNull(spokenLengthText, distance?.let { spokenText(it) }).joinToString(", ")
+    // Spoken by itself only once the length settles (SM1 review MINOR 7). The distance to the target changes with
+    // every hand movement, so it is never announced: it is there for touch exploration.
+    val announced = rememberThrottledAnnouncement(spokenLengthText.orEmpty(), settleOnly = true)
+    Box(Modifier.size(1.dp).semantics { liveRegion = LiveRegionMode.Polite; contentDescription = announced })
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        modifier = Modifier.clearAndSetSemantics { if (spokenAll.isNotEmpty()) contentDescription = spokenAll },
     ) {
-        if (showLength && reading != null && !state.isComplete) {
-            val ctx = MeasureFormatter.contextFor(reading)
-            val primary = MeasureFormatter.length(reading.primary, ctx, units).primary
-            val secondary = reading.secondary
-            val boxHeight = reading.boxHeight
-            if (secondary != null && boxHeight != null) {
-                val d = MeasureFormatter.length(secondary, ctx, units).primary
-                val h = MeasureFormatter.length(boxHeight, ctx, units).primary
-                DimensionLabel(value = stringResource(R.string.scan_box_value, primary.text, d.text, h.text), onDarkChrome = true)
-            } else if (secondary != null) {
-                val h = MeasureFormatter.length(secondary, ctx, units).primary
-                DimensionLabel(value = stringResource(R.string.history_rect_value, primary.text, h.text), onDarkChrome = true)
-            } else {
-                DimensionLabel(length = primary, onDarkChrome = true)
-            }
-        }
-        val cm = state.targetDistanceCm
-        if (cm != null && !state.isComplete) {
+        single?.let { DimensionLabel(length = it, onDarkChrome = true) }
+        composite?.let { DimensionLabel(value = it, onDarkChrome = true) }
+        if (distance != null) {
             Spacer(Modifier.height(4.dp))
-            ChromePill(
-                stringResource(R.string.measure_distance_to_target, MeasureFormatter.targetDistance(cm, units)),
-                style = SpaceViewTheme.typography.caption,
-            )
+            ChromePill(distance, style = SpaceViewTheme.typography.caption)
         }
     }
 }
 
 // ---- controls -------------------------------------------------------------------------------
 
+/**
+ * Undo, "+" and Freeze. With [handsFree], a Hands-free switch above them: while it is on, a point drops by itself
+ * when the reticle is held steady; turning it off, or Undo after a drop, is always one tap away.
+ */
 @Composable
-internal fun Controls(state: MeasureState, onAddPoint: () -> Unit, onUndo: () -> Unit, onFreeze: () -> Unit) {
+internal fun Controls(
+    state: MeasureState,
+    onAddPoint: () -> Unit,
+    onUndo: () -> Unit,
+    onFreeze: () -> Unit,
+    handsFree: HandsFreeUi? = null,
+) {
+    if (handsFree != null) HandsFreeSwitch(handsFree)
     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             if (state.pointCount > 0) ChromeIconButton(onClick = onUndo, description = R.string.measure_undo) { UndoGlyph(it) }
@@ -340,6 +388,33 @@ internal fun Controls(state: MeasureState, onAddPoint: () -> Unit, onUndo: () ->
         )
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             if (state.pointCount > 0) ChromeIconButton(onClick = onFreeze, description = R.string.measure_freeze) { FreezeGlyph(it) }
+        }
+    }
+}
+
+/** The HUD's hands-free switch: a graphite pill with a signal-yellow dot when on; TalkBack reads it as a switch. */
+@Composable
+private fun HandsFreeSwitch(ui: HandsFreeUi) {
+    val on = ui.enabled
+    val signal = SpaceViewTheme.colors.signal
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = SpaceViewTheme.colors.arChrome,
+        modifier = Modifier
+            .padding(bottom = 8.dp)
+            .heightIn(min = 48.dp)
+            .toggleable(value = on, role = Role.Switch, onValueChange = { ui.toggle() }),
+    ) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Canvas(Modifier.size(10.dp)) {
+                if (on) drawCircle(signal) else drawCircle(Color(0xFFA9AEB4), style = Stroke(1.5.dp.toPx()))
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                stringResource(if (on) R.string.smart_hands_free_on else R.string.smart_hands_free_off),
+                style = MaterialTheme.typography.labelLarge,
+                color = SpaceViewTheme.colors.onArChrome,
+            )
         }
     }
 }
@@ -357,14 +432,19 @@ private fun ModeSelector(mode: MeasureMode, onModeChange: (MeasureMode) -> Unit)
                 Surface(
                     shape = MaterialTheme.shapes.small,
                     color = if (selected) SpaceViewTheme.colors.signal else Color.Transparent,
-                    modifier = Modifier.selectable(selected = selected, role = Role.Tab, onClick = { onModeChange(m) }),
+                    // M5 a11y: every tab is at least 48 dp tall (and grows with the font).
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .selectable(selected = selected, role = Role.Tab, onClick = { onModeChange(m) }),
                 ) {
-                    Text(
-                        stringResource(label),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (selected) SpaceViewTheme.colors.onSignal else SpaceViewTheme.colors.onArChrome,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            stringResource(label),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (selected) SpaceViewTheme.colors.onSignal else SpaceViewTheme.colors.onArChrome,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                        )
+                    }
                 }
             }
         }
@@ -375,8 +455,23 @@ private fun ModeSelector(mode: MeasureMode, onModeChange: (MeasureMode) -> Unit)
 
 /** Text on a solid graphite pill (never a blur), legible over any camera image. */
 @Composable
-internal fun ChromePill(text: String, style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.labelLarge) {
-    Surface(shape = MaterialTheme.shapes.small, color = SpaceViewTheme.colors.arChrome) {
+internal fun ChromePill(
+    text: String,
+    style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.labelLarge,
+    /** TalkBack text when the visible one has symbols or units (pass [spokenText]); null reads [text]. */
+    spoken: String? = null,
+    /** Announce changes of [text] (e.g. a step pill). */
+    announce: Boolean = false,
+) {
+    val modifier = if (spoken == null && !announce) {
+        Modifier
+    } else {
+        Modifier.clearAndSetSemantics {
+            contentDescription = spoken ?: text
+            if (announce) liveRegion = LiveRegionMode.Polite
+        }
+    }
+    Surface(shape = MaterialTheme.shapes.small, color = SpaceViewTheme.colors.arChrome, modifier = modifier) {
         Text(
             text,
             style = style,

@@ -1,5 +1,6 @@
 package com.spaceview.app.pro
 
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -70,10 +71,20 @@ object FeatureRules {
     }
 }
 
-/** [FeatureGate] over the app's entitlement. Unknown, Free and Pending all gate as Free. */
+/**
+ * [FeatureGate] over the app's entitlement. Unknown, Free and Pending all gate as Free.
+ *
+ * Cold start (gate N2): until the entitlement has [settled] (Play answered, or failed and fell back to the cache), a
+ * "Free" may be a stale cache of a Pro user. A one-shot [check] that would answer [GateState.NeedsPro] then waits for
+ * the settle (or for Pro to arrive), at most [settleWaitMillis], and evaluates again, so a paying user is not shown
+ * the paywall. An allowed answer never waits, and once settled nothing waits.
+ */
 class EntitlementFeatureGate(
     private val entitlement: StateFlow<Entitlement>,
     private val unknownWaitMillis: Long = UNKNOWN_WAIT_MS,
+    /** [EntitlementRepository.settled]; the default (always settled) keeps the plain behaviour for tests and tools. */
+    private val settled: StateFlow<Boolean> = MutableStateFlow(true),
+    private val settleWaitMillis: Long = SETTLE_WAIT_MS,
 ) : FeatureGate {
 
     override fun observe(feature: ProFeature, usage: Flow<Int>): Flow<GateState> =
@@ -83,10 +94,20 @@ class EntitlementFeatureGate(
         val e = entitlement.value.takeIf { it !is Entitlement.Unknown }
             ?: withTimeoutOrNull(unknownWaitMillis) { entitlement.first { it !is Entitlement.Unknown } }
             ?: Entitlement.Free
-        return FeatureRules.evaluate(feature, e, currentUsage, itemId)
+        val first = FeatureRules.evaluate(feature, e, currentUsage, itemId)
+        if (first !is GateState.NeedsPro || settled.value) return first
+        // N2: possibly a stale cache. Wait until Play has settled the entitlement or Pro arrives, then decide again.
+        withTimeoutOrNull(settleWaitMillis) {
+            combine(settled, entitlement) { s, now -> s || now is Entitlement.Pro }.first { it }
+        }
+        val latest = entitlement.value.takeIf { it !is Entitlement.Unknown } ?: Entitlement.Free
+        return FeatureRules.evaluate(feature, latest, currentUsage, itemId)
     }
 
     companion object {
         const val UNKNOWN_WAIT_MS = 1_000L
+
+        /** N2: longest extra wait for a settle before a cold-start "needs Pro" answer stands. */
+        const val SETTLE_WAIT_MS = 5_000L
     }
 }

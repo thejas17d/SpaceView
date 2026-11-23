@@ -152,7 +152,6 @@
     <string name="common_add_point">पॉइंट जोड़ें</string>
     <string name="common_dismiss">हटाएँ</string>
     <string name="common_back">वापस</string>
-    <string name="common_close">बंद करें</string>
     <!-- Onboarding -->
     <string name="onboarding_skip">छोड़ें</string>
     <string name="onboarding_next">आगे</string>
@@ -186,11 +185,8 @@
     <string name="settings_privacy_options_not_needed">आपके इलाके में विज्ञापन निजता के कोई विकल्प ज़रूरी नहीं हैं</string>
     <string name="settings_privacy_policy">निजता नीति</string>
     <string name="settings_section_about">ऐप के बारे में</string>
-    <string name="settings_version">वर्शन</string>
     <string name="settings_accuracy_note_title">सटीकता</string>
     <string name="settings_accuracy_note" formatted="false">आम तौर पर ±2% (1 m पर लगभग ±1–2 cm)। हर नतीजे के साथ उसका अपना ± दिखता है। बिल्कुल सही नाप चाहिए तो फ़ीते से जाँच लें।</string>
-    <string name="settings_licences">ओपन-सोर्स लाइसेंस</string>
-    <string name="settings_licences_apache">Apache License 2.0: www.apache.org/licenses/LICENSE-2.0</string>
     <string name="settings_depth">डेप्थ इस्तेमाल करें (अगर फ़ोन में हो)</string>
     <string name="settings_depth_detail">सादी दीवारों और फ़र्श पर पॉइंट ज़्यादा स्थिर रहते हैं। बैटरी ज़्यादा खर्च होती है।</string>
     <string name="settings_calibration_none">कोई कैलिब्रेशन सेव नहीं है</string>
@@ -202,7 +198,6 @@
     <string name="settings_clear_calibration_body">इससे सेव किया गया कैलिब्रेशन रिकॉर्ड हट जाएगा। पहले से सेव किए गए नाप नहीं बदलेंगे।</string>
     <string name="settings_clear_calibration_confirm">हटाएँ</string>
     <string name="settings_cancel">रद्द करें</string>
-    <string name="settings_contact">सहायता से संपर्क करें</string>
     <!-- Ads -->
     <string name="ads_label">विज्ञापन</string>
     <string name="ads_advertisement">विज्ञापन</string>

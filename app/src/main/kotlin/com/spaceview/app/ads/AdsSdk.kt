@@ -26,8 +26,12 @@ interface AdsSdk {
     /** UMP: the user must be offered a privacy-options entry point (e.g. EEA/UK). */
     fun privacyOptionsRequired(): Boolean
 
-    /** UMP consent-info update, then the consent form if required. [onResult] runs once, on the main thread. */
-    fun requestConsent(activity: Activity, onResult: (ConsentResult) -> Unit)
+    /**
+     * UMP consent-info update, then the consent form if required. [onResult] runs once, on the main thread.
+     * [canShowForm] is asked when the update has arrived, right before the form would show (gate G1): when it is
+     * false, no form is shown and the result is [ConsentResult.DEFERRED].
+     */
+    fun requestConsent(activity: Activity, canShowForm: () -> Boolean, onResult: (ConsentResult) -> Unit)
 
     /** UMP privacy-options form. [onDone] always runs. */
     fun showPrivacyOptions(activity: Activity, onDone: () -> Unit)
@@ -48,6 +52,9 @@ enum class ConsentResult {
 
     /** The activity finished while waiting; retry with the next activity. */
     ACTIVITY_GONE,
+
+    /** An AR/camera screen came to the front during the network round-trip: no form; retry on a non-AR screen. */
+    DEFERRED,
 }
 
 /** A loaded interstitial. */
@@ -66,13 +73,18 @@ class GoogleAdsSdk(context: Context, private val log: (String) -> Unit = {}) : A
     override fun privacyOptionsRequired(): Boolean =
         consent.privacyOptionsRequirementStatus == ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
 
-    override fun requestConsent(activity: Activity, onResult: (ConsentResult) -> Unit) {
+    override fun requestConsent(activity: Activity, canShowForm: () -> Boolean, onResult: (ConsentResult) -> Unit) {
         consent.requestConsentInfoUpdate(
             activity,
             ConsentRequestParameters.Builder().build(),
             {
                 if (activity.isFinishing || activity.isDestroyed) {
                     onResult(ConsentResult.ACTIVITY_GONE)
+                    return@requestConsentInfoUpdate
+                }
+                // Gate G1: the user may have opened Measure, Scan or Place while the update was in flight.
+                if (!canShowForm()) {
+                    onResult(ConsentResult.DEFERRED)
                     return@requestConsentInfoUpdate
                 }
                 UserMessagingPlatform.loadAndShowConsentFormIfRequired(activity) { error ->

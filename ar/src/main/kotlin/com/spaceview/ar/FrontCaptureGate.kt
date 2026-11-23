@@ -54,7 +54,8 @@ data class FrontCaptureStatus(val hint: CaptureHint, val angleDeg: Int = 0, val 
  * Decides when to auto-capture the front photo (UI research §3.3 A.4): tracking is good, the phone is
  * roughly parallel to the face (view axis within [MAX_ANGLE_DEG] of the face normal), the whole face is
  * in the picture, and the phone has been steady (angular and linear speed under the limits) for
- * [HOLD_NS]. Pure Kotlin and allocation-light, main-thread only (fed once per frame while armed).
+ * [HOLD_NS] (the shared [SteadinessFilter] motion model). Pure Kotlin and allocation-light, main-thread only (fed
+ * once per frame while armed).
  */
 class FrontCaptureGate(
     private val maxAngleDeg: Double = MAX_ANGLE_DEG,
@@ -62,18 +63,12 @@ class FrontCaptureGate(
     private val maxLinearMPerS: Double = STEADY_MAX_LINEAR_M_S,
     private val holdNs: Long = HOLD_NS,
 ) {
-    private var lastTs = -1L
-    private var lastPose: Pose? = null
-    private var angular = Double.NaN
-    private var linear = Double.NaN
+    private val motion = SteadinessFilter()
     private var holdingSinceNs = -1L
 
     /** Forget the motion history (call when the capture is (re)armed). */
     fun reset() {
-        lastTs = -1L
-        lastPose = null
-        angular = Double.NaN
-        linear = Double.NaN
+        motion.reset()
         holdingSinceNs = -1L
     }
 
@@ -83,7 +78,7 @@ class FrontCaptureGate(
      * Returns the status and whether to capture **this** frame ([Decision.capture]).
      */
     fun update(timestampNs: Long, tracking: Boolean, sensorPose: Pose, faceNormal: Vec3, fit: CornerFit): Decision {
-        updateMotion(timestampNs, sensorPose)
+        motion.update(timestampNs, sensorPose)
         val angle = angleToFaceDeg(sensorPose.forward, faceNormal)
         val hint = when {
             !tracking -> CaptureHint.NOT_TRACKING
@@ -108,28 +103,7 @@ class FrontCaptureGate(
     /** Result of one [update]. */
     class Decision(val status: FrontCaptureStatus, val capture: Boolean)
 
-    private fun isSteady(): Boolean =
-        angular.isFinite() && linear.isFinite() && angular <= maxAngularRadPerS && linear <= maxLinearMPerS
-
-    private fun updateMotion(t: Long, pose: Pose) {
-        val prev = lastPose
-        val dt = (t - lastTs) / 1e9
-        // SceneView calls back at display rate; with LATEST_CAMERA_IMAGE a camera frame is delivered
-        // again with the same timestamp. Such a repeat carries no motion information: ignore it and keep
-        // the estimate and the hold (M3 review B1; same rule as TrackingGate).
-        if (prev != null && dt in 0.0..MIN_DT_S) return
-        lastTs = t
-        lastPose = pose
-        if (prev == null || dt <= 0 || dt > MAX_GAP_S) {
-            angular = Double.NaN
-            linear = Double.NaN
-            return
-        }
-        val w = rotationAngle(prev.rotation, pose.rotation) / dt
-        val v = prev.translation.distanceTo(pose.translation) / dt
-        angular = if (angular.isFinite()) angular + EMA_ALPHA * (w - angular) else w
-        linear = if (linear.isFinite()) linear + EMA_ALPHA * (v - linear) else v
-    }
+    private fun isSteady(): Boolean = motion.isSteady(maxAngularRadPerS, maxLinearMPerS)
 
     companion object {
         /** Auto-capture only within this angle between the view axis and the face normal. Tunable. */
@@ -144,9 +118,6 @@ class FrontCaptureGate(
         /** The parallel limit for [shape]. */
         fun maxAngleFor(shape: ScanShape): Double = if (shape == ScanShape.BOX) MAX_ANGLE_DEG_BOX else MAX_ANGLE_DEG
 
-        /** Frames closer together than this are repeats of the same camera image. */
-        private const val MIN_DT_S = 1e-4
-
         /** Beyond this the user is not facing the object at all. */
         const val FACING_LIMIT_DEG = 70.0
 
@@ -158,9 +129,6 @@ class FrontCaptureGate(
 
         /** All conditions must hold this long before the photo is taken. Tunable. */
         const val HOLD_NS = 600_000_000L
-
-        private const val EMA_ALPHA = 0.4
-        private const val MAX_GAP_S = 0.5
 
         /**
          * Angle (degrees) between the camera's view direction [forward] and the direction into the face

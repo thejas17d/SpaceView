@@ -22,7 +22,7 @@ class FeatureGateTest {
         fun free(f: ProFeature) = ProCatalog.rule(f).free
         assertEquals(Allowance.None, free(ProFeature.NO_ADS))
         assertEquals(Allowance.Count(20), free(ProFeature.GALLERY_UNLIMITED))
-        assertEquals(Allowance.Count(3), free(ProFeature.DEVICE_SCAN))
+        assertEquals(Allowance.Count(5), free(ProFeature.DEVICE_SCAN))
         assertEquals(Allowance.Count(2), free(ProFeature.COMPARE))
         // Gate T1: the 3 core templates are Free (by template id); the rest of the library is Pro.
         assertEquals(Allowance.Only(setOf("sofa_v1", "bed_v1", "wardrobe_v1")), free(ProFeature.FURNITURE_TEMPLATES))
@@ -92,8 +92,9 @@ class FeatureGateTest {
         assertEquals(GateState.Limited(2, 20), FeatureRules.evaluate(ProFeature.GALLERY_UNLIMITED, f, 18))
         assertEquals(GateState.Limited(1, 20), FeatureRules.evaluate(ProFeature.GALLERY_UNLIMITED, f, 19))
         assertEquals(GateState.NeedsPro(20), FeatureRules.evaluate(ProFeature.GALLERY_UNLIMITED, f, 20))
-        assertEquals(GateState.NeedsPro(3), FeatureRules.evaluate(ProFeature.DEVICE_SCAN, f, 3))
-        assertEquals(GateState.Limited(3, 3), FeatureRules.evaluate(ProFeature.DEVICE_SCAN, f, -5))
+        assertEquals(GateState.Limited(1, 5), FeatureRules.evaluate(ProFeature.DEVICE_SCAN, f, 4))
+        assertEquals(GateState.NeedsPro(5), FeatureRules.evaluate(ProFeature.DEVICE_SCAN, f, 5))
+        assertEquals(GateState.Limited(5, 5), FeatureRules.evaluate(ProFeature.DEVICE_SCAN, f, -5))
         assertEquals(GateState.NeedsPro(0), FeatureRules.evaluate(ProFeature.EXPORT_GLB, f, 0))
     }
 
@@ -150,5 +151,61 @@ class FeatureGateTest {
         val result = async { gate.check(ProFeature.EXPORT_PDF) }
         advanceTimeBy(1_001)
         assertEquals(GateState.NeedsPro(0), result.await())
+    }
+
+    // ---- N2: a stale cold-start Free must not show a Pro user the paywall ----
+
+    @Test
+    fun `N2 stale Free then Pro arrives before the settle - Allowed`() = runTest {
+        val entitlement = MutableStateFlow<Entitlement>(Entitlement.Free) // stale cache
+        val settled = MutableStateFlow(false)
+        val gate = EntitlementFeatureGate(entitlement, settled = settled)
+        val result = async { gate.check(ProFeature.GALLERY_UNLIMITED, 20) }
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertFalse("still waiting for Play", result.isCompleted)
+        entitlement.value = pro
+        settled.value = true
+        runCurrent()
+        assertEquals(GateState.Allowed, result.await())
+    }
+
+    @Test
+    fun `N2 Play settles on Free - NeedsPro stands`() = runTest {
+        val settled = MutableStateFlow(false)
+        val gate = EntitlementFeatureGate(MutableStateFlow(Entitlement.Free), settled = settled)
+        val result = async { gate.check(ProFeature.GALLERY_UNLIMITED, 20) }
+        advanceTimeBy(1_500)
+        settled.value = true
+        runCurrent()
+        assertEquals(GateState.NeedsPro(20), result.await())
+    }
+
+    @Test
+    fun `N2 never settles - NeedsPro after 5 s`() = runTest {
+        val gate = EntitlementFeatureGate(MutableStateFlow(Entitlement.Free), settled = MutableStateFlow(false))
+        val result = async { gate.check(ProFeature.GALLERY_UNLIMITED, 20) }
+        advanceTimeBy(EntitlementFeatureGate.SETTLE_WAIT_MS - 1)
+        runCurrent()
+        assertFalse(result.isCompleted)
+        advanceTimeBy(2)
+        runCurrent()
+        assertEquals(GateState.NeedsPro(20), result.await())
+    }
+
+    @Test
+    fun `N2 already settled Free - NeedsPro with no wait`() = runTest {
+        val gate = EntitlementFeatureGate(MutableStateFlow(Entitlement.Free), settled = MutableStateFlow(true))
+        val start = testScheduler.currentTime
+        assertEquals(GateState.NeedsPro(20), gate.check(ProFeature.GALLERY_UNLIMITED, 20))
+        assertEquals(0L, testScheduler.currentTime - start)
+    }
+
+    @Test
+    fun `N2 an allowed answer never waits for the settle`() = runTest {
+        val gate = EntitlementFeatureGate(MutableStateFlow(Entitlement.Free), settled = MutableStateFlow(false))
+        val start = testScheduler.currentTime
+        assertEquals(GateState.Limited(2, 20), gate.check(ProFeature.GALLERY_UNLIMITED, 18))
+        assertEquals(0L, testScheduler.currentTime - start)
     }
 }

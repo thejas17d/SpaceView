@@ -32,8 +32,8 @@ import com.spaceview.engine.LengthUnit
  *
  * @param value value with its unit, e.g. "45.5 cm" or "5′ 8″".
  * @param tolerance the ± part without the sign, e.g. "0.5"; null hides it.
- * @param contentDescription TalkBack text; defaults to the visible text. Prefer the
- *   [FormattedLength] overload, which speaks units out ("centimetres").
+ * @param contentDescription TalkBack text; defaults to the visible text spoken out ([spokenText]). Prefer the
+ *   [FormattedLength] overload, which speaks units out exactly ("centimetres").
  * @param onDarkChrome true when drawn over the camera feed (graphite pill, light text).
  */
 @Composable
@@ -45,7 +45,8 @@ fun DimensionLabel(
     onDarkChrome: Boolean = false,
 ) {
     val colors = SpaceViewTheme.colors
-    val description = contentDescription ?: if (tolerance == null) value else "$value ± $tolerance"
+    // M5 a11y: never let TalkBack read "±" or "cm" literally.
+    val description = contentDescription ?: spokenText(if (tolerance == null) value else "$value ± $tolerance")
     Surface(
         modifier = modifier.clearAndSetSemantics { this.contentDescription = description },
         shape = MaterialTheme.shapes.small,

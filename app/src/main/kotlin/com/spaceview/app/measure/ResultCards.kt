@@ -1,5 +1,11 @@
 package com.spaceview.app.measure
 
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import com.spaceview.app.common.spokenText
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -101,9 +107,13 @@ internal fun ResultCard(
             ValueRow(R.string.result_width, reading.primary, ctx, units)
             ValueRow(R.string.result_rect_height, reading.secondary!!, ctx, units)
             reading.area?.let { a ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.result_area), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(72.dp))
-                    Text(MeasureFormatter.area(a, ctx, units), style = MaterialTheme.typography.titleMedium)
+                val areaLabel = stringResource(R.string.result_area)
+                val areaText = MeasureFormatter.area(a, ctx, units)
+                val areaSpoken = "$areaLabel, " + spokenText(areaText)
+                // M5 a11y: "0.24 m² ± 0.01" is read as "square metres, plus or minus".
+                Row(Modifier.clearAndSetSemantics { contentDescription = areaSpoken }, verticalAlignment = Alignment.CenterVertically) {
+                    Text(areaLabel, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.widthIn(min = 72.dp))
+                    Text(areaText, style = MaterialTheme.typography.titleMedium)
                 }
             }
             val skew = reading.maxRightAngleDeviationDeg ?: 0.0
@@ -118,7 +128,8 @@ internal fun ResultCard(
             AccuracyBadge(reading.quality, onDarkChrome = true)
         } else {
             val f = MeasureFormatter.length(reading.primary, ctx, units)
-            Row(verticalAlignment = Alignment.Bottom) {
+            val readoutSpoken = spokenText(listOfNotNull(f.primary.valueWithUnit(), f.secondary?.let { "($it)" }).joinToString(" "))
+            Row(Modifier.clearAndSetSemantics { contentDescription = readoutSpoken }, verticalAlignment = Alignment.Bottom) {
                 Text(f.primary.valueWithUnit(), style = SpaceViewTheme.typography.readout)
                 Spacer(Modifier.width(8.dp))
                 f.secondary?.let { Text("($it)", style = SpaceViewTheme.typography.tolerance, modifier = Modifier.padding(bottom = 8.dp)) }
@@ -182,8 +193,10 @@ internal fun ResultCard(
 @Composable
 private fun ValueRow(@StringRes label: Int, m: Measurement, ctx: MeasureContext, units: UnitPreference) {
     val f = MeasureFormatter.length(m, ctx, units)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(label), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(72.dp))
+    val name = stringResource(label)
+    val spoken = "$name, " + spokenText(listOfNotNull(f.primary.text, f.secondary?.let { "($it)" }).joinToString(" "))
+    Row(Modifier.clearAndSetSemantics { contentDescription = spoken }, verticalAlignment = Alignment.CenterVertically) {
+        Text(name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.widthIn(min = 72.dp))
         Text(f.primary.text, style = MaterialTheme.typography.titleLarge)
         f.secondary?.let {
             Spacer(Modifier.width(8.dp))
@@ -307,13 +320,20 @@ private fun CalibrationOutcomeText(outcome: CalibrationOutcome) {
         is CalibrationOutcome.Accepted -> {
             val c = outcome.calibration
             val pm95 = Uncertainty.K95 * c.sigma / c.factor
+            val body = stringResource(
+                R.string.calib_result_body,
+                MeasureFormatter.percent(c.factor - 1.0),
+                String.format(Locale.ROOT, "%.1f%%", pm95 * 100),
+            )
+            val spoken = spokenText(body)
+            // M5 a11y: announced when it appears, "±" read as "plus or minus".
             Text(
-                stringResource(
-                    R.string.calib_result_body,
-                    MeasureFormatter.percent(c.factor - 1.0),
-                    String.format(Locale.ROOT, "%.1f%%", pm95 * 100),
-                ),
+                body,
                 style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.semantics {
+                    contentDescription = spoken
+                    liveRegion = LiveRegionMode.Polite
+                },
             )
         }
         is CalibrationOutcome.Rejected -> Text(
@@ -328,6 +348,7 @@ private fun CalibrationOutcomeText(outcome: CalibrationOutcome) {
                 },
             ),
             style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
 }

@@ -146,7 +146,7 @@ class PlacementCore(val item: PlacedItem, initialTarget: SurfaceTarget) {
         val usable = tracking && hitPos != null && hitNormal != null
         lastHitPos = if (usable) hitPos else null
         lastHitNormal = if (usable) hitNormal else null
-        if (usable && PlacementMath.isHorizontal(hitNormal!!)) floor.add(hitPos!!.x, hitPos.y, hitPos.z, hitOnPlane)
+        if (usable && PlacementMath.isHorizontal(hitNormal!!)) floor.add(hitPos!!.x, hitPos.y, hitPos.z, hitOnPlane, timestampNs)
         when (val s = currentState) {
             is PlacementState.Placed -> {
                 if (anchorPose != null && anchorPose !== this.anchorPose) {

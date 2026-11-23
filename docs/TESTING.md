@@ -170,7 +170,15 @@ Install `builds/SpaceView-M3-debug.apk` **over** the M2-final APK, without unins
 - **Purchase history:** the app stores only a SHA-256 hash of the purchase token, on the device, excluded from backup and never sent anywhere by SpaceView. Google Play Billing handles the purchase itself.
 - **Diagnostics from SDKs:** Play Billing Library 9.1 brings `com.google.android.datatransport` (Firelog), which sends library diagnostics to Google. Check Google's current Play Billing Library data disclosure and declare what it lists, together with the AdMob and UMP rows.
 - **Permission:** `com.android.vending.BILLING` (install-time, no prompt).
-- Re-check the form whenever `ci/release-dependencies.txt` changes in `com.android.billingclient` or `com.google.android.datatransport`.
+- **ML Kit object naming (SM1b; unbundled image labelling through Google Play services, `play-services-mlkit-image-labeling` + `com.google.mlkit:*`; SM1-M5 review MAJOR 2):** inference runs on the phone and the photo is never uploaded, but ML Kit sends **diagnostics and usage analytics** to Google. Google's ML Kit data disclosure (developers.google.com/ml-kit/android-data-disclosure, *last modified 14 May 2025*, read on 2026-11-17) lists, for all features:
+  - device information (manufacturer, model, OS version and build, available ML accelerators);
+  - application information (package name, app version);
+  - **device or other IDs**: for "thin" (Play services) features, a device identifier plus per-installation identifiers;
+  - performance metrics (latency), API configuration (image format and resolution), input/output size, feature version, event type (initialisation, model download, detection, release) and error codes.
+  Per that page: encrypted in transit (HTTPS) and **not transferred to third parties**. Planned answers: **App info and performance → Diagnostics** and **Device or other IDs**, collected, not shared, purpose *Analytics / App functionality*, not user-provided content. **Verified** from the page text above. **Still to check at submission:** the live page again (it may have changed), whether the non-custom Play services labeller adds anything (the page has a row only for the *custom* labeller), and whether Play's "data processed ephemerally / on device" wording applies to the labels.
+- **In-app review** (`com.google.android.play:review`, M5): no data declared by SpaceView; the review card is Play's own UI. Check Play Core's disclosure at submission.
+- **One consistent story:** the form, the privacy policy and the in-app Help/About text (`help_privacy_*`, "your measurements and photos stay on your phone; Google services used for ads, purchases and object naming may collect limited diagnostic and device data") must say the same thing.
+- Re-check the form whenever `ci/release-dependencies.txt` changes in `com.android.billingclient`, `com.google.android.datatransport`, `com.google.mlkit`, `com.google.android.gms:play-services-mlkit-*`, `com.google.android.play` or `com.google.android.gms:play-services-ads`.
 
 ## 18. M4 Place in room + 3D core (from `docs/reviews/M4-P1-gate.md` §7)
 
@@ -226,9 +234,11 @@ Install the M4 APK **over M3**, without uninstalling, so the v2→v3 database up
     - The item is ≤ 0.5 MB (Settings storage, or the app's files).
     - It places standing on the floor at its measured footprint (bottom about 1 cm up).
     - The Gallery shows "Approximate 3D shape · measured size".
-19. **Free caps:** with 3 saved 3D scans on Free, the next 3D scan opens the paywall **before** the camera. The 20-item cap behaves as in TESTING §17 items 8–10.
+19. **Free caps:** Free gets **5 3D scans in total** (user decision 2026-11-23). After 5 saved scans, the next 3D scan opens the paywall **before** the camera, and **deleting a scan does not give one back** (the paywall says so). Delete my data keeps the count. The 20-item cap behaves as in TESTING §17 items 8–10.
 
 ## 19. Furniture templates + 3D Scan Lab spike (from `docs/reviews/T-D0-gate.md` §7)
+
+**Spike phone (user, 2026-11-23): Google Pixel 10a.** It is on Google's ARCore list with **Depth API support**; it has no hardware ToF sensor, so its depth is software (motion stereo). Record its results as the non-ToF case of ARCH §7.1.10. A ToF phone is still wanted for comparison but is not required.
 
 **T: Furniture templates** (release or debug app; Free first, then Pro through FakeBilling on debug or a licence tester on release)
 
@@ -317,6 +327,83 @@ Install the M4 APK **over M3**, without uninstalling, so the v2→v3 database up
 - **Camera-side drops (G4):** a `FRAME_TIME` event with a healthy `ar_frame_ms_p95` and `camera_frame_ms_p95` ≈ 66 ms is a light problem, not app load.
 - **Unsettled baseline (G3):** if the JSON's `noise` stage `pss_mb` is below the processing baseline − 1 MB, ignore that run's c3.
 - **Intrinsics before depth:** `aspect_mismatch = true` combined with a c1 failure means check intrinsics before blaming depth.
+
+---
+
+## 20. M5 remainder: consent, review prompt, Help, Delete my data, accessibility (Builder B, Phase 3 RC)
+
+Release-signed build installed **over** the previous one, unless a step says otherwise.
+
+**UMP consent (needs a UMP test device; debug geography EEA, see the UMP "test your implementation" guide):**
+1. Fresh install as an EEA user, Free: the consent form appears shortly after the first frame, before any banner. While it is open, no banner loads and no interstitial is requested (logcat: no `Ads` load lines until the form closes).
+2. Consent → banners appear on History / Gallery / Settings. Settings → Privacy → "Ad privacy options" is **enabled** and opens the UMP privacy form.
+3. Refuse / manage → no ads load at all; the app keeps working.
+4. Non-EEA geography: no form; the "Ad privacy options" row is disabled with "No ad privacy choices are needed in your region".
+5. Airplane mode at first launch: no form, no ads. Turn the network on, then open Measure and come back to Home: the form appears on Home (retried when a non-AR screen resumes), **never over Measure, Scan or Place**. Same if the entitlement settles while an AR screen is open, and if Measure or Calibrate is opened while the consent request is still in flight (tap Measure right after Home appears): the form waits for the next non-AR screen (gate G1).
+6. Pro (licence tester): the form never appears, and Settings shows no "Ad privacy options" row.
+
+**In-app review (internal-track build only; Play never shows the card to sideloaded builds):**
+7. Save 3 measurements or scans, then go back to Home: the Play review card may appear once (Play applies its own quota). Never on Measure / Scan / Place, never while the camera is open.
+8. Place an item and get a **Fits** verdict, then go back: the card may appear on the item screen, not over the camera.
+9. After an interstitial, no review card for at least 10 minutes. After one ask, none for 90 days (clear app data to retest).
+
+**Help and About:**
+10. Settings → Help and FAQ works in airplane mode, in English and Hindi. TalkBack: every question title is a heading (swipe by headings), "±" is read as "plus or minus".
+11. Contact: with no support address configured the button opens SpaceView's Play page; with `SUPPORT_EMAIL` set it opens the mail app.
+12. Settings → About SpaceView: version and build number match the APK; the licence list scrolls; "Privacy policy" opens the browser when `PRIVACY_POLICY_URL` is set, otherwise "Privacy summary" opens Help.
+
+**Delete my data:**
+13. With History rows, Gallery items (scan + template), a calibration and Imperial units: Settings → Delete my data → the dialog lists what goes, says it can't be undone, and lists what is kept (Pro purchase status, ad privacy choices, ad and review counters) → Delete everything. History and Gallery are empty, Settings shows no calibration, units are Auto, "Your data was deleted." is announced by TalkBack. Onboarding does not reappear.
+14. As Pro: after deleting, Pro is still active (no ads, Settings shows Pro) without tapping Restore.
+15. Rotate or leave Settings while deleting: the delete still finishes (re-open Settings, everything is gone).
+    - With a banner showing on Settings, delete: the banner keeps working (SDK and WebView caches are not touched; only SpaceView's own data is removed).
+
+**Accessibility pass (TalkBack, 200% font, Switch Access spot-check):**
+16. TalkBack reads measurements in full on Measure results, Review, Gallery cards, the item screen, History, Place notes and the Fit card, and the furniture review: "45.5 centimetres, plus or minus 0.5 centimetres", never "±" or "cm".
+17. System font 200% (Display size default and largest): Home, Settings, Help, About, Gallery item, Review, Paywall, Furniture review: no clipped or overlapping text; spec labels wrap instead of truncating.
+18. Error and status messages (save failed, invalid size, offers loading/failed, restore result, delete result, Place readings) are announced when they appear.
+19. All buttons and rows are at least 48 dp (Accessibility Scanner on Home, Settings, Help, Gallery item, Place).
+20. Measure, Scan and Furniture HUDs: mode tabs are at least 48 dp; the Scan AR value rows and the Review dimension rows are read in full ("plus or minus", unit names); the Review edit dialog field has a label (gate G5).
+
+---
+
+## 21. Smart Measure (SM1): hands-free point drop, object naming, G2 floor (Builder A, Phase 3 RC)
+
+Release-signed build installed **over** the previous one, unless a step says otherwise. Hands-free is **on** by default; the haptic tick is **off** (`HAPTIC_TICK_ENABLED = false`, SM1 review MAJOR 3).
+
+**Dwell tuning** (constants in `ar/.../DwellTrigger.kt`: `HOLD_NS` 700 ms, steady ≤ 0.20 rad/s and ≤ 0.10 m/s, drift ≤ max(1 cm, 1% of range), spacing 3 cm, cool-down 1 s):
+1. **Shaky hold:** Measure distance, rectangle and height; Scan box (4 points); one furniture step. Hold the phone loosely at arm's length: each point drops once, about 1.2 s after aiming (the ring closes as it drops). Note the count of holds that never drop.
+2. **Steady hold:** a tripod or a table edge: a point never drops "too eagerly" while the user is still choosing the spot (note how often Undo is needed in 10 points). Tune `HOLD_NS` within 0.6–0.8 s from items 1–2.
+3. **Existing "+" user:** aim, wait about 1 s and tap "+": no "same spot" message, no second point; a tap right after the last point completes never clears the result.
+
+**No unintended drops:**
+4. **Calibration:** Settings → Recalibrate. Hold still over a table for 5 s while reading the picker: no click, no point. Choose "Known length": it starts with 0 points, and hands-free is **off** (the HUD switch says so) until switched on.
+5. **Freeze:** "+", Freeze, drag the point 4 cm, Done, keep the phone still: nothing drops until the reticle is moved about 3 cm.
+6. **Resume:** switch apps mid-measurement and come back holding still: nothing drops within 1 s.
+7. **Undo:** after a hands-free drop, Undo and keep holding still: the same spot is not dropped again; move 3 cm and it drops.
+8. **Dialogs and cards:** with a dialog over the camera (the camera-permission dialog, the notification shade, or any other system dialog; the consent form never opens over the camera, §20 item 5), on a result card, on the Scan photo step and the Outline card: nothing drops.
+
+**The haptic tick experiment** (debug build with `HAPTIC_TICK_ENABLED = true`; the release keeps it off):
+9. On a bench distance of about 1 m, measure 5× hands-free with the tick and 5× with "+". Read each result again after 10 s. If the hands-free spread, or the change after 10 s, is worse than with "+", or the reticle visibly jumps at the tick, the tick stays off for good; otherwise record the numbers and decide.
+
+**TalkBack:**
+10. Every hands-free drop is spoken ("Placed point 1", "Placed point 2"), including the **first** one and a point re-dropped after Undo.
+11. While aiming, TalkBack does not stream the distance; the live length is spoken once it settles. The hands-free switch is read as a switch with its state. Freeze: the four "Move point" actions move it about 1 cm each, and the new value is spoken.
+12. Scan Review: the name chip is announced when it appears.
+
+**Object naming (ML Kit, unbundled):**
+13. **Model not yet downloaded:** a fresh install, Scan straight away: no chip, no error, no delay to Save.
+14. **Model present** (a few minutes after install, online): a sofa, a chair, a TV and a poster give the right chip within about 3 s, in English and in Hindi. Tapping it fills the name; without a tap the name stays the type's default.
+15. **No Play services** (or Play services disabled): no chip, no crash. In airplane mode with the model present: the chip still appears (inference is on-device).
+16. **Every ML Kit version bump:** repeat 14 (a change in ML Kit's internal init fails silently; logcat shows one `ObjectNamer` warning).
+
+**Manifest and start-up:**
+17. `aapt2 dump xmltree` of the release APK: no `MlKitInitProvider`; the `com.google.mlkit.vision.DEPENDENCIES` = `ica` meta-data is present; `aapt2 dump permissions` equals `ci/allowed-permissions.txt`.
+18. **Cold start:** `adb shell am start -W` five times each, against a build of `13f3740`: no regression beyond noise (no ML Kit work at start-up).
+
+**G2 floor (adds to §19 item 22):**
+19. A glossy floor that ARCore does **not** track, a coffee table that it does: look over the floor for at least 3 s, then do the wall–floor taps. They are accepted, and the wall centre height is right.
+20. A polished floor that ARCore **does** track, with a table reflected in it: the floor never jumps down to the reflection (wall–floor taps keep working). Note the result for `FloorEstimator.AREA_RATIO`.
 
 ---
 

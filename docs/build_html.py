@@ -42,7 +42,8 @@ MILESTONES = [
     ("M2", "Measure mode", "done"),
     ("M3", "Scan → Gallery", "done"),
     ("M4", "Place in room + Pro base", "done"),
-    ("M5", "Templates + ads, Hindi", "active"),
+    ("M5", "Templates, Smart Measure, ads, Hindi", "done"),
+    ("D", "On-device 3D scan (spike on Pixel 10a)", "active"),
     ("M6", "Perf, size, release", "next"),
 ]
 

@@ -1,5 +1,6 @@
 package com.spaceview.data
 
+import com.spaceview.data.gallery.CaptureMethod
 import com.spaceview.data.history.MeasurementDao
 import com.spaceview.data.history.MeasurementEntity
 import com.spaceview.data.history.MeasurementKind
@@ -37,6 +38,20 @@ private class FakeDao : MeasurementDao {
 }
 
 class HistoryRepositoryTest {
+
+    /** SM1a: how the points were taken goes into the v3 `capture_method` column (no schema change). */
+    @Test
+    fun captureMethodIsStoredByName() = runTest {
+        val dao = FakeDao()
+        val repo = MeasurementRepository(dao)
+        val id = repo.save(
+            MeasurementKind.DISTANCE, Measurement(1.0, 0.01), quality = Quality.GOOD, context = MeasureContext.OBJECT,
+            calibrated = false, timestampMillis = 1L, captureMethod = CaptureMethod.HANDS_FREE,
+        )
+        assertEquals("HANDS_FREE", dao.get(id)?.captureMethod)
+        val manual = repo.save(MeasurementKind.DISTANCE, Measurement(1.0, 0.01), quality = Quality.GOOD, context = MeasureContext.OBJECT, calibrated = false, timestampMillis = 2L)
+        assertNull("unknown by default (callers pass MANUAL)", dao.get(manual)?.captureMethod)
+    }
 
     @Test
     fun saveAndReadBackRectangle() = runTest {

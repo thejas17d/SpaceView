@@ -23,6 +23,10 @@ playServicesAds = "25.5.0"
 ump = "4.0.0"
 billing = "9.1.0"
 review = "2.0.2"
+# SM1b (Builder A): ML Kit image labelling through Google Play services (unbundled: the model is not in the APK).
+# Pinned. A bump needs the TESTING §21 device check "chip appears with the model present": SpaceView initialises ML Kit
+# through its sdkinternal MlKitContext (the init provider is removed), and a change there fails silently.
+mlkitImageLabeling = "16.0.8"
 junit = "4.13.2"
 androidxTestRunner = "1.7.0"
 androidxTestExtJunit = "1.3.0"
@@ -62,7 +66,9 @@ sceneview-ar = { module = "io.github.sceneview:arsceneview", version.ref = "scen
 play-services-ads = { module = "com.google.android.gms:play-services-ads", version.ref = "playServicesAds" }
 ump = { module = "com.google.android.ump:user-messaging-platform", version.ref = "ump" }
 billing-ktx = { module = "com.android.billingclient:billing-ktx", version.ref = "billing" }
-review-ktx = { module = "com.google.android.play:review-ktx", version.ref = "review" }
+# M5: Play In-App Review (plain artifact, not -ktx: no extra coroutines-play-services dependency).
+play-review = { module = "com.google.android.play:review", version.ref = "review" }
+play-services-mlkit-image-labeling = { module = "com.google.android.gms:play-services-mlkit-image-labeling", version.ref = "mlkitImageLabeling" }
 junit = { module = "junit:junit", version.ref = "junit" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 

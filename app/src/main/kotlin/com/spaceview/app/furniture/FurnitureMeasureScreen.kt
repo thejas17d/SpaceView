@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -50,6 +51,7 @@ import com.spaceview.app.ads.AdsManager
 import com.spaceview.app.ads.ArScreenAdGuard
 import com.spaceview.app.common.AccuracyBadge
 import com.spaceview.app.common.CoachingCard
+import com.spaceview.app.common.spokenText
 import com.spaceview.app.measure.ArCameraView
 import com.spaceview.app.measure.ChromeIconButton
 import com.spaceview.app.measure.ChromePill
@@ -62,6 +64,8 @@ import com.spaceview.app.measure.LiveReadout
 import com.spaceview.app.measure.Reticle
 import com.spaceview.app.measure.messageRes
 import com.spaceview.app.scan.ScanSettings
+import com.spaceview.app.smart.HandsFreeUi
+import com.spaceview.app.smart.rememberHandsFree
 import com.spaceview.app.ui.theme.SpaceViewTheme
 import com.spaceview.ar.CommitFailure
 import com.spaceview.ar.MeasureEvent
@@ -129,6 +133,8 @@ internal fun FurnitureMeasureScreen(
         var rejected by remember { mutableStateOf<CommitFailure?>(null) }
         val state by session.state.collectAsStateWithLifecycle()
         val frozen by session.frozen.collectAsStateWithLifecycle()
+        // Hands-free only while the reticle is on screen (not the result card, a freeze or a failed session).
+        val handsFree = rememberHandsFree(session, settings.handsFreeEnabled, suspended = sessionFailed || frozen != null || state.isComplete)
 
         // A furniture measurement never uses a stored calibration (it only applies inside the session that made it).
         LaunchedEffect(session) { session.setCalibration(null) }
@@ -160,7 +166,7 @@ internal fun FurnitureMeasureScreen(
                 .background(Color.Black)
                 .onSizeChanged { session.setViewSize(it.width, it.height) },
         ) {
-            ArCameraView(session, planeRenderer = frozen == null, onSessionFailed = { sessionFailed = true })
+            ArCameraView(session, planeRenderer = frozen == null, onSessionFailed = { sessionFailed = true }, handsFree = handsFree)
             val f = frozen
             if (f != null) {
                 FreezeOverlay(
@@ -188,6 +194,7 @@ internal fun FurnitureMeasureScreen(
                     onType = onType,
                     onUseTypical = onUseTypical,
                     onNext = onNext,
+                    handsFree = handsFree,
                 )
             }
         }
@@ -214,6 +221,7 @@ private fun GuidedHud(
     onType: () -> Unit,
     onUseTypical: () -> Unit,
     onNext: () -> Unit,
+    handsFree: HandsFreeUi,
 ) {
     val label = stringResource(FurnitureLabels.param(step.template, step.spec.id))
     val coaching = state.tracking == TrackingStatus.INITIALIZING || !state.sessionRunning
@@ -245,7 +253,7 @@ private fun GuidedHud(
         if (!sessionFailed && finished == null) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(64.dp))
-                Reticle(state)
+                Reticle(state, handsFree::progress)
                 Spacer(Modifier.height(8.dp))
                 LiveReadout(state, units, showLength = true)
             }
@@ -259,8 +267,11 @@ private fun GuidedHud(
             if (finished != null) {
                 ResultCard(step, label, finished.primary, finished.quality, units, enabled = state.pointsTracking, onRedo = onRedo, onUse = onUse, onType = onType)
             } else {
-                step.current?.let { ChromePill(stringResource(R.string.furniture_now, FurnitureFormat.dimension(it, units))) }
-                if (!sessionFailed) Controls(state, onAddPoint, onUndo, onFreeze)
+                step.current?.let {
+                    val now = stringResource(R.string.furniture_now, FurnitureFormat.dimension(it, units))
+                    ChromePill(now, spoken = spokenText(now))
+                }
+                if (!sessionFailed) Controls(state, onAddPoint, onUndo, onFreeze, handsFree)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ArTextButton(stringResource(R.string.furniture_type), onType, Modifier.testTag("furniture_type"))
                     if (step.optional) ArTextButton(stringResource(R.string.furniture_use_typical), onUseTypical)
@@ -286,6 +297,8 @@ private fun ResultCard(
 ) {
     val stored = FurnitureFlow.measured(m)
     val error = step.errorFor(stored.meters)
+    val shownValue = FurnitureFormat.dimension(stored, units)
+    val spokenValue = spokenText(shownValue)
     Surface(
         shape = MaterialTheme.shapes.large,
         color = SpaceViewTheme.colors.arChrome,
@@ -295,9 +308,12 @@ private fun ResultCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(label.uppercase(), style = SpaceViewTheme.typography.caption, modifier = Modifier.semantics { heading() })
             Text(
-                FurnitureFormat.dimension(stored, units),
+                shownValue,
                 style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                modifier = Modifier.semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    contentDescription = spokenValue
+                },
             )
             AccuracyBadge(quality, onDarkChrome = true)
             if (error != null) {

@@ -1,5 +1,7 @@
 package com.spaceview.app.measure
 
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
@@ -118,7 +120,7 @@ fun ArGate(onClose: () -> Unit, content: @Composable () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     CircularProgressIndicator(color = SpaceViewTheme.colors.signalText)
-                    Text(stringResource(R.string.arcore_checking), style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(R.string.arcore_checking), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 }
                 GateState.NEED_PERMISSION -> GateCard(
                     title = R.string.perm_title, body = R.string.perm_body,

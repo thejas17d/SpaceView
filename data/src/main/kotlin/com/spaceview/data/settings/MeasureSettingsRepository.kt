@@ -84,11 +84,15 @@ data class CalibrationRecord(
  *
  * @property depthEnabled use the ARCore Depth API where supported (off by default: costs power).
  * @property safetyNoticeShown the one-time "watch your surroundings" notice was shown.
+ * @property handsFreeEnabled Smart Measure hands-free point drop (SM1a): a point drops when the reticle is held
+ *   steady and locked. On by default: it answers the users' main complaint (shaky hands, too much tapping), and a
+ *   tap on "+" itself shakes the phone at the worst moment.
  */
 data class MeasureSettings(
     val calibration: CalibrationRecord? = null,
     val depthEnabled: Boolean = false,
     val safetyNoticeShown: Boolean = false,
+    val handsFreeEnabled: Boolean = true,
 )
 
 /**
@@ -135,6 +139,19 @@ class MeasureSettingsRepository(private val store: DataStore<Preferences>) {
         store.edit { it[SAFETY_SHOWN] = true }
     }
 
+    /** Smart Measure hands-free point drop on / off. Throws [IOException] on a write failure. */
+    suspend fun setHandsFreeEnabled(enabled: Boolean) {
+        store.edit { it[HANDS_FREE] = enabled }
+    }
+
+    /**
+     * Settings → Delete my data (M5): back to the defaults (no calibration, depth off, the safety notice shows
+     * again). Throws [IOException] on a write failure.
+     */
+    suspend fun clearAll() {
+        store.edit { it.clear() }
+    }
+
     companion object {
         /** Distinct from the app settings file (`spaceview_settings`) and ad counters (`spaceview_ads`). */
         const val FILE_NAME = "spaceview_measure"
@@ -171,6 +188,7 @@ class MeasureSettingsRepository(private val store: DataStore<Preferences>) {
         }
         private val DEPTH = booleanPreferencesKey("depth_enabled")
         private val SAFETY_SHOWN = booleanPreferencesKey("safety_notice_shown")
+        private val HANDS_FREE = booleanPreferencesKey("hands_free_enabled")
 
         /** Creates the repository on its file. Call once per process (AppContainer). */
         fun create(context: Context): MeasureSettingsRepository = MeasureSettingsRepository(
@@ -199,6 +217,7 @@ class MeasureSettingsRepository(private val store: DataStore<Preferences>) {
                 calibration = calibration,
                 depthEnabled = this[DEPTH] ?: false,
                 safetyNoticeShown = this[SAFETY_SHOWN] ?: false,
+                handsFreeEnabled = this[HANDS_FREE] ?: true,
             )
         }
     }

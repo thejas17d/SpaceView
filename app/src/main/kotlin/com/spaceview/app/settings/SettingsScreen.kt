@@ -48,9 +48,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -58,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spaceview.app.BuildConfig
 import com.spaceview.app.R
+import com.spaceview.app.about.AppLinks
 import com.spaceview.app.ads.AdsManager
 import com.spaceview.app.ads.BannerAd
 import com.spaceview.app.appContainer
@@ -94,6 +97,8 @@ fun SettingsRoute(
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     onOpenPaywall: ((ProFeature) -> Unit)? = null,
+    onOpenHelp: (() -> Unit)? = null,
+    onOpenAbout: (() -> Unit)? = null,
 ) {
     val activity = LocalActivity.current
     val context = LocalContext.current
@@ -116,6 +121,19 @@ fun SettingsRoute(
         }
     }
     val uriHandler = LocalUriHandler.current
+    // Delete my data (M5): runs to the end even if Settings is left meanwhile (UserDataEraser is NonCancellable).
+    var erasing by remember { mutableStateOf(false) }
+    var eraseComplete by remember { mutableStateOf<Boolean?>(null) }
+    val erase: () -> Unit = {
+        if (!erasing) {
+            erasing = true
+            eraseComplete = null
+            scope.launch {
+                eraseComplete = container.userDataEraser.eraseAll().complete
+                erasing = false
+            }
+        }
+    }
     SettingsScreen(
         onRecalibrate = onRecalibrate,
         onOpenPrivacyOptions = { activity?.let { ads.showPrivacyOptions(it) } },
@@ -140,8 +158,18 @@ fun SettingsRoute(
             if (BuildConfig.DEBUG) Scan3dLabLink()
         },
         banner = { BannerAd(adsManager = ads) },
+        onOpenHelp = onOpenHelp,
+        onOpenAbout = onOpenAbout,
+        deleteData = DeleteDataUi(running = erasing, complete = eraseComplete, onDelete = erase),
     )
 }
+
+/** What the Settings "Delete my data" row shows. [complete]: null before the first run, else whether everything went. */
+data class DeleteDataUi(
+    val running: Boolean = false,
+    val complete: Boolean? = null,
+    val onDelete: () -> Unit = {},
+)
 
 /** What the Settings "SpaceView Pro" section shows. */
 data class ProSettingsUi(
@@ -181,6 +209,9 @@ fun SettingsScreen(
     pro: ProSettingsUi = ProSettingsUi(),
     debugPanel: @Composable () -> Unit = {},
     banner: @Composable () -> Unit = {},
+    onOpenHelp: (() -> Unit)? = null,
+    onOpenAbout: (() -> Unit)? = null,
+    deleteData: DeleteDataUi = DeleteDataUi(),
 ) {
     val units by repository.unitPreference.collectAsStateWithLifecycle(UnitPreference.AUTO)
     val sounds by repository.soundsEnabled.collectAsStateWithLifecycle(true)
@@ -195,6 +226,9 @@ fun SettingsScreen(
         depth = measure.depthEnabled,
         // A disk error must not crash Settings; the switch then simply snaps back.
         onDepthChange = { enabled -> scope.launch { runCatching { measureRepository.setDepthEnabled(enabled) } } },
+        // SM1a (Builder A): hands-free point drop, persisted next to depth in the measuring store.
+        handsFree = measure.handsFreeEnabled,
+        onHandsFreeChange = { enabled -> scope.launch { runCatching { measureRepository.setHandsFreeEnabled(enabled) } } },
         calibratedAtMillis = calibratedAt,
         // CalibrationRecord.isStale: older than 30 days (MAX_AGE_MILLIS) or dated in the future.
         calibrationStale = measure.calibration?.isStale(clock()) == true,
@@ -206,6 +240,9 @@ fun SettingsScreen(
         pro = pro,
         debugPanel = debugPanel,
         banner = banner,
+        onOpenHelp = onOpenHelp,
+        onOpenAbout = onOpenAbout,
+        deleteData = deleteData,
         modifier = modifier,
     )
 }
@@ -228,10 +265,15 @@ private fun SettingsContent(
     pro: ProSettingsUi,
     debugPanel: @Composable () -> Unit,
     banner: @Composable () -> Unit,
+    onOpenHelp: (() -> Unit)?,
+    onOpenAbout: (() -> Unit)?,
+    deleteData: DeleteDataUi,
     modifier: Modifier = Modifier,
+    handsFree: Boolean = true,
+    onHandsFreeChange: (Boolean) -> Unit = {},
 ) {
-    var showLicences by rememberSaveable { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -258,6 +300,8 @@ private fun SettingsContent(
                 Divider()
                 SwitchRow(R.string.settings_depth, R.string.settings_depth_detail, depth, onDepthChange)
                 Divider()
+                SwitchRow(R.string.smart_settings_hands_free, R.string.smart_settings_hands_free_detail, handsFree, onHandsFreeChange)
+                Divider()
                 val calibrationStatus = if (calibratedAtMillis == null) {
                     stringResource(R.string.settings_recalibrate_detail)
                 } else {
@@ -283,26 +327,38 @@ private fun SettingsContent(
                 )
             }
 
-            // Ad privacy choices only matter while ads can run (never for Pro, ARCHITECTURE-v2 §4.6).
+            // Ad privacy choices only matter while ads can run (never for Pro, ARCHITECTURE-v2 §4.6). The row is
+            // enabled exactly when UMP says a privacy-options entry point is required (e.g. EEA/UK).
             val adsActive = pro.entitlement !is Entitlement.Pro
-            val hasPolicy = BuildConfig.PRIVACY_POLICY_URL.isNotBlank()
-            if (adsActive || hasPolicy) {
-                Section(R.string.settings_section_privacy) {
-                    if (adsActive) {
-                        ActionRow(
-                            title = R.string.settings_privacy_options,
-                            detail = if (privacyOptionsRequired) R.string.settings_privacy_options_detail else R.string.settings_privacy_options_not_needed,
-                            enabled = privacyOptionsRequired,
-                            onClick = onOpenPrivacyOptions,
-                        )
-                    }
-                    if (hasPolicy) {
-                        if (adsActive) Divider()
-                        ActionRow(R.string.settings_privacy_policy, null, onClick = {
-                            runCatching { uriHandler.openUri(BuildConfig.PRIVACY_POLICY_URL) }
-                        })
-                    }
+            val policyUrl = AppLinks.privacyPolicyUrl
+            Section(R.string.settings_section_privacy) {
+                if (adsActive) {
+                    ActionRow(
+                        title = R.string.settings_privacy_options,
+                        detail = if (privacyOptionsRequired) R.string.settings_privacy_options_detail else R.string.settings_privacy_options_not_needed,
+                        enabled = privacyOptionsRequired,
+                        onClick = onOpenPrivacyOptions,
+                    )
+                    Divider()
                 }
+                if (policyUrl != null) {
+                    ActionRow(R.string.settings_privacy_policy, null, onClick = { runCatching { uriHandler.openUri(policyUrl) } })
+                    Divider()
+                }
+                ActionRow(
+                    title = R.string.settings_delete_data,
+                    detail = null,
+                    detailText = when {
+                        deleteData.running -> stringResource(R.string.settings_delete_data_running)
+                        deleteData.complete == true -> stringResource(R.string.settings_delete_data_done)
+                        deleteData.complete == false -> stringResource(R.string.settings_delete_data_partial)
+                        else -> stringResource(R.string.settings_delete_data_detail)
+                    },
+                    detailColor = if (deleteData.complete == false) MaterialTheme.colorScheme.error else null,
+                    liveDetail = deleteData.running || deleteData.complete != null,
+                    enabled = !deleteData.running,
+                    onClick = { confirmDelete = true },
+                )
             }
 
             Section(R.string.pro_settings_section) {
@@ -311,26 +367,21 @@ private fun SettingsContent(
             debugPanel()
 
             Section(R.string.settings_section_about) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 56.dp)
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(stringResource(R.string.settings_version), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    Text(BuildConfig.VERSION_NAME, style = SpaceViewTheme.typography.spec, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                ActionRow(
+                    title = R.string.settings_help,
+                    detail = R.string.settings_help_detail,
+                    detailSpoken = stringResource(R.string.settings_help_detail_spoken),
+                    onClick = onOpenHelp,
+                )
                 Divider()
-                ActionRow(R.string.settings_accuracy_note_title, R.string.settings_accuracy_note, onClick = null)
+                ActionRow(R.string.settings_about, R.string.settings_about_detail, onClick = onOpenAbout)
                 Divider()
-                ActionRow(R.string.settings_licences, null, onClick = { showLicences = true })
-                if (BuildConfig.SUPPORT_EMAIL.isNotBlank()) {
-                    Divider()
-                    ActionRow(R.string.settings_contact, null, onClick = {
-                        runCatching { uriHandler.openUri("mailto:${BuildConfig.SUPPORT_EMAIL}") }
-                    })
-                }
+                ActionRow(
+                    R.string.settings_accuracy_note_title,
+                    R.string.settings_accuracy_note,
+                    detailSpoken = stringResource(R.string.settings_accuracy_note_spoken),
+                    onClick = null,
+                )
             }
 
             Spacer(Modifier.height(4.dp))
@@ -338,7 +389,15 @@ private fun SettingsContent(
             Spacer(Modifier.height(12.dp))
         }
     }
-    if (showLicences) LicencesDialog(onDismiss = { showLicences = false })
+    if (confirmDelete) {
+        DeleteDataDialog(
+            onConfirm = {
+                confirmDelete = false
+                deleteData.onDelete()
+            },
+            onDismiss = { confirmDelete = false },
+        )
+    }
     if (confirmClear) {
         ClearCalibrationDialog(
             onConfirm = {
@@ -384,11 +443,30 @@ private fun ProRows(pro: ProSettingsUi) {
         title = R.string.pro_restore,
         detail = R.string.pro_restore_detail,
         detailText = pro.message?.let { stringResource(paywallMessageRes(it)) },
+        liveDetail = pro.message != null,
         enabled = !pro.restoring,
         onClick = pro.onRestore,
     )
     Divider()
     ActionRow(R.string.pro_manage, R.string.pro_manage_detail, onClick = pro.onManage)
+}
+
+/** Delete my data confirmation: says what goes, that it cannot be undone, and that the Play subscription stays. */
+@Composable
+private fun DeleteDataDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onConfirm, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.settings_delete_data_confirm), color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.settings_cancel)) }
+        },
+        title = { Text(stringResource(R.string.settings_delete_data_title)) },
+        text = { Text(stringResource(R.string.settings_delete_data_body), modifier = Modifier.verticalScroll(rememberScrollState())) },
+    )
 }
 
 @Composable
@@ -470,6 +548,8 @@ private fun RowText(
     enabled: Boolean = true,
     detailText: String? = null,
     detailColor: Color? = null,
+    detailSpoken: String? = null,
+    liveDetail: Boolean = false,
 ) {
     val alpha = if (enabled) 1f else 0.5f
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -477,7 +557,16 @@ private fun RowText(
         val text = detailText ?: detail?.let { stringResource(it) }
         if (text != null) {
             val color = detailColor ?: MaterialTheme.colorScheme.onSurfaceVariant
-            Text(text, style = MaterialTheme.typography.bodySmall, color = color.copy(alpha = alpha))
+            Text(
+                text,
+                style = MaterialTheme.typography.bodySmall,
+                color = color.copy(alpha = alpha),
+                // M5 a11y: results that appear after a tap (restore, delete) are announced; symbols are spoken in words.
+                modifier = Modifier.semantics {
+                    if (liveDetail) liveRegion = LiveRegionMode.Polite
+                    if (detailSpoken != null) contentDescription = detailSpoken
+                },
+            )
         }
     }
 }
@@ -512,6 +601,8 @@ private fun ActionRow(
     enabled: Boolean = true,
     detailText: String? = null,
     detailColor: Color? = null,
+    detailSpoken: String? = null,
+    liveDetail: Boolean = false,
     onClick: (() -> Unit)?,
 ) {
     val base = Modifier
@@ -523,39 +614,11 @@ private fun ActionRow(
         base
     }
     Row(clickable.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        RowText(title, detail, Modifier.weight(1f), enabled = enabled, detailText = detailText, detailColor = detailColor)
+        RowText(
+            title, detail, Modifier.weight(1f), enabled = enabled, detailText = detailText, detailColor = detailColor,
+            detailSpoken = detailSpoken, liveDetail = liveDetail,
+        )
     }
-}
-
-/** Libraries shipped in the APK and their licences. Verify against the final dependency list in M6. */
-private val LICENCES = listOf(
-    "AndroidX, Jetpack Compose" to "Apache License 2.0",
-    "Kotlin, kotlinx.coroutines" to "Apache License 2.0",
-    "SceneView / ARSceneView" to "Apache License 2.0",
-    "Filament (Google)" to "Apache License 2.0",
-    "ARCore SDK for Android (Google)" to "Google APIs Terms of Service",
-    "Google Mobile Ads SDK, User Messaging Platform" to "Google APIs Terms of Service",
-    "Google Play Billing Library" to "Android Software Development Kit License",
-)
-
-@Composable
-private fun LicencesDialog(onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) } },
-        title = { Text(stringResource(R.string.settings_licences)) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                LICENCES.forEach { (name, licence) ->
-                    Column {
-                        Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                        Text(licence, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                Text(stringResource(R.string.settings_licences_apache), style = MaterialTheme.typography.bodySmall)
-            }
-        },
-    )
 }
 
 @Preview(name = "Light", showBackground = true, heightDp = 1200)
@@ -568,6 +631,7 @@ private fun SettingsPreview() {
             depth = false, onDepthChange = {}, calibratedAtMillis = 1_760_000_000_000L, calibrationStale = true,
             onClearCalibration = {}, onRecalibrate = {}, onOpenPrivacyOptions = {}, privacyOptionsRequired = false, onBack = {},
             pro = ProSettingsUi(entitlement = Entitlement.Free, onOpenPaywall = {}), debugPanel = {}, banner = {},
+            onOpenHelp = {}, onOpenAbout = {}, deleteData = DeleteDataUi(complete = true),
         )
     }
 }

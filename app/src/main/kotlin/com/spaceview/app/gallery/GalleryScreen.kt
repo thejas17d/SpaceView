@@ -1,5 +1,8 @@
 package com.spaceview.app.gallery
 
+import com.spaceview.app.common.spokenText
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -96,6 +99,7 @@ fun GalleryScreen(
                 Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                     Text(
                         stringResource(R.string.gallery_error_load),
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
                     )
@@ -181,15 +185,17 @@ private fun GalleryCardView(card: GalleryCard, onClick: () -> Unit) {
                 about = stringResource(R.string.gallery_cd_about),
                 by = stringResource(R.string.gallery_cd_by),
             )
-            val dimsDescription = if (item.hasEstimates) stringResource(R.string.gallery_cd_estimated, spoken) else spoken
+            // M5 a11y: units are spoken too ("centimetres"), and the text wraps instead of clipping at 200% font.
+            val dimsDescription = spokenText(if (item.hasEstimates) stringResource(R.string.gallery_cd_estimated, spoken) else spoken)
             Text(
                 card.dimsText,
                 style = SpaceViewTheme.typography.spec,
-                maxLines = 2,
                 modifier = Modifier.semantics { contentDescription = dimsDescription },
             )
             card.diagonalText?.let {
-                Text(stringResource(R.string.gallery_diagonal_short, it), style = SpaceViewTheme.typography.spec)
+                val diagonal = stringResource(R.string.gallery_diagonal_short, it)
+                val diagonalSpoken = spokenText(diagonal)
+                Text(diagonal, style = SpaceViewTheme.typography.spec, modifier = Modifier.semantics { contentDescription = diagonalSpoken })
             }
             if (item.allEstimated) {
                 Text(

@@ -496,12 +496,21 @@ object PurchaseVerifier { fun verify(base64PublicKey: String, signedData: String
   - within 1 s of resume
   - while the result is complete
   - on repeated camera timestamps (the M3 B1 lesson: skip `dt ≤ 1e-4` without touching state)
-- **Wiring:** a listener next to `MeasureSession` (S1) that calls the existing `addPoint()`. `MeasureSession` itself is unchanged.
+- **Wiring:** a listener next to `MeasureSession` (S1) that calls the existing commit path (see "As built" below for the small session additions).
 - **UX:**
   - a progress ring on the reticle
   - the existing click sound on fire
   - a TalkBack live-region announcement ("Point 2 placed")
   - a toggle on the Measure HUD and in Settings, persisted in the `spaceview_measure` DataStore, off by default
+- **As built (SM1, Builder A, 2026-11-17).** Deviations from the design above, each deliberate:
+  - **On by default.** It answers the user's own complaint ("too manual, hands shiver"), and a tap on "+" itself shakes the phone at the worst moment. Undo, and the HUD switch, are always one tap away.
+  - **`HOLD_NS` = 700 ms** (brief: 0.6–0.8 s), counted only while `CommitCandidate.locked`, so aim-to-drop is about 1.2 s (the estimator's ~0.5 s lock + the hold).
+  - **Dwell steadiness 0.20 rad/s and 0.10 m/s** (`DwellTrigger`), looser than the front photo's 0.10 / 0.06: the point is already averaged and locked, and a shaky hand must still be able to drop. Both share the extracted `SteadinessFilter`.
+  - **Also:** target drift ≤ max(1 cm, 1% of range) or the hold restarts; ≥ 3 cm from every committed point; 1 s cool-down after a drop, an Undo/Clear and a resume; re-arm only after moving 3 cm from the last drop spot (so an undone point is not dropped again on the same spot).
+  - **Wiring:** `HandsFreeDropper` (`:ar`, an `ArFrameListener` after the session) calls `MeasureSession.addPointHandsFree()`, the same commit path as "+"; `MeasureSession` gained only small `internal` read-outs (`autoDropTarget`, `distanceToNearestPoint`, …) and `PointAdded.auto`. `app/smart/HandsFree.kt` gives Measure, Scan outline and furniture guided measure the same ring, switch and announcement through `ArCameraView`.
+  - **Feedback:** the existing click, the ring and a TalkBack announcement. The **haptic tick is off** (`HAPTIC_TICK_ENABLED = false`, SM1 review MAJOR 3): ARCore's guidance and the research advise against vibration in AR; TESTING §21 item 9 is the experiment that could turn it on.
+  - **Never behind hidden UI** (review MAJOR 1): each screen passes `suspended` when its reticle or controls are not shown (calibration picker, freeze, photo step, result card, failed session), and a window without focus (any dialog) suspends it too. Choosing a calibration reference clears the points, and calibration starts with hands-free off. Hold-offs also follow the end of a freeze (re-arm after a 3 cm move), and "+" within 1 s of an auto-drop on the same spot, or of completing a result, is ignored.
+  - The HUD switch overrides the Settings value for that screen only.
 
 ### 5.2 SM1b: Object naming (ML Kit image labelling, unbundled)
 
@@ -515,6 +524,11 @@ object PurchaseVerifier { fun verify(base64PublicKey: String, signedData: String
   - This avoids mixed-script UI (§13 D11).
 - **Placement:** `:app/scan/naming` (`ObjectNamer` interface, `MlKitObjectNamer`, `FakeObjectNamer`). Builder A owns the scan flow, and Builder B owns the dependency, manifest and baseline changes.
 - **Privacy:** inference is on-device. ML Kit's data disclosure (API usage diagnostics sent to Google) must be reflected in the Data safety form, so **verify the current disclosure text at submission**.
+- **As built (SM1, Builder A, 2026-11-17):**
+  - `play-services-mlkit-image-labeling` **16.0.8** (the latest published). New transitive artifacts: `com.google.mlkit` common, vision-common, vision-interfaces, image-labeling-common, image-labeling-default-common; `firebase-components`/`-annotations`; `odml:image`; `exifinterface`. **No new permission** (checked in every new AAR manifest and the merged release manifest).
+  - `MlKitInitProvider` is **removed** from the merged manifest (it would run at every cold start); `MlKitImageLabelSource` calls `MlKitContext.initializeIfNeeded` on first use, off main.
+  - Code lives in `app/smart` (`ObjectNamer`, `LabelObjectNamer`, `LabelMapper`, `MlKitObjectNamer`), not `app/scan/naming`. K6 gained an optional `kind` so a frame scan is never offered "Sofa". The curated list is 44 ML Kit labels → 42 names (EN + HI in `strings_smart.xml`); outside it nothing is shown in **any** language.
+  - Runs once per straightened photo on `Dispatchers.Default`, 3 s timeout, confidence ≥ 0.70; the chip is a `SuggestionChip` under the name field and applies only on tap.
 
 ### 5.3 SM2: Auto-detect flat rectangles (frames, TVs, doors, A4), anchored in 3D
 
@@ -927,7 +941,7 @@ fun GlbWriter.writeMesh(mesh: TriMesh, origin: BoxOrigin = BOTTOM_CENTER, unlit:
 - **Separate budget? No.** The existing `check(bytes <= MAX_SCAN_BYTES)` (`GalleryRepository.kt:186`) applies unchanged.
 - **If quality later needs more:** `KHR_mesh_quantization` (int16 positions, int8 normals) halves the bytes per triangle **if** gltfio supports it on device (not checked). It is preferred over raising the budget.
 - **Save path:** `GalleryRepository.saveMesh(MeshDraft)` reuses the staging → commit → sweep protocol, with `model_kind = MESH_DEVICE`, the box dimensions, `mesh_*` fields (§9) and the GLB.
-- **Gallery cap:** device scans count toward it, and Free gets 3 saved 3D scans (pro-monetization.md §1). Gated **before** capture starts, never in AR.
+- **Gallery cap:** device scans count toward it. Free gets **5 3D scans in total** (user decision 2026-11-23, replacing "3 saved"): a lifetime counter in `SettingsRepository` (`device_scans_used`), floored by the saved MESH_DEVICE rows; deleting a scan does not refund it, and Delete my data keeps it. **The D save path must call `SettingsRepository.recordDeviceScanSaved()` after every successful `saveMesh`.** Gated **before** capture starts, never in AR.
 
 #### 7.1.8 Placement in M4 (contract K8)
 - **Origin:** every device mesh is written in the measured box's frame with **`BOX_ORIGIN = BOTTOM_CENTER`** (the centre of the box base on the support plane). M4's floor placement therefore handles it exactly like a proxy box.
@@ -1429,7 +1443,7 @@ The suggested order was M4 → Pro (parallel) → Smart Measure → templates �
 | K3 | Entry from Gallery | A ↔ orchestrator | Route `place/{id: Long}`; `placeDestination(onBack, onOpenPaywall)` |
 | K4 | Placement model | A internal | `GalleryRepository.modelForPlacement(id): PlacementModel?` (PROXY_BOX, TEMPLATE, MESH_DEVICE) |
 | K5 | Paywall entry | B → A | `onOpenPaywall(feature: ProFeature)` callback passed by nav, never a direct navigation from A's screens |
-| K6 | Naming | B → A | `suspend fun ObjectNamer.suggest(jpeg: ByteArray): NameSuggestion?`, null when the model is unavailable. A shows the chip. |
+| K6 | Naming | A (as built, SM1) | `suspend fun ObjectNamer.suggest(jpeg: ByteArray, kind: ObjectKind? = null): NameSuggestion?`. `kind` (the scan type picked) filters out names that cannot be that object (OTHER and null accept every curated name). Null when the model is unavailable or not downloaded, on any error or 3 s timeout, or below 0.70 confidence; never throws (only the caller's cancellation propagates). A shows the chip; it applies only on tap. |
 | K7 | Cloud (later) | B (`:cloud`) ↔ A (capture) | `CaptureStore.write(frame, pose, intrinsics)`; `CloudScanRepository.enqueue(captureDir)` |
 | K8 | Every GLB is placeable | A (writer, `:data`) → A (M4) and B (T) | Origin `BOTTOM_CENTER` (floor items, templates, meshes) or `BACK_CENTER` (wall items). `extras.{widthM,heightM,depthM}` = the GLB's own bounding box, plus `glbVersion = 2` and `modelKind`. A mesh is never regenerated; it falls back to the proxy box (ADR-014). |
 | K9 | GLB writer API | A → B | `GlbWriter.writeParts(parts: List<Part>, palette, origin, name): ByteArray` and `writeMesh(mesh: TriMesh, origin, unlit, extras): ByteArray`, frozen at the end of phase 0 |
@@ -1468,7 +1482,7 @@ The suggested order was M4 → Pro (parallel) → Smart Measure → templates �
 | D14 | Cloud credit model (later) | Consumable packs / credits included in Pro / both | pro-monetization.md §3 recommends **monthly included credits plus packs, charged only on success**. That works with the §8 ledger (reserve, commit, release). Accept it once 3d-capture.md gives the real cost per scan. |
 | D15 | A third builder for `:engine/recon` | Two builders / add Builder C | **Add C if you can afford the tokens.** It is pure JVM work in a new package, with no file overlap, and takes the biggest maths block off Builder A's critical path. The build lock still allows only one Gradle run at a time, but `:engine:test` is the cheapest one. |
 | D16 | Remote Config for limits and the price A/B (research §8) | Firebase Remote Config now / code constants now, remote later | **Code constants for v1** (§4.3). Firebase means a new SDK, start-up work and Data safety rows. |
-| D17 | On-device 3D scan: device and gate | — | **Needed for the phase 2 spike:** tell me which of your phones support ARCore Depth (ideally one with a ToF sensor and one without). If the spike's exit criteria (§7.1.10) fail, the scan stays behind a flag and the release goes ahead without it. **Shipping:** as **"Experimental: approximate 3D shape"**, Free 3 saved and Pro unlimited (pro-monetization.md §1). Its dimensions always come from the measured box. |
+| D17 | On-device 3D scan: device and gate | — | **Needed for the phase 2 spike:** tell me which of your phones support ARCore Depth (ideally one with a ToF sensor and one without). If the spike's exit criteria (§7.1.10) fail, the scan stays behind a flag and the release goes ahead without it. **Shipping:** as **"Experimental: approximate 3D shape"**, Free **5 in total** (user decision 2026-11-23; was "3 saved") and Pro unlimited. **Spike phone: Google Pixel 10a** (Depth API, no ToF). Its dimensions always come from the measured box. |
 
 ---
 

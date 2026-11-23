@@ -8,7 +8,7 @@
     <!-- Why the paywall opened (one per ProFeature). -->
     <string name="pro_reason_no_ads">Use SpaceView without ads.</string>
     <string name="pro_reason_gallery">The free gallery holds %1$d items. Pro saves as many as you like. Nothing you\'ve saved is ever hidden or deleted.</string>
-    <string name="pro_reason_device_scan">You\'ve used your %1$d free 3D scans. Pro scans without a limit. Your saved scans stay yours.</string>
+    <string name="pro_reason_device_scan">You\'ve used all %1$d free 3D scans. Deleting a scan doesn\'t give one back. Pro scans without a limit. Your saved scans stay yours.</string>
     <string name="pro_reason_templates">This furniture template is part of Pro. Sofa, bed and wardrobe stay free.</string>
     <string name="pro_reason_compare">Free compares %1$d items at a time. Pro compares as many as you like.</string>
     <string name="pro_reason_export_glb">Exporting 3D models is part of Pro.</string>

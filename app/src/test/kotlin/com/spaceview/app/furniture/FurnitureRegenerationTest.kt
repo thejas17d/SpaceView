@@ -145,5 +145,7 @@ class FurnitureRegenerationTest {
             rows.value = rows.value.filterNot { it.id == id }
             return before - rows.value.size
         }
+
+        override suspend fun deleteAll(): Int = rows.value.size.also { rows.value = emptyList() }
     }
 }

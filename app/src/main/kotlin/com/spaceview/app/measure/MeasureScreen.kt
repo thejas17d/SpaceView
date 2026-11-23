@@ -25,6 +25,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spaceview.app.common.ar.ArSessionHost
+import com.spaceview.app.smart.HandsFreeAnnouncer
+import com.spaceview.app.smart.HandsFreeUi
+import com.spaceview.app.smart.rememberHandsFree
 import com.spaceview.ar.ArFrameListener
 import io.github.sceneview.ar.ARSceneScope
 import com.spaceview.ar.MeasureEvent
@@ -131,6 +134,14 @@ private fun MeasureArScreen(
 
         val state by session.state.collectAsStateWithLifecycle()
         val frozen by session.frozen.collectAsStateWithLifecycle()
+        // Hands-free only while the reticle and controls are on screen (never behind the reference picker), and off
+        // at the start of a calibration, where the aim must be exact (SM1 review MAJOR 1).
+        val handsFree = rememberHandsFree(
+            session,
+            settings.handsFreeEnabled,
+            suspended = handsFreeSuspended(calibration, sessionFailed, frozen != null),
+            startOff = calibration != null,
+        )
 
         BackHandler(enabled = frozen != null || calibration != null) {
             when {
@@ -149,7 +160,7 @@ private fun MeasureArScreen(
                 .background(Color.Black)
                 .onSizeChanged { session.setViewSize(it.width, it.height) },
         ) {
-            ArCameraView(session, planeRenderer = frozen == null, onSessionFailed = { sessionFailed = true })
+            ArCameraView(session, planeRenderer = frozen == null, onSessionFailed = { sessionFailed = true }, handsFree = handsFree)
 
             val f = frozen
             if (f != null) {
@@ -175,11 +186,14 @@ private fun MeasureArScreen(
                     onFreeze = session::freeze,
                     onNew = session::clear,
                     // Saves exactly the reading on the result card (M2 review minor 1).
-                    onSave = { reading, label -> vm.save(reading, label, state.capabilities?.tier); session.clear() },
+                    onSave = { reading, label ->
+                        vm.save(reading, label, state.capabilities?.tier, handsFree = session.anyHandsFreePoint())
+                        session.clear()
+                    },
                     onStartOver = session::clear,
                     onRetrySession = { sessionFailed = false; sessionKey++ },
                     onDismissSafety = vm::dismissSafetyNotice,
-                    onChooseReference = { ref -> calibration = CalibrationStep.Measuring(ref) },
+                    onChooseReference = { ref -> calibration = startCalibration(ref, session::clear) },
                     onCancelCalibration = {
                         calibration = null
                         session.clear()
@@ -193,10 +207,27 @@ private fun MeasureArScreen(
                     onRetryCalibration = session::clear,
                     calibrationCheck = session::calibrationCheck,
                     knownLengthCheck = session::knownLengthCheck,
+                    handsFree = handsFree,
                 )
             }
         }
     }
+}
+
+/**
+ * Hands-free must not drop points the user cannot see: while the reference picker covers the reticle, while a frozen
+ * photo is being adjusted, or after the AR session failed (SM1 review MAJOR 1).
+ */
+internal fun handsFreeSuspended(calibration: CalibrationStep?, sessionFailed: Boolean, frozen: Boolean): Boolean =
+    calibration == CalibrationStep.Choosing || sessionFailed || frozen
+
+/**
+ * A calibration reference was chosen: it always starts from zero points (stray points, from a dwell or a tap before
+ * the choice, would otherwise become the calibrated span when the mode does not change; SM1 review MAJOR 1).
+ */
+internal fun startCalibration(reference: ReferenceObject?, clearPoints: () -> Unit): CalibrationStep {
+    clearPoints()
+    return CalibrationStep.Measuring(reference)
 }
 
 /** Short-lived messages shown in the hint area. */
@@ -216,6 +247,8 @@ private const val TRANSIENT_MS = 3000L
  * children into the caller's Box. Shared by Measure and Scan; Place adds its own listener after [session].
  *
  * @param extraListeners listeners called after [session] on every frame (must not change for this composable).
+ * @param handsFree the hands-free point drop (SM1a): its listener runs right after [session], and its TalkBack
+ *   announcement lives here, so every measuring screen gets the same behaviour from one place.
  */
 @Composable
 internal fun ArCameraView(
@@ -223,10 +256,16 @@ internal fun ArCameraView(
     planeRenderer: Boolean,
     onSessionFailed: () -> Unit,
     extraListeners: List<ArFrameListener> = emptyList(),
+    handsFree: HandsFreeUi? = null,
     content: (@Composable ARSceneScope.() -> Unit)? = null,
 ) {
-    val listeners = remember(session, extraListeners) { listOf<ArFrameListener>(session) + extraListeners }
+    // Keyed on the dropper (one per session), never on the switch state: the host's listener list must not change.
+    val dropper = handsFree?.dropper
+    val listeners = remember(session, extraListeners, dropper) {
+        listOf<ArFrameListener>(session) + listOfNotNull(dropper) + extraListeners
+    }
     ArSessionHost(listeners = listeners, planeRenderer = planeRenderer, onSessionFailed = onSessionFailed, content = content)
+    if (handsFree != null) HandsFreeAnnouncer(handsFree)
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->

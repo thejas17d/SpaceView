@@ -128,6 +128,19 @@ class MeasureSettingsRepositoryTest {
         assertNull(r.settings.first().calibration)
     }
 
+    /** M5 Delete my data: calibration, depth and the safety notice all go back to the defaults. */
+    @Test
+    fun clearAllRestoresTheDefaults() = runTest {
+        val store = MemoryStore()
+        val r = MeasureSettingsRepository(store)
+        r.setCalibration(record(1.012))
+        r.setDepthEnabled(true)
+        r.markSafetyNoticeShown()
+        r.clearAll()
+        assertEquals(com.spaceview.data.settings.MeasureSettings(), r.settings.first())
+        assertTrue(store.state.value.asMap().isEmpty())
+    }
+
     @Test
     fun legacyVisitTimeRecordIsNeverLoaded() = runTest {
         // An M2 build stored the visit time (a Long) as the session; such a record has no ARCore

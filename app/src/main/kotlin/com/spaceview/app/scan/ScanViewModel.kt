@@ -2,6 +2,7 @@ package com.spaceview.app.scan
 
 import android.graphics.PointF
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.SavedStateHandle
@@ -10,6 +11,8 @@ import androidx.lifecycle.viewModelScope
 import com.spaceview.app.scan.imaging.FrontPhotoRectifier
 import com.spaceview.app.scan.imaging.JpegEncoder
 import com.spaceview.app.settings.SettingsRepository
+import com.spaceview.app.smart.NameSuggestion
+import com.spaceview.app.smart.ObjectNamer
 import com.spaceview.ar.FrontPhoto
 import com.spaceview.ar.ImprovementTip
 import com.spaceview.ar.ScanOutline
@@ -50,6 +53,8 @@ data class ScanSettings(
     val units: UnitPreference = UnitPreference.AUTO,
     val soundsEnabled: Boolean = true,
     val depthEnabled: Boolean = false,
+    /** Smart Measure hands-free point drop (SM1a), from the `spaceview_measure` store. */
+    val handsFreeEnabled: Boolean = true,
     val loaded: Boolean = false,
 )
 
@@ -92,6 +97,10 @@ data class ScanUiState(
     val saveFailed: Boolean = false,
     /** Save was refused by the Free gallery cap; the draft is kept (Upgrade / Share / Discard). */
     val galleryFull: Boolean = false,
+    /** SM1b: a curated name for the photo, offered as a chip; only applied when the user taps it. */
+    val nameSuggestion: NameSuggestion? = null,
+    /** Some outline points were dropped hands-free: saved as `CaptureMethod.HANDS_FREE`. */
+    val handsFree: Boolean = false,
 ) {
     val shape: ScanShape? get() = kind?.let { ScanDraftBuilder.shapeFor(it) }
 
@@ -126,6 +135,8 @@ class ScanViewModel(
      * kept on the Review screen, never dropped.
      */
     private val canSave: suspend () -> Boolean = { true },
+    /** SM1b (contract K6): names the straightened photo once, off the main thread; null = no naming. */
+    private val namer: ObjectNamer? = null,
 ) : ViewModel() {
 
     val settings: StateFlow<ScanSettings> = settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, ScanSettings())
@@ -135,6 +146,7 @@ class ScanViewModel(
 
     private var frontJpeg: ByteArray? = null
     private var photoJob: Job? = null
+    private var nameJob: Job? = null
 
     init {
         _state.value.savedId?.let { loadSavedItem(it) }
@@ -161,10 +173,10 @@ class ScanViewModel(
         setState { it.copy(kind = kind, step = ScanStep.OUTLINE, outline = null, edits = emptyMap()) }
     }
 
-    /** The user confirmed the outline in AR. */
-    fun onOutline(outline: ScanOutline, tip: ImprovementTip?, tier: DeviceTier) {
+    /** The user confirmed the outline in AR; [handsFree]: some of its points were dropped hands-free (SM1a). */
+    fun onOutline(outline: ScanOutline, tip: ImprovementTip?, tier: DeviceTier, handsFree: Boolean = false) {
         dropPhoto()
-        setState { it.copy(outline = outline, tip = tip, tier = tier, edits = emptyMap(), step = ScanStep.PHOTO) }
+        setState { it.copy(outline = outline, tip = tip, tier = tier, handsFree = handsFree, edits = emptyMap(), step = ScanStep.PHOTO) }
     }
 
     /** The front photo was taken: straighten it to the measured W:H off the main thread, then review. */
@@ -198,6 +210,7 @@ class ScanViewModel(
             }
             frontJpeg = result?.second
             setState { it.copy(photo = result?.first?.asImageBitmap(), photoBusy = false, photoFailed = result == null) }
+            result?.second?.let { suggestName(it) }
         }
         // Cancelled before the block ran (Back, Measure again): the camera image is still ours to free (m6).
         job.invokeOnCompletion { cause -> if (cause != null) photo.bitmap.recycle() }
@@ -244,7 +257,7 @@ class ScanViewModel(
         val values = s.values ?: return
         if (s.saving || s.savedId != null || s.photoBusy || !values.isSavable) return
         setState { it.copy(saving = true, saveFailed = false, galleryFull = false) }
-        val draft = ScanDraftBuilder.draft(kind, values, frontJpeg, ScanDraftBuilder.label(s.label, suggestedLabel), s.tier, arcoreVersion())
+        val draft = ScanDraftBuilder.draft(kind, values, frontJpeg, ScanDraftBuilder.label(s.label, suggestedLabel), s.tier, arcoreVersion(), s.handsFree)
         viewModelScope.launch {
             if (!canSave()) {
                 // Gallery full on Free: keep everything (values, edits, name, photo) for Upgrade then Save.
@@ -279,11 +292,31 @@ class ScanViewModel(
         }
     }
 
+    /** Once per photo: the namer runs off main with its own timeout; a failure or "no model" just means no chip. */
+    @VisibleForTesting
+    internal fun suggestName(jpeg: ByteArray) {
+        val n = namer ?: return
+        val kind = _state.value.kind
+        nameJob?.cancel()
+        nameJob = viewModelScope.launch {
+            val suggestion = try {
+                n.suggest(jpeg, kind)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null // the contract says never, but a naming bug must never cost the user the scan
+            }
+            if (suggestion != null) _state.update { it.copy(nameSuggestion = suggestion) }
+        }
+    }
+
     private fun dropPhoto() {
         photoJob?.cancel()
         photoJob = null
+        nameJob?.cancel()
+        nameJob = null
         frontJpeg = null
-        _state.update { it.copy(photo = null, photoBusy = false, photoFailed = false) }
+        _state.update { it.copy(photo = null, photoBusy = false, photoFailed = false, nameSuggestion = null) }
     }
 
     private fun warn(message: String) {
@@ -303,6 +336,6 @@ class ScanViewModel(
             measureSettings.settings,
             appSettings.unitPreference,
             appSettings.soundsEnabled,
-        ) { m, units, sounds -> ScanSettings(units, sounds, m.depthEnabled, loaded = true) }
+        ) { m, units, sounds -> ScanSettings(units, sounds, m.depthEnabled, m.handsFreeEnabled, loaded = true) }
     }
 }

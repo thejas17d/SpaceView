@@ -1,6 +1,7 @@
 package com.spaceview.app.place
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -11,6 +12,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.spaceview.app.appContainer
 import com.spaceview.app.pro.ProFeature
+import com.spaceview.engine.Fit
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** The Place route, `place/{id}` (contract K3). */
 object PlaceDestination {
@@ -48,6 +52,14 @@ fun NavGraphBuilder.placeDestination(onBack: () -> Unit, @Suppress("UNUSED_PARAM
             )
         }
         BackHandler(onBack = onBack)
+        // M5 (Builder B): a Fits verdict is a positive moment for the review prompt. This only arms it; the ask
+        // happens later on a non-AR screen (ReviewPrompter), never here over the camera.
+        LaunchedEffect(vm) {
+            combine(vm.load, vm.target, vm.space) { load, target, space ->
+                val ready = load as? PlaceLoad.Ready
+                if (ready == null || target == null) null else vm.verdict(ready.loaded.model, target, space)?.fit
+            }.distinctUntilChanged().collect { if (it == Fit.FITS) container.reviewPrompter.onFitsVerdict() }
+        }
         PlaceRoute(viewModel = vm, onBack = onBack)
     }
 }

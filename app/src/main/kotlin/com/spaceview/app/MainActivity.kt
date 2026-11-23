@@ -36,5 +36,7 @@ class MainActivity : ComponentActivity() {
                 container.ads.start(this)
             }
         }
+        // UMP consent is retried on the next non-AR screen to resume (AdsManager.onNonArScreenResumed), never from
+        // onStart: the form must not open over Measure, Scan or Place (SM1-M5 review MINOR 10).
     }
 }

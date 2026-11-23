@@ -170,7 +170,7 @@ class GalleryRepository(
             .flowOn(io)
             .catch { e -> if (e is CancellationException) throw e else emit(null) }
 
-    /** Saved on-device 3D scans (`model_kind = MESH_DEVICE`), for the Free cap of 3. Throws like [count]. */
+    /** Saved on-device 3D scans (`model_kind = MESH_DEVICE`), a floor under the Free lifetime quota of 5 (the app keeps the lifetime counter). Throws like [count]. */
     suspend fun countDeviceScans(): Int = withContext(io) { dao.countModelKind(ModelKind.MESH_DEVICE.name) }
 
     /** One item (null when deleted or unreadable). Never throws. */
@@ -440,6 +440,23 @@ class GalleryRepository(
                 layout.itemDir(id.toString()).deleteRecursively()
                 shareDir()?.listFiles()?.filter { it.name.startsWith("$id-") }?.forEach { it.deleteRecursively() }
                 true
+            }
+        }
+    }
+
+    /**
+     * Settings → Delete my data (M5): deletes every row, then the whole gallery directory (models, photos,
+     * thumbnails, staging leftovers), the share copies and the Place fallback boxes in the cache. Runs under the
+     * write lock, so it never interleaves with a save, an edit or [cleanUp]. False when the database could not be
+     * written or a directory could not be removed (the caller says so; a retry finishes the job).
+     */
+    suspend fun deleteAll(): Boolean = withContext(io) {
+        writeLock.withLock {
+            guarded {
+                dao.deleteAll()
+                val dirs = listOfNotNull(layout.galleryDir, shareDir(), File(cacheDir ?: File(filesDir, ".cache"), PLACE_DIR))
+                // deleteRecursively() is true when the directory is gone afterwards (also when it never existed).
+                dirs.map { it.deleteRecursively() }.all { it }
             }
         }
     }

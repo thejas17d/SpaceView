@@ -15,7 +15,7 @@ enum class ProFeature {
     /** More than [ProCatalog.FREE_GALLERY_ITEMS] saved gallery items. Checked before a scan starts and at Save. */
     GALLERY_UNLIMITED,
 
-    /** More than [ProCatalog.FREE_DEVICE_SCANS] saved on-device 3D scans (they also count toward the gallery). */
+    /** More than [ProCatalog.FREE_DEVICE_SCANS] on-device 3D scans in total (saved ones also count toward the gallery). */
     DEVICE_SCAN,
 
     /**
@@ -100,7 +100,8 @@ object ProCatalog {
     val proProductIds: Set<String> = setOf(SUBSCRIPTION_ID)
 
     const val FREE_GALLERY_ITEMS = 20
-    const val FREE_DEVICE_SCANS = 3
+    /** Free on-device 3D scans **in total** on this install (user decision 2026-11-23): deleting one doesn't refund it. */
+    const val FREE_DEVICE_SCANS = 5
     const val FREE_COMPARE_ITEMS = 2
 
     /** The 3 core templates that are free with full accuracy (research §1). Stored ids; never rename. */

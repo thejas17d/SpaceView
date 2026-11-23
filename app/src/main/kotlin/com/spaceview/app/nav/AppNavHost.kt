@@ -27,6 +27,9 @@ import com.spaceview.app.gallery.GalleryItemScreen
 import com.spaceview.app.gallery.GalleryItemViewModel
 import com.spaceview.app.gallery.GalleryScreen
 import com.spaceview.app.gallery.GalleryViewModel
+import com.spaceview.app.help.helpAndAboutDestinations
+import com.spaceview.app.help.openAbout
+import com.spaceview.app.help.openHelp
 import com.spaceview.app.history.HistoryScreen
 import com.spaceview.app.history.HistoryViewModel
 import com.spaceview.app.measure.MeasureRoute
@@ -42,6 +45,7 @@ import com.spaceview.app.scan.GalleryScanStore
 import com.spaceview.app.scan.ScanRoute
 import com.spaceview.app.scan.ScanViewModel
 import com.spaceview.app.settings.SettingsRoute
+import com.spaceview.app.smart.mlKitObjectNamer
 import com.spaceview.app.ui.home.HomeScreen
 import com.spaceview.ar.MeasureMode
 import androidx.compose.runtime.mutableStateOf
@@ -90,15 +94,22 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
     // Free gallery cap (Builder B, P1 review MAJOR 3): checked before the scan's AR session starts, so the
     // paywall never opens over the camera. Save checks again (ScanViewModel) and keeps the draft.
     var scanCheck by remember { mutableStateOf<Job?>(null) }
+    // N2: the check may wait up to ~6 s at cold start (entitlement settle); Home shows "Checking…" meanwhile.
+    var scanChecking by remember { mutableStateOf(false) }
     val startScan: () -> Unit = {
         if (scanCheck?.isActive != true) {
             // M4-P1 gate N4: the check suspends (up to ~1 s), so the user may leave Home / Gallery meanwhile (e.g.
             // tap Settings). Navigate only if the screen that asked is still on top.
             val origin = navController.currentBackStackEntry
+            scanChecking = true
             scanCheck = scope.launch {
-                val gate = container.gallerySaveGate.checkItem()
-                if (navController.currentBackStackEntry !== origin) return@launch
-                if (gate.allowed) navController.navigate(Routes.SCAN) else navController.openPaywall(ProFeature.GALLERY_UNLIMITED)
+                try {
+                    val gate = container.gallerySaveGate.checkItem()
+                    if (navController.currentBackStackEntry !== origin) return@launch
+                    if (gate.allowed) navController.navigate(Routes.SCAN) else navController.openPaywall(ProFeature.GALLERY_UNLIMITED)
+                } finally {
+                    scanChecking = false
+                }
             }
         }
     }
@@ -130,6 +141,7 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                 onHistory = { navController.navigate(Routes.HISTORY) },
                 onSettings = { navController.navigate(Routes.SETTINGS) },
                 onScan = startScan,
+                scanChecking = scanChecking,
                 onGallery = { navController.navigate(Routes.GALLERY) },
                 // T (Builder B): the picker gates each template before any AR.
                 onFurniture = { navController.openFurniture() },
@@ -146,6 +158,8 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                     onScanSaved = { ads.recordCompletedScan() },
                     // Save backstop for the Free gallery cap (keeps the draft when full).
                     canSave = { container.gallerySaveGate.checkItem().allowed },
+                    // SM1b (Builder A): a name chip at Review from on-device ML Kit labelling (K6).
+                    namer = mlKitObjectNamer(context),
                 )
             }
             // A scan visit is a Measure-style visit: an interstitial is only possible after a save, and only
@@ -253,8 +267,12 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                 onRecalibrate = { navController.navigate(Routes.CALIBRATE) },
                 onBack = { navController.popBackStack() },
                 onOpenPaywall = { navController.openPaywall(it) },
+                onOpenHelp = { navController.openHelp() },
+                onOpenAbout = { navController.openAbout() },
             )
         }
+        // M5 remainder (Builder B): Help / FAQ and About, from Settings.
+        helpAndAboutDestinations(navController)
         // M4 Place in room (Builder A): AR screen with its own ArScreenAdGuard; Free (K2/K5/D7).
         // T furniture templates (Builder B): picker → guided measure → preview → review → saved; ads as the scan flow.
         furnitureDestination(

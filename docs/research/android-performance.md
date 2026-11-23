@@ -301,9 +301,12 @@ cacheDir/capture/…                      // temp frames, deleted after the save
 | Data | Collected/shared by | Purpose |
 |---|---|---|
 | IP / approximate location, app interactions, diagnostics, device or other IDs (Advertising ID, app set ID) | **AdMob**: collected **and** shared, encrypted in transit | Advertising, analytics, fraud prevention ([AdMob data disclosure](https://developers.google.com/admob/android/privacy/play-data-disclosure)) |
+| Diagnostics (performance, API configuration, error codes, feature events), device info (make, model, OS), app info (package, version), **device or other IDs** (a device identifier + per-installation IDs) | **ML Kit** image labelling via Google Play services (SM1b object naming): collected, **not shared** (no third-party transfer), encrypted in transit | Diagnostics / usage analytics ([ML Kit data disclosure](https://developers.google.com/ml-kit/android-data-disclosure), last modified 2025-05-14, read 2026-11-17; re-check at submission). Images are labelled **on the device**, never uploaded |
+| Library diagnostics | **Play Billing Library** (`com.google.android.datatransport`): collected by Google | App functionality / diagnostics (check Google's Play Billing data disclosure at submission) |
 | Crash logs, diagnostics | Crashlytics/Sentry, *if added* | App functionality / analytics |
-| Photos and camera frames, measurements, 3D models | **Not collected.** Processed and stored only on the device, never sent off it | — |
-- Mark "data can be deleted" (uninstall / clear the gallery). Link a privacy policy URL (Gridlark already wires `PRIVACY_POLICY_URL` from CI secrets; reuse that pattern).
+| Photos and camera frames, measurements, 3D models | **Not collected.** Processed and stored only on the device, never sent off it (ML Kit labels the photo on the device) | — |
+- The in-app privacy text (Help, About) must match the form: "your measurements and photos stay on your phone; Google services used for ads, purchases and object naming may collect limited diagnostic and device data" (SM1-M5 review MAJOR 2). Never claim "everything stays on your phone".
+- Mark "data can be deleted" (Settings → Delete my data, uninstall). Link a privacy policy URL (Gridlark already wires `PRIVACY_POLICY_URL` from CI secrets; reuse that pattern).
 
 ### 6.4 Camera permission
 - Request `CAMERA` at runtime **only when the user taps Measure or Scan**, with a short pre-prompt explaining why. Don't request it at launch. Handle "Don't ask again" with a Settings deep link. Permission denials are a vital ([vitals list](https://developer.android.com/topic/performance/vitals)).

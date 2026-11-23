@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Smart Measure SM1 (Builder A): hands-free point drop and object naming. Every key also lives in
+     values-hi/strings_smart.xml. Object names are a curated list (decision D11): the model's own labels are never shown. -->
+<resources>
+    <!-- Hands-free point drop (SM1a) -->
+    <string name="smart_hands_free_on">Hands-free: on</string>
+    <string name="smart_hands_free_off">Hands-free: off</string>
+    <string name="smart_point_placed">Placed point %1$d</string>
+    <string name="smart_settings_hands_free">Hands-free points</string>
+    <string name="smart_settings_hands_free_detail">Hold the crosshair steady on a spot and the point is placed by itself. Undo is one tap away.</string>
+
+    <!-- Object naming (SM1b): the chip on the scan Review -->
+    <string name="smart_name_chip">Name it “%1$s”?</string>
+    <string name="smart_name_poster">Poster</string>
+    <string name="smart_name_painting">Painting</string>
+    <string name="smart_name_whiteboard">Whiteboard</string>
+    <string name="smart_name_blackboard">Blackboard</string>
+    <string name="smart_name_clock">Clock</string>
+    <string name="smart_name_tv">TV</string>
+    <string name="smart_name_computer">Computer</string>
+    <string name="smart_name_phone">Mobile phone</string>
+    <string name="smart_name_speaker">Speaker</string>
+    <string name="smart_name_piano">Piano</string>
+    <string name="smart_name_instrument">Musical instrument</string>
+    <string name="smart_name_chair">Chair</string>
+    <string name="smart_name_sofa">Sofa</string>
+    <string name="smart_name_loveseat">Two-seater sofa</string>
+    <string name="smart_name_desk">Desk</string>
+    <string name="smart_name_cabinet">Cabinet</string>
+    <string name="smart_name_drawers">Chest of drawers</string>
+    <string name="smart_name_shelf">Shelf</string>
+    <string name="smart_name_bunk_bed">Bunk bed</string>
+    <string name="smart_name_bench">Bench</string>
+    <string name="smart_name_pillow">Pillow</string>
+    <string name="smart_name_cushion">Cushion</string>
+    <string name="smart_name_curtain">Curtain</string>
+    <string name="smart_name_lamp">Lamp</string>
+    <string name="smart_name_flowerpot">Flower pot</string>
+    <string name="smart_name_plant">Plant</string>
+    <string name="smart_name_sink">Sink</string>
+    <string name="smart_name_bag">Bag</string>
+    <string name="smart_name_handbag">Handbag</string>
+    <string name="smart_name_toy">Toy</string>
+    <string name="smart_name_soft_toy">Soft toy</string>
+    <string name="smart_name_blocks">Building blocks</string>
+    <string name="smart_name_statue">Statue</string>
+    <string name="smart_name_aquarium">Aquarium</string>
+    <string name="smart_name_bicycle">Bicycle</string>
+    <string name="smart_name_shoes">Shoes</string>
+    <string name="smart_name_cup">Cup</string>
+    <string name="smart_name_cookware">Cookware</string>
+    <string name="smart_name_umbrella">Umbrella</string>
+    <string name="smart_name_helmet">Helmet</string>
+    <string name="smart_name_tyre">Tyre</string>
+    <string name="smart_name_skateboard">Skateboard</string>
+
+    <!-- Accessibility (M5 pass on Builder A's screens) -->
+    <string name="smart_a11y_scan_step">Step %1$d of %2$d</string>
+    <string name="smart_a11y_edit_field">%1$s in %2$s</string>
+    <string name="smart_a11y_freeze_photo">Frozen photo with the last point. Use the actions to move the point 1 centimetre at a time.</string>
+    <string name="smart_a11y_move_left">Move point 1 centimetre left</string>
+    <string name="smart_a11y_move_right">Move point 1 centimetre right</string>
+    <string name="smart_a11y_move_up">Move point 1 centimetre up</string>
+    <string name="smart_a11y_move_down">Move point 1 centimetre down</string>
+</resources>

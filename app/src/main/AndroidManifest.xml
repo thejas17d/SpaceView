@@ -20,7 +20,9 @@
          activities are exported="false". -->
 
     <!-- Merged in by SceneView (haptics). SpaceView avoids vibration during AR (it disturbs
-         tracking), so it is stripped. -->
+         tracking), so it is stripped. The hands-free point drop (SM1a) has no haptic tick
+         (HAPTIC_TICK_ENABLED = false, SM1 review MAJOR 3); if the TESTING §21 experiment ever turns it
+         on, it uses View.performHapticFeedback, which needs no permission. -->
     <uses-permission
         android:name="android.permission.VIBRATE"
         tools:node="remove" />
@@ -81,6 +83,19 @@
         <meta-data
             android:name="com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING"
             android:value="true" />
+
+        <!-- SM1b object naming: the unbundled ML Kit image-labelling model ("ica") is downloaded by
+             Google Play services at install, not shipped in the APK. Until it is there, naming simply
+             offers no suggestion. ML Kit adds no permission. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ica" />
+        <!-- ML Kit's init provider would run at every cold start (component discovery, a binder call);
+             MlKitObjectNamer initialises ML Kit on first use instead, off the main thread. -->
+        <provider
+            android:name="com.google.mlkit.common.internal.MlKitInitProvider"
+            android:authorities="${applicationId}.mlkitinitprovider"
+            tools:node="remove" />
 
         <!-- Share sheet (M3 gallery): read-only content:// URIs for files/gallery/ and cache/share/ only,
              granted per share intent. Not exported; needs no permission. -->

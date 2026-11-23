@@ -8,7 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
 
-/** P1 review MAJOR 3: the Free gallery cap (20) and 3D-scan cap (3), enforced for new items only. */
+/** P1 review MAJOR 3: the Free gallery cap (20) and 3D-scan quota (5 in total), enforced for new items only. */
 class GallerySaveGateTest {
     private val pro = Entitlement.Pro("pro", true, 0L, Entitlement.Pro.Source.PLAY_LIVE)
     private val entitlement = MutableStateFlow<Entitlement>(Entitlement.Free)
@@ -41,13 +41,13 @@ class GallerySaveGateTest {
     }
 
     @Test
-    fun `3D scans have their own cap of 3 inside the gallery cap`() = runTest {
+    fun `3D scans have their own quota of 5 inside the gallery cap`() = runTest {
         items = 5
-        meshes = 2
-        assertEquals(GateState.Limited(1, 3), gate.checkDeviceScan())
-        meshes = 3
+        meshes = 4
+        assertEquals(GateState.Limited(1, 5), gate.checkDeviceScan())
+        meshes = 5
         val s = gate.checkDeviceScan()
-        assertEquals(GateState.NeedsPro(3), s)
+        assertEquals(GateState.NeedsPro(5), s)
         assertEquals(ProFeature.DEVICE_SCAN, GallerySaveGate.featureFor(s, deviceScan = true))
         items = 20
         meshes = 0

@@ -1,5 +1,8 @@
 package com.spaceview.app.furniture
 
+import com.spaceview.app.common.spokenUnit
+import com.spaceview.app.common.spokenText
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -302,8 +305,10 @@ private fun OverallSummary(t: FurnitureTemplate, inputs: FurnitureInputs, params
             for (id in FurnitureFlow.REQUIRED) {
                 val d = FurnitureFlow.dimension(inputs, params, id) ?: continue
                 Row {
-                    Text(stringResource(FurnitureLabels.param(t, id)), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(96.dp))
-                    Text(FurnitureFormat.dimension(d, units), style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(FurnitureLabels.param(t, id)), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.widthIn(min = 96.dp))
+                    val dimText = FurnitureFormat.dimension(d, units)
+                    val dimSpoken = spokenText(dimText)
+                    Text(dimText, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.semantics { contentDescription = dimSpoken })
                 }
             }
         }
@@ -390,9 +395,10 @@ internal fun FurnitureReviewScreen(
                     stringResource(R.string.furniture_still_needed, missing.map { stringResource(FurnitureLabels.param(t, it)) }.joinToString(", ")),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 )
             }
-            if (state.saveFailed) Text(stringResource(R.string.furniture_save_failed), color = MaterialTheme.colorScheme.error)
+            if (state.saveFailed) Text(stringResource(R.string.furniture_save_failed), color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             state.needsPro?.let { feature ->
                 InstrumentCard(Modifier.testTag("furniture_needs_pro")) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -424,13 +430,27 @@ private fun ParamRow(t: FurnitureTemplate, spec: ParamSpec, inputs: FurnitureInp
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyMedium)
-            Text(FurnitureFormat.dimension(d, units), style = MaterialTheme.typography.titleLarge)
+            val dimText = FurnitureFormat.dimension(d, units)
+            val dimSpoken = spokenText(dimText)
+            Text(dimText, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { contentDescription = dimSpoken })
             when (d.source) {
                 DimensionSource.TYPED -> Text(stringResource(R.string.furniture_typed), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 DimensionSource.PRESET -> Text(stringResource(R.string.furniture_typical), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 DimensionSource.MEASURED -> Unit
             }
-            if (error != null) Text(FurnitureFormat.error(error, label, units), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            if (error != null) {
+                val errorText = FurnitureFormat.error(error, label, units)
+                val errorSpoken = spokenText(errorText)
+                Text(
+                    errorText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.semantics {
+                        contentDescription = errorSpoken
+                        liveRegion = LiveRegionMode.Polite
+                    },
+                )
+            }
         }
         val editLabel = stringResource(R.string.furniture_edit_title, label)
         TextButton(onClick = { onEdit(spec.id) }, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = editLabel }) {
@@ -470,6 +490,7 @@ internal fun LengthDialog(
                     value = text,
                     onValueChange = { text = it.take(16) },
                     singleLine = true,
+                    label = { Text(label) },
                     suffix = { Text(unit.symbol) },
                     isError = text.isNotEmpty() && (parsed == null || rangeError != null),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
@@ -477,13 +498,31 @@ internal fun LengthDialog(
                 )
                 when {
                     text.isNotEmpty() && parsed == null ->
-                        Text(stringResource(R.string.gallery_edit_invalid), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                    rangeError != null ->
-                        Text(FurnitureFormat.error(rangeError, label, units), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            stringResource(R.string.gallery_edit_invalid),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        )
+                    rangeError != null -> {
+                        val rangeText = FurnitureFormat.error(rangeError, label, units)
+                        val rangeSpoken = spokenText(rangeText)
+                        Text(
+                            rangeText,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.semantics {
+                                contentDescription = rangeSpoken
+                                liveRegion = LiveRegionMode.Polite
+                            },
+                        )
+                    }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (u in GalleryFormatter.EditUnit.entries) {
+                        val unitName = spokenUnit(u.symbol)
                         FilterChip(
+                            modifier = Modifier.semantics { contentDescription = unitName },
                             selected = u == unit,
                             onClick = {
                                 // Convert what is typed so switching units never changes the length.
@@ -533,7 +572,9 @@ internal fun FurnitureSavedScreen(item: GalleryItem?, units: UnitPreference, onP
                     )
                 }
                 Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(GalleryFormatter.shareDims(item, units), style = MaterialTheme.typography.bodyMedium)
+                val dims = GalleryFormatter.shareDims(item, units)
+                val dimsSpoken = spokenText(dims)
+                Text(dims, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.semantics { contentDescription = dimsSpoken })
             }
             Spacer(Modifier.heightIn(min = 8.dp))
             PrimaryButton(stringResource(R.string.gallery_place), onPlace, modifier = Modifier.testTag("furniture_place"))

@@ -111,7 +111,8 @@ fun AccuracyBadge(
 ) {
     val color = accuracyColor(quality, onDarkChrome)
     val description = stringResource(quality.contentDescriptionRes()).let { q ->
-        if (toleranceSpoken == null) q else stringResource(R.string.a11y_badge_with_tolerance, q, toleranceSpoken)
+        // M5 a11y: a visible "± 0.5 cm" passed as the spoken form is still spoken out in words.
+        if (toleranceSpoken == null) q else stringResource(R.string.a11y_badge_with_tolerance, q, spokenText(toleranceSpoken))
     }
     val textColor = if (onDarkChrome) SpaceViewTheme.colors.onArChrome else MaterialTheme.colorScheme.onSurface
     Surface(

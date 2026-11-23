@@ -1,5 +1,11 @@
 package com.spaceview.app.ui.home
 
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
+import com.spaceview.app.common.spokenText
+import androidx.compose.ui.semantics.contentDescription
 import android.content.res.Configuration
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Canvas
@@ -54,6 +60,8 @@ fun HomeScreen(
     onGallery: () -> Unit,
     modifier: Modifier = Modifier,
     onFurniture: () -> Unit = {},
+    /** N2: the gallery-cap check behind "Scan an object" is running (it can wait for the entitlement at cold start). */
+    scanChecking: Boolean = false,
 ) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -79,7 +87,12 @@ fun HomeScreen(
             ModeRow(R.string.home_distance, R.string.home_distance_detail) { onMeasure(MeasureMode.DISTANCE) }
             ModeRow(R.string.home_height, R.string.home_height_detail) { onMeasure(MeasureMode.HEIGHT) }
             ModeRow(R.string.home_rectangle, R.string.home_rectangle_detail) { onMeasure(MeasureMode.RECTANGLE) }
-            ModeRow(R.string.home_scan_object, R.string.home_scan_object_detail, onClick = onScan)
+            RowCard(
+                stringResource(R.string.home_scan_object),
+                stringResource(if (scanChecking) R.string.furniture_checking else R.string.home_scan_object_detail),
+                onClick = onScan,
+                busy = scanChecking,
+            )
             ModeRow(R.string.home_furniture, R.string.home_furniture_detail, onClick = onFurniture)
             ModeRow(R.string.home_gallery, R.string.home_gallery_detail, onClick = onGallery)
             Spacer(Modifier.height(4.dp))
@@ -156,7 +169,7 @@ private fun CalibrationRow(onClick: () -> Unit) {
 }
 
 @Composable
-private fun RowCard(title: String, detail: String, onClick: () -> Unit) {
+private fun RowCard(title: String, detail: String, onClick: () -> Unit, busy: Boolean = false) {
     InstrumentCard(onClick = onClick) {
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 14.dp),
@@ -164,9 +177,19 @@ private fun RowCard(title: String, detail: String, onClick: () -> Unit) {
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(text = title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                Text(text = detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val detailSpoken = spokenText(detail)
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.semantics {
+                        contentDescription = detailSpoken
+                        if (busy) liveRegion = LiveRegionMode.Polite
+                    },
+                )
             }
             Spacer(Modifier.width(12.dp))
+            if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         }
     }
 }

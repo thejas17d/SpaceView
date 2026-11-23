@@ -1,5 +1,8 @@
 package com.spaceview.app.onboarding
 
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import com.spaceview.app.common.spokenText
 import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
@@ -190,12 +193,14 @@ private fun PageContent(page: OnboardingPage) {
             textAlign = TextAlign.Center,
             modifier = Modifier.semantics { heading() },
         )
+        val body = stringResource(page.body)
+        val bodySpoken = spokenText(body)
         Text(
-            stringResource(page.body),
+            body,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 480.dp),
+            modifier = Modifier.widthIn(max = 480.dp).semantics { contentDescription = bodySpoken },
         )
         if (page == OnboardingPage.ACCURACY) {
             Text(
@@ -214,7 +219,10 @@ private fun PageIndicator(current: Int, count: Int) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clearAndSetSemantics { contentDescription = description },
+            .clearAndSetSemantics {
+                contentDescription = description
+                liveRegion = LiveRegionMode.Polite
+            },
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
     ) {
         repeat(count) { i ->
