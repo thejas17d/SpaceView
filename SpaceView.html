@@ -116,7 +116,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   <header class="hero" id="top">
     <h1>SpaceView Build Book</h1>
     <p>Every SpaceView document in one place: status, plan, architecture, testing checklist, all research reports, every milestone review, and the FRIDAY engineering skill. 29 documents, in reading order.</p>
-    <div class="meta">Last commit: 6afb9e3 · PLAN v3 review fixes: ad guard on Distance, honest Ground and 500 m cap, box-top faces, true-proportion cutouts · 24 Nov 2026<br>Generated 24 Nov 2026, 16:47 from the Markdown sources by <code>python docs/build_html.py</code>. Edit the .md files, not this page.</div>
+    <div class="meta">Last commit: 0df92e2 · PLAN v3 gate conditions: 2-sight walk guidance, honest far-ground messages, sturdier cutout trust, faster cutout save · 24 Nov 2026<br>Generated 24 Nov 2026, 23:51 from the Markdown sources by <code>python docs/build_html.py</code>. Edit the .md files, not this page.</div>
     <ol class="milestones" aria-label="Milestones"><li class="ms ms-done"><span class="ms-id">M0</span><span class="ms-name">Scaffold + CI</span><span class="ms-state">Done</span></li><li class="ms ms-done"><span class="ms-id">M1</span><span class="ms-name">Measurement engine</span><span class="ms-state">Done</span></li><li class="ms ms-done"><span class="ms-id">M2</span><span class="ms-name">Measure mode</span><span class="ms-state">Done</span></li><li class="ms ms-done"><span class="ms-id">M3</span><span class="ms-name">Scan → Gallery</span><span class="ms-state">Done</span></li><li class="ms ms-done"><span class="ms-id">M4</span><span class="ms-name">Place in room + Pro base</span><span class="ms-state">Done</span></li><li class="ms ms-done"><span class="ms-id">M5</span><span class="ms-name">Templates, Smart Measure, ads, Hindi</span><span class="ms-state">Done</span></li><li class="ms ms-active"><span class="ms-id">D</span><span class="ms-name">On-device 3D scan (spike on Pixel 10a)</span><span class="ms-state">Partly done</span></li><li class="ms ms-next"><span class="ms-id">M6</span><span class="ms-name">Perf, size, release</span><span class="ms-state">Next</span></li></ol>
   </header>
   <section class="doc" id="doc-project-guide"><header class="doc-head"><span class="doc-group">Start here</span><span class="doc-path">docs/PROJECT-GUIDE.md · updated 06 Nov 2026, 11:22</span></header><h2 id="doc-project-guide--spaceview-project-guide-plain-english" class="doc-h1">SpaceView: Project guide (plain English)</h2>
@@ -1537,7 +1537,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 </tr>
 </tbody>
 </table></div>
-</section><section class="doc" id="doc-handoff"><header class="doc-head"><span class="doc-group">Status</span><span class="doc-path">HANDOFF.md · updated 24 Nov 2026, 16:47</span></header><h2 id="doc-handoff--spaceview-handoff-read-this-first" class="doc-h1">SpaceView — Handoff (read this first)</h2>
+</section><section class="doc" id="doc-handoff"><header class="doc-head"><span class="doc-group">Status</span><span class="doc-path">HANDOFF.md · updated 24 Nov 2026, 23:51</span></header><h2 id="doc-handoff--spaceview-handoff-read-this-first" class="doc-h1">SpaceView — Handoff (read this first)</h2>
 <p>Living context file so any new session/LLM can continue. Updated after every step of work.</p>
 <p><em>Last updated: 2026-11-24 — PLAN v3 (2D v1) built, reviewed and gated; gate conditions R1–R3 and R5 closed (see the end of the milestone list); R4 = user sign-off on Distance limits or the zoomed-aim plan. APKs: builds/SpaceView-v3-*.apk.</em></p>
 <h2 id="doc-handoff--what-spaceview-is">What SpaceView is</h2>
@@ -2209,6 +2209,29 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
 <li><strong>Release dex:</strong> 0 debug-only strings.</li>
 </ul>
 </li>
+<li><strong>CI run 45382869677 (0df92e2): GREEN.</strong></li>
+<li><strong>2026-11-24 Play Console:</strong> app created with package <strong><code>com.spaceview.app</code></strong> (no public Play app had it). The user is at Internal testing.
+<ul>
+<li><strong>Upload key</strong> generated in <code>C:\Users\Kanishk\Documents\SpaceView-keys\spaceview-upload.jks</code> (PKCS12, alias <code>upload</code>, RSA 4096, SHA-256 0E:70:30:B5…:99:11:E3). The passwords are in the README beside it. <strong>Never commit it; the user must back it up.</strong> Later: add it as CI secrets (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD).</li>
+<li><strong>First AAB:</strong> <code>builds/SpaceView-0.9.0-vc1-internal.aab</code> (versionCode 1, versionName 0.9.0, commit 0df92e2), signed with the upload key.
+<ul>
+<li>Built <strong>without</strong> REQUIRE_RELEASE_CONFIG, so: Google <strong>test ads</strong>, no licence key (Pro purchases can't verify yet), and empty support email / privacy URL. Internal track only.</li>
+<li><strong>The next upload must use versionCode ≥ 2.</strong></li>
+</ul>
+</li>
+<li>Play App Signing: Google-generated key recommended.</li>
+</ul>
+</li>
+<li><strong>2026-11-24 internal testing LIVE:</strong> release 1 (0.9.0) is published to internal testing. The user installed it from Play on the Pixel 10a: &quot;everything seems fine&quot;. The preview had only 2 warnings: no testers yet, and no native debug symbols (from ARCore/Filament).</li>
+<li><strong>Support email: <code>fableformlabs@gmail.com</code></strong> (user, 2026-11-24).</li>
+<li><strong>Privacy policy:</strong> <code>docs/privacy/index.html</code> (+ <code>docs/.nojekyll</code>).
+<ul>
+<li>Target URL: <strong>https://thejas17d.github.io/SpaceView/privacy/</strong> once the repo owner enables GitHub Pages (Settings → Pages → Deploy from branch <code>main</code>, folder <code>/docs</code>).</li>
+<li>It matches Data safety §6.3 and <code>help_privacy_body</code>.</li>
+<li>The developer is not named, only the email.</li>
+</ul>
+</li>
+<li><strong>Next user steps:</strong> create the <code>pro</code> subscription (<code>monthly</code> ₹129, <code>yearly</code> ₹799 with <code>trial7</code>, prepaid <code>pass30</code> ₹149; the user may lower the prices since 3D is gone), send the licence key (Monetization setup → Licensing), add licence testers, then AdMob IDs.</li>
 <li>If resuming after a crash: run <code>git status</code> to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.</li>
 </ul>
 <h2 id="doc-handoff--log">Log</h2>

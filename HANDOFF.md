@@ -453,6 +453,20 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
   - **Tests:** engine 238 / ar 165 / data 70 (1 skip) / app 340 (1 skip), 0 failures; Kover OK.
   - **Builds and lint:** assembleDebug and assembleRelease pass (release 20,281,858 B); lint 0 errors (app 5 warnings).
   - **Release dex:** 0 debug-only strings.
+- **CI run 45382869677 (0df92e2): GREEN.**
+- **2026-11-24 Play Console:** app created with package **`com.spaceview.app`** (no public Play app had it). The user is at Internal testing.
+  - **Upload key** generated in `C:\Users\Kanishk\Documents\SpaceView-keys\spaceview-upload.jks` (PKCS12, alias `upload`, RSA 4096, SHA-256 0E:70:30:B5…:99:11:E3). The passwords are in the README beside it. **Never commit it; the user must back it up.** Later: add it as CI secrets (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD).
+  - **First AAB:** `builds/SpaceView-0.9.0-vc1-internal.aab` (versionCode 1, versionName 0.9.0, commit 0df92e2), signed with the upload key.
+    - Built **without** REQUIRE_RELEASE_CONFIG, so: Google **test ads**, no licence key (Pro purchases can't verify yet), and empty support email / privacy URL. Internal track only.
+    - **The next upload must use versionCode ≥ 2.**
+  - Play App Signing: Google-generated key recommended.
+- **2026-11-24 internal testing LIVE:** release 1 (0.9.0) is published to internal testing. The user installed it from Play on the Pixel 10a: "everything seems fine". The preview had only 2 warnings: no testers yet, and no native debug symbols (from ARCore/Filament).
+- **Support email: `fableformlabs@gmail.com`** (user, 2026-11-24).
+- **Privacy policy:** `docs/privacy/index.html` (+ `docs/.nojekyll`).
+  - Target URL: **https://thejas17d.github.io/SpaceView/privacy/** once the repo owner enables GitHub Pages (Settings → Pages → Deploy from branch `main`, folder `/docs`).
+  - It matches Data safety §6.3 and `help_privacy_body`.
+  - The developer is not named, only the email.
+- **Next user steps:** create the `pro` subscription (`monthly` ₹129, `yearly` ₹799 with `trial7`, prepaid `pass30` ₹149; the user may lower the prices since 3D is gone), send the licence key (Monetization setup → Licensing), add licence testers, then AdMob IDs.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
 ## Log
