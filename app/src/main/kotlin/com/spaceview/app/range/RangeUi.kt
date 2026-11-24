@@ -45,9 +45,6 @@ internal object RangeUi {
         SightFailure.NOT_TRACKING -> R.string.range_sight_not_tracking
     }
 
-    /** A 2-sight refusal can be fixed by retaking sight 2 (sight 1 still valid); tracking loss needs a fresh start. */
-    fun canRetake(r: RangeRejection): Boolean = r != RangeRejection.TRACKING_LOST && r != RangeRejection.INVALID_INPUT
-
     /** The reading's text, never with more digits than its ± supports. */
     fun text(r: RangeReading, imperial: Boolean): RangeText = RangeFormat.format(r.distance, imperial)
 

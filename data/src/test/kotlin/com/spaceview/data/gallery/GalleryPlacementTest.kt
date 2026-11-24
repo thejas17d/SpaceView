@@ -34,10 +34,12 @@ class GalleryPlacementTest {
     private val cacheRoot get() = File(tmp.root, "cache")
     private val galleryDir get() = File(filesRoot, "gallery")
 
+    private val logged = java.util.Collections.synchronizedList(ArrayList<String>())
+
     private fun repo(dao: FakeGalleryDao = FakeGalleryDao()) =
         GalleryRepository(
             dao, filesRoot, JvmImageCodec, clock = { now }, io = Dispatchers.IO, transactions = FakeTransactions(dao),
-            cacheDir = cacheRoot,
+            cacheDir = cacheRoot, log = { logged += it },
         )
 
     private val jpeg: ByteArray by lazy { JvmImageIo.encodeJpeg(640, 480, TestPhotos.typicalFrame(640, 480), 0.9f) }
@@ -337,6 +339,10 @@ class GalleryPlacementTest {
         val text = String(glb, Charsets.ISO_8859_1)
         assertTrue("alpha cutout: BLEND + PNG", "\"alphaMode\":\"BLEND\"" in text && "image/png" in text)
         assertEquals(0.48, GlbReader.readInfo(glb)!!.widthM, 0.0)
+        // Gate W1: one timing line per cutout save (logcat `SpaceViewCutout` on debug builds).
+        val line = logged.single()
+        assertTrue(line, line.startsWith("cutout save #$id: PNG ") && " save " in line && "encode " in line)
+        println("CUTOUT LOG: $line")
         println("CUTOUT SIZE (photo-like, saved): model.glb=${item.modelFile.length()} B, cutout.webp=${item.photoFile?.length()} B, thumb=${item.thumbnailFile?.length()} B, total=${item.bytes} B")
     }
 
@@ -346,8 +352,11 @@ class GalleryPlacementTest {
         val w = Dimension.measured(0.48, 0.01); val h = Dimension.measured(0.86, 0.012)
         for ((label, image) in listOf("photo-like 700x1000" to transparentSubject(), "photo-like 1024x1024" to transparentSubject(1024, 1024),
             "noisy 700x1000" to transparentSubject(noisy = true))) {
+            repo.encodeCutout(w, h, "Chair", image) // JIT warm-up, so the timing below is the steady state
+            val t0 = System.nanoTime()
             val e = repo.encodeCutout(w, h, "Chair", image)
-            println("CUTOUT TEXTURE [$label]: ${e.textureSide} px PNG, glb=${e.glb.size} B, picture=${e.frontWidth}x${e.frontHeight} q${e.frontQuality} ${e.front?.size} B, total=${e.totalBytes} B")
+            val ms = (System.nanoTime() - t0) / 1_000_000
+            println("CUTOUT TEXTURE [$label]: ${e.textureSide} px PNG, glb=${e.glb.size} B, picture=${e.frontWidth}x${e.frontHeight} q${e.frontQuality} ${e.front?.size} B, total=${e.totalBytes} B, encode=$ms ms (JVM)")
             assertTrue(label, e.totalBytes <= GalleryRepository.MAX_CUTOUT_BYTES)
             assertTrue("$label: transparent, never a plain panel", e.textureSide > 0)
             if (label.startsWith("photo-like")) assertTrue("$label: ${e.textureSide} px", e.textureSide >= 640)

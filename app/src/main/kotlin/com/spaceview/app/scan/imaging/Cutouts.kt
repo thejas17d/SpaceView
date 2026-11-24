@@ -43,11 +43,12 @@ object CutoutMaker {
         if (mask == null || mask.size != photo.argb.size) return CutoutChoice(photo, null, CutoutStatus.NOT_AVAILABLE)
         if (!CutoutPixels.trusted(CutoutPixels.stats(mask))) return CutoutChoice(photo, null, CutoutStatus.NOT_SURE)
         val masked = CutoutPixels.applyMask(photo, mask)
-        // Trust check only (the bounds never crop): the outline was measured around the object, so whatever the mask
-        // keeps visible (any alpha, so faint thin parts such as chair legs count) must nearly fill it on both axes. A
+        // Trust check only (the extent never crops): the outline was measured around the object, so whatever the mask
+        // keeps visible (any alpha, so faint thin parts such as chair legs count) must nearly fill it on both axes. The
+        // extent ignores isolated specks (gate G5: a stray pixel near each edge must not let a legless mask pass). A
         // mask that leaves a large part of the outline empty found something else, or lost part of the object: keep
         // the rectangle rather than save an object with missing parts.
-        val bounds = CutoutPixels.alphaBounds(masked, minAlpha = 1) ?: return CutoutChoice(photo, null, CutoutStatus.NOT_SURE)
+        val bounds = CutoutPixels.visibleExtent(masked) ?: return CutoutChoice(photo, null, CutoutStatus.NOT_SURE)
         val bw = bounds[2] - bounds[0]; val bh = bounds[3] - bounds[1]
         if (bw < photo.width * MIN_BOUNDS_SHARE || bh < photo.height * MIN_BOUNDS_SHARE) {
             return CutoutChoice(photo, null, CutoutStatus.NOT_SURE)

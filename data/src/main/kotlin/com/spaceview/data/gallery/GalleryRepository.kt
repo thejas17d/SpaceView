@@ -151,6 +151,11 @@ class GalleryRepository(
     private val cacheDir: File? = null,
     /** fsyncs a directory after a rename into it (no-op on the JVM; `Os.fsync` on Android). */
     private val syncDir: (File) -> Unit = {},
+    /**
+     * Cutout save timing and sizes, one line per save (PLAN v3 gate W1). [create] wires it to logcat tag
+     * `SpaceViewCutout` on debuggable builds only; never any image data.
+     */
+    private val log: (String) -> Unit = {},
 ) {
     private val layout = StorageLayout(filesDir)
     private val writeLock = Mutex()
@@ -203,6 +208,7 @@ class GalleryRepository(
         for (dim in listOf(w, h, d)) validate(dim, forSave = true)
         val cutout = draft.cutout
         val modelKind = if (cutout != null) ModelKind.CUTOUT else ModelKind.PROXY_BOX
+        val t0 = System.nanoTime()
         val encoded = withContext(cpu) {
             if (cutout != null) {
                 encodeCutout(w, h, displayName(draft.kind, draft.label), cutout.image)
@@ -215,10 +221,23 @@ class GalleryRepository(
             encoded.glb, encoded.front?.takeIf { encoded.thumbnail != null }, encoded.thumbnail?.takeIf { encoded.front != null }, photoName,
             encoded.budget,
         )
-        return commitLocked(staged) { now ->
+        val t1 = System.nanoTime()
+        val id = commitLocked(staged) { now ->
             baseRow(draft.kind, w, h, d, draft.quality, draft.calibrated, draft.calibrationFactor, draft.deviceTier, draft.arcoreVersion, draft.label, now)
                 .copy(modelKind = modelKind.name, captureMethod = draft.captureMethod?.name)
         }
+        if (cutout != null) {
+            val t2 = System.nanoTime()
+            runCatching {
+                log(
+                    "cutout save #$id: ${when { encoded.textureSide > 0 -> "PNG ${encoded.textureSide} px (alpha)"; encoded.front != null -> "JPEG (opaque)"; else -> "plain panel" }}, " +
+                        "glb ${encoded.glb.size} B, picture ${encoded.frontWidth}x${encoded.frontHeight} q${encoded.frontQuality}, " +
+                        "total ${encoded.totalBytes} B of ${encoded.budget}, encode ${(t1 - t0) / 1_000_000} ms, " +
+                        "write ${(t2 - t1) / 1_000_000} ms, save ${(t2 - t0) / 1_000_000} ms",
+                )
+            }
+        }
+        return id
     }
 
     /** The files of a new item: the model always, a photo and a thumbnail when present. */
@@ -691,7 +710,11 @@ class GalleryRepository(
         return plain()
     }
 
-    /** A transparent cutout within [MAX_CUTOUT_BYTES] (see [encodeCutout]), or null when nothing fits. */
+    /**
+     * A transparent cutout within [MAX_CUTOUT_BYTES] (see [encodeCutout]), or null when nothing fits. The picture is the
+     * normal `cutout.webp` (1024 px, q82, stepping down only if the texture cannot fit beside it); the texture takes
+     * the rest of the budget ([transparentTexture]: one cheap probe encode picks the starting rung).
+     */
     private fun encodeTransparentCutout(w: Dimension, h: Dimension, name: String, image: ArgbImage): Encoded? {
         val thumbImage = codec.fromPixels(CutoutPixels.downscale(image, THUMB_LONG_SIDE))
         val thumb = try {
@@ -699,22 +722,43 @@ class GalleryRepository(
         } finally {
             thumbImage.release()
         }
-        val pictures = HashMap<Int, GalleryImage>()
-        val photos = HashMap<Pair<Int, Int>, ByteArray>()
-        try {
-            for (texSide in CUTOUT_TEXTURE_SIDES) {
-                val png = cutoutPng(image, texSide)
-                val glb = GlbWriter.writeCutout(w.meters, h.meters, png, GlbWriter.CutoutAlpha.BLEND, name = name)
-                if (glb.size + thumb.size > MAX_CUTOUT_BYTES) continue
-                for (side in FRONT_LONG_SIDES) for (q in FRONT_QUALITIES) {
-                    val img = pictures.getOrPut(side) { codec.fromPixels(CutoutPixels.downscale(image, side)) }
-                    val photo = photos.getOrPut(side to q) { img.webp(q) }
-                    val out = Encoded(glb, photo, thumb, img.width, img.height, q, MAX_CUTOUT_BYTES, textureSide = minOf(texSide, maxOf(image.width, image.height)))
-                    if (out.totalBytes <= MAX_CUTOUT_BYTES) return out
+        val pngs = HashMap<Int, ByteArray>()
+        for (side in FRONT_LONG_SIDES) {
+            val img = codec.fromPixels(CutoutPixels.downscale(image, side))
+            try {
+                for (q in FRONT_QUALITIES) {
+                    val photo = img.webp(q)
+                    val glbBudget = MAX_CUTOUT_BYTES - photo.size - thumb.size
+                    val (texSide, glb) = transparentTexture(w, h, name, image, glbBudget, pngs) ?: continue
+                    return Encoded(glb, photo, thumb, img.width, img.height, q, MAX_CUTOUT_BYTES, textureSide = texSide)
                 }
+            } finally {
+                img.release()
             }
-        } finally {
-            pictures.values.forEach { it.release() }
+        }
+        return null
+    }
+
+    /**
+     * The largest PNG texture rung whose cutout GLB fits [glbBudget], as (texture long side, GLB); null when even the
+     * smallest does not. PLAN v3 gate W1 (save time): instead of encoding every rung from 1024 px down, one probe
+     * encode at [CUTOUT_PROBE_SIDE] gives the bytes per pixel, and the first rung tried is the largest one whose
+     * estimate, with [ESTIMATE_MARGIN], fits; a rung that still does not fit falls through to the next. Typically two
+     * encodes (the probe and the chosen rung) instead of up to seven. Encodes are cached in [pngs] by side.
+     */
+    private fun transparentTexture(
+        w: Dimension, h: Dimension, name: String, image: ArgbImage, glbBudget: Long, pngs: MutableMap<Int, ByteArray>,
+    ): Pair<Int, ByteArray>? {
+        val long = maxOf(image.width, image.height)
+        val sides = CUTOUT_TEXTURE_SIDES.map { minOf(it, long) }.distinct()
+        fun pixels(side: Int): Double = image.width.toDouble() * image.height * (side.toDouble() / long).let { it * it }
+        fun png(side: Int) = pngs.getOrPut(side) { cutoutPng(image, side) }
+        val probe = sides.firstOrNull { it <= CUTOUT_PROBE_SIDE } ?: sides.last()
+        val bytesPerPixel = png(probe).size / pixels(probe)
+        val start = sides.indexOfFirst { it <= probe || bytesPerPixel * pixels(it) * ESTIMATE_MARGIN + GLB_OVERHEAD_BYTES <= glbBudget }
+        for (side in sides.drop(start.coerceAtLeast(0))) {
+            val glb = GlbWriter.writeCutout(w.meters, h.meters, png(side), GlbWriter.CutoutAlpha.BLEND, name = name)
+            if (glb.size <= glbBudget) return side to glb
         }
         return null
     }
@@ -731,10 +775,7 @@ class GalleryRepository(
         try {
             val pixels = decoded.pixels()
             if (!pixels.isOpaque) {
-                for (texSide in CUTOUT_TEXTURE_SIDES) {
-                    val glb = GlbWriter.writeCutout(w.meters, h.meters, cutoutPng(pixels, texSide), GlbWriter.CutoutAlpha.BLEND, name = name)
-                    if (glb.size + otherBytes <= MAX_CUTOUT_BYTES) return glb
-                }
+                transparentTexture(w, h, name, pixels, MAX_CUTOUT_BYTES - otherBytes, HashMap())?.let { return it.second }
             }
             for (q in FRONT_QUALITIES) {
                 val glb = GlbWriter.writeCutout(w.meters, h.meters, decoded.jpeg(q), name = name)
@@ -973,6 +1014,15 @@ class GalleryRepository(
          * before the stored picture's size or quality does (the model in the room matters most).
          */
         internal val CUTOUT_TEXTURE_SIDES = intArrayOf(1024, 896, 768, 640, 512, 384, 256)
+
+        /** The one rung always encoded first, to estimate the PNG's bytes per pixel (gate W1). */
+        private const val CUTOUT_PROBE_SIDE = 512
+
+        /** Safety factor on the probe's size estimate for larger rungs (bytes per pixel vary by ~±10 % with size). */
+        private const val ESTIMATE_MARGIN = 1.1
+
+        /** A cutout GLB's bytes besides its image (JSON, geometry, padding): ~1.5 KB, rounded up. */
+        private const val GLB_OVERHEAD_BYTES = 4_096L
         const val THUMB = "thumb.webp"
         private const val STAGING_PREFIX = ".tmp-"
         private const val SHARE_DIR = "share"
@@ -1068,6 +1118,11 @@ class GalleryRepository(
                 transactions = RoomGalleryTransactions(db),
                 cacheDir = app.cacheDir,
                 syncDir = ::fsyncDirectory,
+                log = if (app.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+                    { msg -> android.util.Log.i("SpaceViewCutout", msg) }
+                } else {
+                    {}
+                },
             )
         }
     }

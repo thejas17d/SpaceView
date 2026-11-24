@@ -65,6 +65,9 @@ class CutoutMakerTest {
         // Legs lost completely (confidence 0.1): the visible part spans 63 % of the height.
         val legless = FloatArray(w * h) { i -> if (i % w in 2 until 38 && i / w < 19) 0.95f else 0.1f }
         assertEquals(CutoutStatus.NOT_SURE, CutoutMaker.choose(photo, false, legless).status)
+        // Gate G5: the same legless mask with a stray speck near each edge (bottom corners, sides) still fails.
+        val specks = legless.copyOf().also { m -> for ((x, y) in listOf(0 to 29, 39 to 29, 0 to 0, 39 to 15, 20 to 29)) m[y * w + x] = 0.9f }
+        assertEquals("specks don't stretch the extent", CutoutStatus.NOT_SURE, CutoutMaker.choose(photo, false, specks).status)
         // A small blob in a corner is not the measured object.
         val blob = CutoutMaker.choose(photo, false, subjectMask(0, 12, 0, 12))
         assertEquals(CutoutStatus.NOT_SURE, blob.status)

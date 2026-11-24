@@ -2,7 +2,7 @@
 <!-- Hindi: Distance (rangefinder, PLAN v3 W4) and the W5/W6 measuring hints. Numbers, units (m, ft) and ± stay as in English. -->
 <resources>
     <string name="home_rangefinder">कितनी दूर?</string>
-    <string name="home_rangefinder_detail">निशाने वाली किसी भी जगह की दूरी, 500 m तक, हमेशा ± के साथ।</string>
+    <string name="home_rangefinder_detail">निशाने वाली जगह की दूरी: पास की, पास की ज़मीन पर, या दो निशानों से दूर की। हमेशा ± के साथ।</string>
 
     <string name="range_title">कितनी दूर?</string>
     <string name="range_close">कितनी दूर बंद करें</string>

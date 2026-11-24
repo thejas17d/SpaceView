@@ -11,7 +11,6 @@ import com.spaceview.engine.range.RangeMethod
 import com.spaceview.engine.range.RangeReading
 import com.spaceview.engine.range.RangeRejection
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,13 +21,6 @@ class RangeUiTest {
         RangeIssue.entries.forEach { assertTrue(RangeUi.issueRes(it) != 0) }
         RangeRejection.entries.forEach { assertTrue(RangeUi.rejectionRes(it) != 0) }
         SightFailure.entries.forEach { assertTrue(RangeUi.sightFailureRes(it) != 0) }
-    }
-
-    @Test
-    fun trackingLossNeedsAFreshStartOtherRefusalsCanRetakeSight2() {
-        assertFalse(RangeUi.canRetake(RangeRejection.TRACKING_LOST))
-        assertTrue(RangeUi.canRetake(RangeRejection.NEAR_PARALLEL))
-        assertTrue(RangeUi.canRetake(RangeRejection.INCONSISTENT_SIGHTS))
     }
 
     @Test

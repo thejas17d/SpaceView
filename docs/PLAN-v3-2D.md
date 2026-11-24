@@ -52,6 +52,14 @@ The user tested the app on a **Google Pixel 10a** (ARCore Depth API supported, n
 - The alpha must render correctly, with no black halo.
 
 ### W4. Rangefinder: distance to a point, ≤ 500 m (Builder A)
+
+> **As built (gate fixes, 2026-11-24), pending the user's sign-off (gate R4):**
+> - **Near (AR hit):** to 8 m.
+> - **Ground (one sight, level ground):** about 8.5 m at hand height, 12–14 m from a 2.5 m camera.
+> - **2-sight with the full 30 m walk:** numbers up to about 390–400 m. The 500 m cap is decided on the whole ±95 interval, so a reading is shown only when even its upper end is ≤ 500 m.
+> - **Why:** the limit comes from the 0.24° aim error (2 VGA px).
+> - **Proposed next step to reach 500 m:** a zoomed aim on the full-resolution CPU image and a longer allowed walk (50–60 m). Not started.
+> - The 500 m figures below are the design target.
 - **New mode "Distance"**:
   - Home row + its own screen. Crosshair only, no measuring tools.
   - Result: **line-of-sight distance from the phone to the aimed point, in metres (ft optional by units setting), with ±**, a method badge and the Good/Fair/Rough quality.
@@ -109,7 +117,7 @@ The user tested the app on a **Google Pixel 10a** (ARCore Depth API supported, n
 - **Height:** measuring a 2 m door from 3 m away while tilting up to 60° keeps the point; the result lies inside its ±.
 - **Distance:**
   - 5 m tape check inside ±;
-  - 30 m (Ground) inside ±;
+  - ~~30 m (Ground) inside ±~~ → as built: 8 m (Ground) inside ±, and 12 m says "Too far for one sight" (Ground ends at about 8.5 m at hand height);
   - 100 m and 300 m (2-sight) against a map, GPS or known distance, inside ±;
   - 600 m shows "out of range".
 - **Cutout:** a photo frame and a chair save without a background; Place shows them at true size, with no halo.

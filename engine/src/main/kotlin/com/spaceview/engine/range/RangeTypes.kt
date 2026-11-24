@@ -110,6 +110,13 @@ object RangeLimits {
     const val MAX_BASELINE_M = 30.0
 
     /**
+     * A walk of at least this fraction of [MAX_BASELINE_M] counts as the full walk (gate G1): under it, a point whose
+     * interval still reaches past [MAX_RANGE_M] is "walk further"; from it on, "out of range". The margin absorbs the
+     * VIO error of the walked distance itself. Tunable.
+     */
+    const val FULL_WALK_FRACTION = 0.9
+
+    /**
      * Beyond this, k·σ/value of an inverse-law quantity (d ∝ 1/angle) makes the 95% interval meaningless (its upper
      * end would be more than 2× the value): refused as [RangeRejection.TOO_UNCERTAIN].
      */

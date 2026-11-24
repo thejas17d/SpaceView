@@ -3,7 +3,7 @@
 <resources>
     <!-- Home row (wired by the orchestrator) -->
     <string name="home_rangefinder">How far?</string>
-    <string name="home_rangefinder_detail">Distance to any point you aim at, up to 500 m, always with ±.</string>
+    <string name="home_rangefinder_detail">Distance to a point you aim at: close up, on the ground nearby, or far away with two sights. Always with ±.</string>
 
     <!-- Distance screen -->
     <string name="range_title">How far?</string>

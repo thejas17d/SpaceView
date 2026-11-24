@@ -138,8 +138,12 @@ object RayTriangulation {
         val m = RangeUncertainty.inverseLaw(distance, rel, model.sigmaMargin)
             ?: return result(RangeOutcome.Rejected(RangeRejection.TOO_UNCERTAIN), expectedMiss)
         // The cap is decided on the interval, not the point estimate (review MINOR 1): a number only when the whole
-        // ±95 interval is within the limit; otherwise the point may be beyond it.
-        if (m.high95 > maxRangeM) return result(RangeOutcome.OutOfRange, expectedMiss)
+        // ±95 interval is within the limit. While the walk is still under the longest the app asks for, a point within
+        // the limit is "not accurate enough yet: walk further", not "out of range" (gate G1).
+        if (m.high95 > maxRangeM) {
+            val walkFurther = baseline < RangeLimits.MAX_BASELINE_M * RangeLimits.FULL_WALK_FRACTION
+            return result(if (walkFurther) RangeOutcome.Rejected(RangeRejection.TOO_UNCERTAIN) else RangeOutcome.OutOfRange, expectedMiss)
+        }
         return result(RangeOutcome.Ok(RangeReading(m, RangeMethod.TWO_SIGHT)), expectedMiss)
     }
 

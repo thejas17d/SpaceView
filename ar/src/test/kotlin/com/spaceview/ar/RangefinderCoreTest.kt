@@ -101,6 +101,107 @@ class RangefinderCoreTest {
     }
 
     @Test
+    fun aFarHitOnOpenGroundSaysTooFarNotSomethingInTheWay() {
+        // Gate G2: depth on, open paving 12 m away. The hit is on the floor: nothing is in the way, Ground is just too far.
+        val p = groundPoint(12.0)
+        val hit = HitSample(p, Vec3.UP, HitKind.DEPTH_POINT, p.distanceTo(eye))
+        hold(40, eye, p, hit)
+        assertNull(core.live)
+        assertEquals(RangeIssue.GROUND_TOO_FAR, core.liveIssue)
+    }
+
+    /** A ray from [from] pitched [depressionDeg] below the horizon, straight ahead (as a target point 10 m out). */
+    private fun aimDown(from: Vec3, depressionDeg: Double): Vec3 {
+        val t = Math.toRadians(depressionDeg)
+        return from + Vec3(0.0, -kotlin.math.sin(t), -kotlin.math.cos(t)) * 10.0
+    }
+
+    @Test
+    fun aSlowPanOffTheObstacleOntoOpenGroundClearsTheBlock() {
+        // Gate G3a: blocked on a wall foot, then the crosshair is lowered slowly (0.07° a frame, about 2°/s) onto the
+        // paving in front. The aim window never restarts, but the block is cleared by the distance moved.
+        val high = Vec3(0.0, 2.5, 0.0)
+        val wallFoot = Vec3(0.0, 0.3, -sqrt(81.0 - 2.2 * 2.2))
+        val hit = HitSample(wallFoot, Vec3(0.0, 0.0, 1.0), HitKind.DEPTH_POINT, wallFoot.distanceTo(high))
+        hold(30, high, wallFoot)
+        hold(5, high, wallFoot, hit)
+        assertEquals(RangeIssue.OFF_GROUND, core.liveIssue)
+        val start = Math.toDegrees(kotlin.math.atan2(2.2, sqrt(81.0 - 2.2 * 2.2)))
+        var deg = start
+        while (deg < start + 2.0) {
+            deg += 0.07
+            frame(high, aimDown(high, deg))
+        }
+        hold(20, high, aimDown(high, deg))
+        assertEquals(RangeMethod.GROUND, core.live!!.method)
+    }
+
+    @Test
+    fun oneNoisyHitAmongFloorFramesDoesNotBlockGround() {
+        // Gate G3b: a single depth point 1 m short and 0.3 m high among 30 frames on open ground at 7 m.
+        val p = groundPoint(7.0)
+        repeat(30) { i ->
+            val outlier = if (i == 15) {
+                val q = eye + (p - eye).normalized() * 6.0 + Vec3(0.0, 0.3, 0.0)
+                HitSample(q, Vec3(0.0, 0.0, 1.0), HitKind.DEPTH_POINT, 6.0)
+            } else {
+                null
+            }
+            frame(eye, p, outlier)
+            assertTrue("frame $i", core.liveIssue != RangeIssue.OFF_GROUND)
+        }
+        assertEquals(RangeMethod.GROUND, core.live!!.method)
+    }
+
+    @Test
+    fun hitsSeenWhileMovingDoNotBlockTheNextAim() {
+        // Gate G3c: walking (LIMITED tracking) past a wall, then stopping to aim at open ground: no block carried over.
+        var pos = eye
+        repeat(20) {
+            pos += Vec3(0.02, 0.0, 0.0)
+            val w = pos + Vec3(0.0, -0.5, -5.0)
+            frame(pos, w, HitSample(w, Vec3(0.0, 0.0, 1.0), HitKind.DEPTH_POINT, w.distanceTo(pos)))
+        }
+        val p = pos + (groundPoint(7.0) - eye)
+        hold(30, pos, p)
+        assertEquals(RangeMethod.GROUND, core.live!!.method)
+    }
+
+    @Test
+    fun aFarTargetGetsTheFullWalkRequestedAndTooUncertainUntilThen() {
+        // Gate G1: a 350 m target. The app must ask for the 30 m walk long before 16 m are walked; a sight 2 at 12 m is
+        // "walk further" (not "out of range"), and the full walk then measures it.
+        val target = Vec3(0.0, 4.0, -350.0)
+        hold(30, eye, target)
+        core.startTwoSight()
+        core.takeSight()
+        hold(RangefinderCore.SIGHT_SAMPLES, eye, target)
+        var pos = eye
+        var askedFullAt = Double.NaN
+        while (pos.x < 12.0) {
+            pos += Vec3(0.02, 0.0, 0.0)
+            frame(pos, target)
+            if (askedFullAt.isNaN() && core.requiredBaselineM == 30.0) askedFullAt = pos.x
+        }
+        assertTrue("asked for 30 m at $askedFullAt m", askedFullAt < 16.0)
+        hold(30, pos, target)
+        core.takeSight()
+        hold(RangefinderCore.SIGHT_SAMPLES, pos, target)
+        assertEquals(RangeOutcome.Rejected(RangeRejection.TOO_UNCERTAIN), core.result)
+        assertTrue(core.retakeSight2())
+        while (pos.x < 30.0) {
+            pos += Vec3(0.02, 0.0, 0.0)
+            frame(pos, target)
+        }
+        hold(30, pos, target)
+        core.takeSight()
+        hold(RangefinderCore.SIGHT_SAMPLES, pos, target)
+        val reading = (core.result as RangeOutcome.Ok).reading
+        assertTrue(abs(reading.distance.value - target.distanceTo(pos)) <= reading.distance.bound95)
+        assertTrue(reading.distance.high95 <= 500.0)
+    }
+
+    @Test
     fun aNearPointAboveTheFloorIsShownAsNearNeverAsGround() {
         // A box top 0.3 m high, 3 m away: Near reads it; Ground (the floor behind it, ~3.8 m) is refused.
         val top = Vec3(0.0, 0.3, -sqrt(9.0 - 1.2 * 1.2))

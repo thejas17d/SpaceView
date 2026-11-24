@@ -2,7 +2,7 @@
 
 Living context file so any new session/LLM can continue. Updated after every step of work.
 
-_Last updated: 2026-11-24 — PLAN v3 (2D focus) after Pixel 10a feedback: 3D removed from v1 (parked on branch next/3d-engine), rangefinder ≤500 m, height vertical plane, surface tuning, background-free cutouts, flat Place, Pro test switch. Builders A+B running. Read docs/PLAN-v3-2D.md._
+_Last updated: 2026-11-24 — PLAN v3 (2D v1) built, reviewed and gated; gate conditions R1–R3 and R5 closed (see the end of the milestone list); R4 = user sign-off on Distance limits or the zoomed-aim plan. APKs: builds/SpaceView-v3-*.apk._
 
 ## What SpaceView is
 Android-first (Google Play) AR app: measure anything precisely; scan an object (e.g. photo frame in a café) → save to "AR Gallery" with exact dimensions → place it in your room at true size. Later: B2B for Indian retailers (Croma, Reliance Digital, furniture), iOS (ARKit/LiDAR).
@@ -400,7 +400,7 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
   - **MINOR 8:** transparent cutouts get their own budget, `MAX_CUTOUT_BYTES = 1 MB`, with a texture ladder of 1024 → 256 px. Opaque cutouts and boxes stay at 0.5 MB. If nothing fits → opaque rectangle.
   - **MINOR 10:** the CI grep now includes `dbg track`.
   - **MINOR 9:** ML Kit's live data-disclosure page (modified 2025-05-14) has no Subject Segmentation section, but its all-features table already covers it → no new Data safety row. Re-check at submission.
-  - **MINOR 11:** TESTING §22 items 12/14/17 updated. `CutoutPixels.crop` is now unused.
+  - **MINOR 11:** TESTING §22 items 12/14/17 updated. (`CutoutPixels.crop` was later removed in the gate round.)
   - Waiting on Builder A.
 - **Builder A's review fixes DONE:**
   - **MAJOR 2:** raw hits are kept at any range; Ground is refused when something is in the way (`OFF_GROUND` hint, a sticky block per steady aim); Near wins when the two disagree.
@@ -419,6 +419,39 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
 - **Full verification (foreground pieces):**
   - **Tests:** engine 236 / ar 160 / data 70 (1 skip) / app 341 (1 skip), 0 failures; Kover OK.
   - **Builds and lint:** assembleDebug and assembleRelease pass (release 20,281,722 B); lint: app release 0 errors / 5 warnings, ar and data clean.
+  - **Release dex:** 0 debug-only strings.
+- **Commit 6afb9e3** (review fixes) pushed; **CI run 45377573154 GREEN**. APKs: `builds/SpaceView-v3-debug.apk` (sha256 782352bf…aac) + `SpaceView-v3-release.apk` (98d62728…998); pre-review APK deleted.
+- **PLAN v3 GATE: PASS WITH CONDITIONS** (`docs/reviews/PLAN-v3-gate.md`). All 5 MAJORs and 11 MINORs FIXED. New MINORs:
+  - **G1:** the interval cap hides the 2-sight walk guidance at about 250–500 m.
+  - **G2:** a far hit always says "something in the way".
+  - **G3:** the Ground block is sticky.
+  - **G4:** the copy and PLAN still say 500 m / 30 m Ground.
+  - **G5:** the 85 % rule is defeated by stray pixels.
+  - **Warnings:** W1 cutout save time unmeasured.
+  - **Doc items:** D1 stale comment, D2 test-only dead code.
+- **Conditions:**
+  - **R1/R2 (Builder A, running):** G1, G2, G3, plus honest Home copy (no "500 m" promise), plus D2 in range.
+  - **R3 (Builder B, running):** G5, cheaper cutout ladder plus a save timing log, plus D1/D2.
+  - **R4 (user):** sign off on the limits, or choose the zoomed-aim improvement. Then update PLAN §1/U2/W4/§5 and the known-limitations draft.
+  - **R5 (orchestrator):** HANDOFF, HTML, commit, CI.
+- **Builder A gate round DONE** (uncommitted). Tests: engine 238 / ar 165 / app range+measure 23, all green.
+  - **G1:** "walk further" (TOO_UNCERTAIN) until 90 % of the 30 m walk; the requested walk is raised from the rough triangulated point.
+  - **G2:** a far hit on open ground now says GROUND_TOO_FAR.
+  - **G3:** the block clears after the aim moves 1°, needs 2 of 3 frames to set, and is dropped when moving or LIMITED.
+  - **Home copy** no longer promises 500 m.
+  - **D2:** `RangeUi.canRetake` removed. TESTING §23 items 7–10 updated.
+  - **New tunables:** `FULL_WALK_FRACTION` 0.9, `BLOCK_VOTES_NEEDED` 2.
+  - **Effective limits:** Near 8 m; Ground about 8.5 m at hand height (12–14 m from a 2.5 m camera); 2-sight with a 30 m walk up to about **390–400 m**.
+  - Waiting on Builder B (R3).
+- **Builder B gate round DONE.**
+  - **G5:** `CutoutPixels.visibleExtent` uses 1–99 % quantiles, so specks are ignored.
+  - **W1:** probe-based texture ladder, IntArray edge fill, faster PNG; JVM save 202–1043 ms (was 1.4–2.8 s).
+  - **Timing log:** logcat `SpaceViewCutout` (debuggable builds only); TESTING §22 item 18: cutout Save ≤ 2 s.
+  - **D1/D2:** stale comment fixed; `crop` and `alphaBounds` removed.
+- **Orchestrator R4 (doc part):** PLAN v3 W4 now has an "As built" box (Near 8 m; Ground ≈ 8.5 m; 2-sight ≈ 390–400 m with a 30 m walk; zoomed-aim proposal); §5's 30 m Ground check is replaced.
+- **Full verification (foreground pieces):**
+  - **Tests:** engine 238 / ar 165 / data 70 (1 skip) / app 340 (1 skip), 0 failures; Kover OK.
+  - **Builds and lint:** assembleDebug and assembleRelease pass (release 20,281,858 B); lint 0 errors (app 5 warnings).
   - **Release dex:** 0 debug-only strings.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 

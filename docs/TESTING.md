@@ -443,15 +443,16 @@ Phone: **Google Pixel 10a**. Install the v3 APK **over** the build you tested be
 15. Gallery: the grid thumbnail and the item photo are the cutout (checkerboard behind a removed background). The item's size, ±, depth and the "Edit dimensions" flow are unchanged; after an edit the model is rebuilt at the new size (still a cutout).
 16. Share from the item and from Saved: WhatsApp and Gmail receive the picture (a `.webp`). Note whether WhatsApp shows the transparent area as black or white (cosmetic; report it).
 17. Size (review MINOR 8): Settings → Delete my data still clears everything. A **transparent** cutout has its own budget of **1 MB** (`MAX_CUTOUT_BYTES`: its texture must be an RGBA PNG); a flat (frame/TV) or undone cutout stays ≤ 0.5 MB. Check with `adb shell run-as com.spaceview.app.debug du -b files/gallery/<id>` and record the sizes and, for the chair, the texture size (expected ≥ 640–768 px for a real photo; JVM measurements are in the HANDOFF). If even the smallest PNG did not fit, the item is saved as the opaque rectangle (never as a plain panel).
-18. Hindi: every new Review note and button is in Hindi; Help → "Scans and cutouts" and the privacy text mention on-device background removal.
+18. **Save time (gate W1): a cutout Save takes ≤ 2 s on the Pixel 10a.** Time it from tapping Save on the chair's Review to the Saved screen (stopwatch), for 3 different objects. On a debug build the exact numbers are in logcat: `adb logcat -s SpaceViewCutout` prints one line per cutout save (`PNG <n> px (alpha)` or `JPEG (opaque)`, GLB and total bytes, `encode … ms`, `write … ms`, `save … ms`). Record them; over 2 s is a finding.
+19. Hindi: every new Review note and button is in Hindi; Help → "Scans and cutouts" and the privacy text mention on-device background removal.
 
 **W3: flat Place in room**
-19. **Chair (Floor):** Place opens on Floor. The chair stands **upright with its bottom edge on the floor** (no gap, not sunk), at true size (check with a tape against the real chair next to it). Move, rotate (it turns about the vertical) and nudge work as before.
-20. **Frame (Wall):** Place opens on Wall. The frame **hangs flat on the wall** (not standing out from it), centred on the reticle; the height slider and "Eye level" work; a quarter turn switches portrait ↔ landscape.
-21. **No halo:** look closely at the chair's edges against a light floor and against a dark one: no black (or white) outline around the object, and the background really is gone (you see the room through the gaps).
-22. Both sides: walk behind a placed cutout: its back shows the same picture (mirrored), never an invisible or black quad.
-23. **Check the fit:** measure a gap or a floor rectangle. The verdict uses the item's **measured** width × height on a wall and width × depth on the floor (a measured depth counts; a frame's preset depth says "Using your typed size"). It never compares against a zero depth.
-24. A legacy proxy box (M3/M4 scan) still places as a 3D box, and a legacy template / mesh as in item 2.
+20. **Chair (Floor):** Place opens on Floor. The chair stands **upright with its bottom edge on the floor** (no gap, not sunk), at true size (check with a tape against the real chair next to it). Move, rotate (it turns about the vertical) and nudge work as before.
+21. **Frame (Wall):** Place opens on Wall. The frame **hangs flat on the wall** (not standing out from it), centred on the reticle; the height slider and "Eye level" work; a quarter turn switches portrait ↔ landscape.
+22. **No halo:** look closely at the chair's edges against a light floor and against a dark one: no black (or white) outline around the object, and the background really is gone (you see the room through the gaps).
+23. Both sides: walk behind a placed cutout: its back shows the same picture (mirrored), never an invisible or black quad.
+24. **Check the fit:** measure a gap or a floor rectangle. The verdict uses the item's **measured** width × height on a wall and width × depth on the floor (a measured depth counts; a frame's preset depth says "Using your typed size"). It never compares against a zero depth.
+25. A legacy proxy box (M3/M4 scan) still places as a 3D box, and a legacy template / mesh as in item 2.
 
 ---
 
@@ -477,22 +478,29 @@ Phone: Google Pixel 10a. **"Use depth" is now ON by default**, so first check it
 6. **Distance, Near:** a 5 m tape check is inside the ±, with the badge "AR point".
 7. **Distance, Ground:**
    - At 6 m and 8 m on level paving, the reading is inside the ± and shows the badges "Ground" and "Assumes the point is on level ground".
-   - At 12 m it usually says "Too far for one sight. Use 2 sights." (the slope allowance is now 0.3°).
+   - **Limit:** one sight on the ground reaches about 8.5 m with the phone at hand height (more from a higher camera).
+   - At 12 m on open paving, it says "Too far for one sight. Use 2 sights." This holds even when depth finds the paving.
    - Aim at the foot of a wall or a car about 9 m away: it says "Something is in the way before the ground…", never a Ground number.
+   - Aim at a kerb or car wheel (blocked), then lower the crosshair slowly onto open paving in front: Ground comes back without jerking the phone.
    - Aim at a box top about 3 m away: it shows "AR point", never "Ground".
    - **Slope check:** on paving with a known 1–2% fall, record the error against a tape. If it is outside the ±, raise `RangeErrorModel.LEVEL_GROUND_SLOPE_DEG` towards 0.4°.
 8. **Distance, 2-sight:** at 100 m and 300 m, check against a map, GPS or a known distance.
    - The ± covers the truth.
-   - The app asks for a walk of about 12 m at 100 m and about 30 m at 300 m.
-   - The walked distance and the preview update while you walk.
-   - **Honest limit as built:** a number is shown only when its whole ±95 interval is within 500 m. With a 30 m walk and the 0.24° aim error, that holds up to about 350–380 m; further targets show "Out of range: may be over 500 m".
+   - The walk asked for:
+     - about 12 m at 100 m;
+     - 30 m at 300 m, shown within the first few metres of walking (once the two sight lines are about 0.5° apart), not only at the end.
+   - The walked distance updates while you walk. A preview number appears once a sight 2 there would give one.
+   - Taking sight 2 before the asked walk is done on a far target says "Not accurate enough yet. Walk further sideways…". It never says "Out of range" while you are under 30 m.
+   - **Honest limit as built:** a number is shown only when its whole ±95 interval is within 500 m. With the full 30 m walk and the 0.24° aim error, that is about 380–410 m. Beyond that, after the full walk, it shows "Out of range: may be over 500 m".
 9. **Refusals:**
    - Cover the camera between sights → "tracking lost", and no retake is offered.
    - Get a refusal, cover the camera while the result is on screen, then uncover it → Retake is no longer offered.
    - Leave the app with a result on screen and come back → Retake is not offered.
    - Aim sight 2 at a different object → "different things".
    - Walk 1 m on a 200 m target → "near-parallel" (sometimes "Not accurate enough yet": the measured angle is noisy).
-10. **Out of range:** a point at 600 m shows "Out of range: may be over 500 m". It is never a number (fewer than 1 in 200 tries in the Monte-Carlo test). A target at exactly 500 m also usually shows "Out of range".
+10. **Out of range:**
+    - A point at 600 m, after the full 30 m walk, shows "Out of range: may be over 500 m". It is never a number (fewer than 1 in 200 tries in the Monte-Carlo test).
+    - A target at exactly 500 m also usually shows "Out of range".
 11. **TalkBack:** Hold and every 2-sight result are spoken once, in words. The live value is spoken once it settles.
 12. **Ads:** no ad appears on the Distance screen or when leaving it.
     - On a first launch (or with consent still pending), tap "How far?" straight after Home: no consent form appears over the camera.

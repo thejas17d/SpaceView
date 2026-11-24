@@ -93,7 +93,7 @@ class CutoutTest {
 
     // ---- CutoutPixels --------------------------------------------------------------------------------------
 
-    @Test fun maskBecomesASoftAlphaAndCropsToTheSubject() {
+    @Test fun maskBecomesASoftAlpha() {
         // 10 × 8 photo, subject = a 4 × 3 block at (3, 2); a soft one-pixel rim around it.
         val w = 10; val h = 8
         val photo = ArgbImage(w, h, IntArray(w * h) { 0xFF000000.toInt() or (it * 3) })
@@ -110,14 +110,26 @@ class CutoutTest {
         assertEquals(0, cut.argb[0] ushr 24)
         assertEquals("colour kept under alpha 0", photo.argb[0] and 0xFFFFFF, cut.argb[0] and 0xFFFFFF)
         assertEquals(128.0, CutoutPixels.alphaOf(0.5f).toDouble(), 1.0)
-        assertArrayEquals(intArrayOf(2, 1, 8, 6), CutoutPixels.alphaBounds(cut))
-        assertArrayEquals("solid part only", intArrayOf(3, 2, 7, 5), CutoutPixels.alphaBounds(cut, 255))
-        val cropped = CutoutPixels.crop(cut, intArrayOf(3, 2, 7, 5))
-        assertEquals(4, cropped.width); assertEquals(3, cropped.height)
-        assertEquals(cut.argb[2 * w + 3], cropped.argb[0])
-        assertTrue(cropped.isOpaque)
+        assertArrayEquals("every visible pixel, the soft rim included", intArrayOf(2, 1, 8, 6), CutoutPixels.visibleExtent(cut))
         assertFalse(cut.isOpaque)
-        assertNull(CutoutPixels.alphaBounds(ArgbImage(2, 1, intArrayOf(0, 0))))
+        assertNull(CutoutPixels.visibleExtent(ArgbImage(2, 1, intArrayOf(0, 0))))
+    }
+
+    /** PLAN v3 gate G5: stray specks near the edges never widen the extent; faint thin parts still count. */
+    @Test fun visibleExtentIgnoresStraySpecks() {
+        val w = 100; val h = 100
+        val px = IntArray(w * h)
+        for (y in 10 until 60) for (x in 20 until 80) px[y * w + x] = 0xFF808080.toInt() // seat + back
+        // A stray pixel near each edge (a mask speck), as in a legless chair whose mask leaks a little.
+        for ((x, y) in listOf(0 to 99, 99 to 0, 0 to 50, 50 to 99)) px[y * w + x] = 0x40808080
+        val extent = CutoutPixels.visibleExtent(ArgbImage(w, h, px))!!
+        assertArrayEquals(intArrayOf(20, 10, 80, 60), extent)
+        // Faint legs (alpha 60) down to the floor: 4 px wide, 40 px tall, at both sides: they do count.
+        for (y in 60 until 100) for (x in (20 until 24) + (76 until 80)) px[y * w + x] = 0x3C808080
+        val withLegs = CutoutPixels.visibleExtent(ArgbImage(w, h, px))!!
+        assertEquals(10, withLegs[1])
+        assertTrue("legs reach the floor: ${withLegs[3]}", withLegs[3] >= 95)
+        assertArrayEquals("no trim: the plain bounding box", intArrayOf(0, 0, 100, 100), CutoutPixels.visibleExtent(ArgbImage(w, h, px), trim = 0.0))
     }
 
     @Test fun maskTrust() {

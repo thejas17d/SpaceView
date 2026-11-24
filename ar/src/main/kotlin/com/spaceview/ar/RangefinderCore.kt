@@ -177,8 +177,11 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
     private var lastPosition: Vec3? = null
     private var collectStartMs = 0L
     private var lastAimSigma = AimModel.DEFAULT_AIM_SIGMA_RAD
-    /** [DirectionWindow.generation] of the steady aim in which something blocked the ray before the floor (-1: none). */
-    private var blockedAim = -1
+    /** Mean aim direction at which something was found in the way before the floor (null: Ground not blocked). */
+    private var blockDirection: Vec3? = null
+
+    /** The last 3 frames, newest in bit 0: did a raw hit show something in the way? */
+    private var blockVotes = 0
 
     private val pending = ArrayList<RangeEvent>(2)
 
@@ -227,23 +230,32 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
         } else {
             null
         }
-        // Ground is only for a point ON the floor. Any hit along the ray that is above the floor, or nearer than the
-        // Ground interval, shows something is in the way; it blocks Ground for the rest of this steady aim, so a hit
-        // that drops out for a frame cannot let the floor behind the object through (review MAJOR 2).
+        // Ground is only for a point ON the floor (review MAJOR 2, gate G3). Evidence that something is in the way:
+        // - raw hits above the floor, or nearer than the Ground interval, in at least 2 of the last 3 frames (one noisy
+        //   depth / feature point must not block a whole aim);
+        // - the averaged Near point above the floor (one frame is enough: it is already an average).
+        // The block remembers the aim direction where it was set and lasts while the averaged aim stays within
+        // AIM_MOVE_DEG of it, so a hit dropping out cannot let the floor behind the object through, while a slow pan
+        // onto open ground clears it. Evidence only counts during a steady aim (never from LIMITED frames).
         val groundOk = (ground as? RangeOutcome.Ok)?.reading
         val floorY = f.floorY
-        if (rawHit != null && floorY != null) {
-            val above = rawHit.position.y - floorY > max(OFF_FLOOR_MIN_M, OFF_FLOOR_REL * rawHit.distance)
-            val nearer = groundOk != null && rawHit.distance < groundOk.distance.low95
-            if (above || nearer) blockedAim = aim.generation
-        }
+        val steadyAim = aim.size > 0
+        val hitBlocks = steadyAim && rawHit != null && floorY != null && (
+            rawHit.position.y - floorY > max(OFF_FLOOR_MIN_M, OFF_FLOOR_REL * rawHit.distance) ||
+                (groundOk != null && rawHit.distance < groundOk.distance.low95)
+            )
+        blockVotes = ((blockVotes shl 1) or (if (hitBlocks) 1 else 0)) and 0b111
         val nearEst = near.estimate
-        if (nearReading != null && nearEst != null && floorY != null &&
+        val nearBlocks = steadyAim && nearReading != null && nearEst != null && floorY != null &&
             nearEst.position.y - floorY > max(OFF_FLOOR_MIN_M, OFF_FLOOR_REL * nearReading.distance.value)
-        ) {
-            blockedAim = aim.generation
+        if (!steadyAim) {
+            blockDirection = null
+        } else if (nearBlocks || Integer.bitCount(blockVotes) >= BLOCK_VOTES_NEEDED) {
+            blockDirection = aim.meanDirection()
+        } else {
+            blockDirection?.let { if (aim.angleTo(it) > Math.toRadians(AIM_MOVE_DEG)) blockDirection = null }
         }
-        val groundBlocked = blockedAim == aim.generation
+        val groundBlocked = blockDirection != null
         val groundReading = groundOk?.takeIf { !groundBlocked }
         // A direct AR measurement wins whenever both exist and disagree; when they agree the smaller ± is shown.
         live = when {
@@ -257,7 +269,9 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
         liveIssue = when {
             live != null -> null
             q != TrackingQuality.TRACKING -> RangeIssue.HOLD_STEADY
-            groundBlocked || (rawHit != null && rawHit.distance > RangeLimits.NEAR_MAX_M) -> RangeIssue.OFF_GROUND
+            // Only a real block says "something is in the way"; a far hit on open ground falls through to "too far"
+            // (gate G2).
+            groundBlocked -> RangeIssue.OFF_GROUND
             ground == RangeOutcome.OutOfRange -> RangeIssue.OUT_OF_RANGE
             ground == RangeOutcome.Rejected(RangeRejection.TOO_UNCERTAIN) -> RangeIssue.GROUND_TOO_FAR
             ground == RangeOutcome.Rejected(RangeRejection.ABOVE_HORIZON) -> RangeIssue.ABOVE_HORIZON
@@ -339,6 +353,8 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
         near.reset()
         aim.clear()
         sightWindow.clear()
+        blockDirection = null
+        blockVotes = 0
         held = null
         live = null
         preview = null
@@ -435,17 +451,31 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
             return
         }
         walkedBaselineM = (RayTriangulation.perpendicularBaseline(s1, f.cameraPose.translation) * 10).roundToInt() / 10.0
-        preview = if (ray != null && q == TrackingQuality.TRACKING) {
+        // Any frame with a ray (also while walking, LIMITED) gives a rough triangulated point. The walk the app asks
+        // for follows that point whenever the two rays are consistent, not only once a number would be shown: with the
+        // interval cap a far target has no shown number until the walk is long enough (gate G1).
+        val t = if (ray != null && q != TrackingQuality.NOT_TRACKING) {
             Sight.of(ray.origin, ray.direction, f.aimSigmaRad, f.timestampNs / 1e9)?.let { now ->
-                (RayTriangulation.solve(s1, now, pathLength, false, errors).outcome as? RangeOutcome.Ok)?.reading
+                RayTriangulation.solve(s1, now, pathLength, false, errors)
             }
         } else {
             null
         }
-        preview?.let { requiredBaselineM = roundHalf(RayTriangulation.requiredBaseline(it.distance.value, f.aimSigmaRad, errors)) }
+        preview = if (q == TrackingQuality.TRACKING) (t?.outcome as? RangeOutcome.Ok)?.reading else null
+        val rough = t?.point?.takeIf { guides(t.outcome) }
+        if (rough != null) {
+            val d = rough.distanceTo(f.cameraPose.translation)
+            requiredBaselineM = roundHalf(RayTriangulation.requiredBaseline(d, f.aimSigmaRad, errors))
+        }
     }
 
     private fun roundHalf(v: Double) = (v * 2).roundToInt() / 2.0
+
+    /** A triangulated point is good enough to guide the walk unless the rays are parallel, behind or inconsistent. */
+    private fun guides(o: RangeOutcome): Boolean = when (o) {
+        is RangeOutcome.Ok, RangeOutcome.OutOfRange -> true
+        is RangeOutcome.Rejected -> o.reason == RangeRejection.TOO_UNCERTAIN
+    }
 
     /**
      * Recent aim directions (unit vectors) and camera positions: their mean, and the σ of the mean direction (per
@@ -456,9 +486,6 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
         private val origins = ArrayDeque<Vec3>(capacity)
         val size: Int get() = dirs.size
 
-        /** Bumped every time the window restarts (a new steady aim). */
-        var generation = 0
-            private set
 
         fun add(direction: Vec3, origin: Vec3) {
             if (dirs.size == capacity) {
@@ -479,7 +506,6 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
         }
 
         fun clear() {
-            if (dirs.isNotEmpty()) generation++
             dirs.clear()
             origins.clear()
         }
@@ -532,6 +558,9 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
 
         /** Consecutive frames are correlated (hand tremor is slow): the jitter's effective sample size is n / this. */
         const val CORRELATION_FRAMES = 3.0
+
+        /** Raw-hit frames (of the last 3) that must show something in the way before Ground is blocked (gate G3). */
+        const val BLOCK_VOTES_NEEDED = 2
 
         /** A hit this far above the floor (m) ... */
         const val OFF_FLOOR_MIN_M = 0.10

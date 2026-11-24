@@ -27,7 +27,9 @@ data class MaskStats(
 /**
  * Pure pixel steps of the background-free cutout (PLAN v3 W2), JVM-tested:
  * 1. [applyMask]: the segmentation confidence becomes the alpha channel (a soft ramp, so edges are anti-aliased).
- * 2. [alphaBounds] + [crop]: crop to the subject's bounding box, which then maps to the measured W × H.
+ * 2. [visibleExtent]: a trust check only. The cutout is never cropped: the rectified photo already is the measured
+ *    W × H, so cropping it to the subject and mapping the crop back onto W × H would stretch the object (PLAN v3 review
+ *    MAJOR 5).
  * 3. [downscale]: alpha-weighted box filter (premultiplied average), so transparent pixels never darken the edge.
  * 4. [bleedEdges]: transparent pixels take the colour of their nearest opaque neighbours (and the rest the mean
  *    colour), so a renderer's bilinear filter and mipmaps never pull a dark or background colour into the edge.
@@ -39,8 +41,11 @@ object CutoutPixels {
     /** Confidence above this is the object (alpha 255). Between the two, alpha ramps linearly. */
     const val MASK_HIGH = 0.65f
 
-    /** An alpha at or above this counts as part of the subject for its bounding box. */
-    const val BOUNDS_ALPHA = 128
+    /**
+     * Share of the visible pixels [visibleExtent] trims from each end of each axis, so isolated specks (a stray mask
+     * pixel near an edge) cannot stretch the extent (PLAN v3 gate G5).
+     */
+    const val EXTENT_TRIM = 0.01
 
     /** A mask covering less than this of the photo is not trusted (the object was not found). */
     const val MIN_COVERAGE = 0.05
@@ -79,31 +84,41 @@ object CutoutPixels {
     /** True when the mask can be used: enough of the object was found and the segmentation is not confused. */
     fun trusted(stats: MaskStats): Boolean = stats.coverage >= MIN_COVERAGE && stats.uncertainShare <= MAX_UNCERTAIN_SHARE
 
-    /** The bounding box `[x0, y0, x1, y1)` of pixels with alpha ≥ [minAlpha]; null when there are none. */
-    fun alphaBounds(image: ArgbImage, minAlpha: Int = BOUNDS_ALPHA): IntArray? {
-        var x0 = Int.MAX_VALUE; var y0 = Int.MAX_VALUE; var x1 = -1; var y1 = -1
+    /**
+     * The extent `[x0, y0, x1, y1)` of the visible pixels (alpha ≥ 1, so faint thin parts such as chair legs count
+     * fully), robust to specks: along each axis it spans from the [trim] to the 1 − [trim] quantile of the visible
+     * pixels' positions, so a few stray pixels near an edge (a fraction ≤ [trim] of the visible ones) never widen it.
+     * Null when nothing is visible. Used only to check that a mask fills the measured outline.
+     */
+    fun visibleExtent(image: ArgbImage, trim: Double = EXTENT_TRIM): IntArray? {
+        require(trim in 0.0..0.25)
+        val cols = IntArray(image.width)
+        val rows = IntArray(image.height)
+        var total = 0L
         for (y in 0 until image.height) {
             val row = y * image.width
             for (x in 0 until image.width) {
-                if ((image.argb[row + x] ushr 24) >= minAlpha) {
-                    if (x < x0) x0 = x
-                    if (x > x1) x1 = x
-                    if (y < y0) y0 = y
-                    y1 = y
+                if ((image.argb[row + x] ushr 24) != 0) {
+                    cols[x]++; rows[y]++; total++
                 }
             }
         }
-        return if (x1 < 0) null else intArrayOf(x0, y0, x1 + 1, y1 + 1)
+        if (total == 0L) return null
+        val (x0, x1) = quantileSpan(cols, total, trim)
+        val (y0, y1) = quantileSpan(rows, total, trim)
+        return intArrayOf(x0, y0, x1, y1)
     }
 
-    /** The pixels inside `[x0, y0, x1, y1)`. */
-    fun crop(image: ArgbImage, rect: IntArray): ArgbImage {
-        val (x0, y0, x1, y1) = rect
-        require(x0 in 0 until x1 && y0 in 0 until y1 && x1 <= image.width && y1 <= image.height) { "Bad crop ${rect.toList()}" }
-        val w = x1 - x0; val h = y1 - y0
-        val out = IntArray(w * h)
-        for (y in 0 until h) System.arraycopy(image.argb, (y0 + y) * image.width + x0, out, y * w, w)
-        return ArgbImage(w, h, out)
+    /** `[first, last + 1)` of the histogram bins holding the [trim] .. 1 − [trim] quantiles of its [total] count. */
+    private fun quantileSpan(hist: IntArray, total: Long, trim: Double): Pair<Int, Int> {
+        val skip = (total * trim).toLong() // counts allowed to fall outside on each end
+        var acc = 0L
+        var lo = 0
+        while (lo < hist.size - 1 && acc + hist[lo] <= skip) { acc += hist[lo]; lo++ }
+        acc = 0L
+        var hi = hist.size - 1
+        while (hi > lo && acc + hist[hi] <= skip) { acc += hist[hi]; hi-- }
+        return lo to hi + 1
     }
 
     /**
@@ -163,30 +178,43 @@ object CutoutPixels {
             a += pa; r += pa * ((p shr 16) and 0xFF); g += pa * ((p shr 8) and 0xFF); b += pa * (p and 0xFF)
         }
         val mean = if (a == 0L) 0x808080 else (((r / a).toInt() shl 16) or ((g / a).toInt() shl 8) or (b / a).toInt())
-        var frontier = (0 until px.size).filter { !coloured[it] }
+        // Frontier of still-uncoloured pixels as a plain IntArray (no boxing: a 1024² cutout has ~500k of them).
+        var frontier = IntArray(px.size)
+        var n = 0
+        for (k in px.indices) if (!coloured[k]) frontier[n++] = k
+        val updIdx = IntArray(n)
+        val updRgb = IntArray(n)
         repeat(passes) {
-            if (frontier.isEmpty()) return@repeat
-            val updates = ArrayList<IntArray>()
-            val remaining = ArrayList<Int>()
-            for (i in frontier) {
+            if (n == 0) return@repeat
+            var u = 0
+            var remaining = 0
+            for (f in 0 until n) {
+                val i = frontier[f]
                 val x = i % w; val y = i / w
-                var n = 0; var sr = 0; var sg = 0; var sb = 0
-                for (dy in -1..1) for (dx in -1..1) {
-                    if (dx == 0 && dy == 0) continue
-                    val nx = x + dx; val ny = y + dy
-                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
-                    val j = ny * w + nx
-                    if (!coloured[j]) continue
-                    val q = px[j]
-                    sr += (q shr 16) and 0xFF; sg += (q shr 8) and 0xFF; sb += q and 0xFF; n++
+                var c = 0; var sr = 0; var sg = 0; var sb = 0
+                for (dy in -1..1) {
+                    val ny = y + dy
+                    if (ny < 0 || ny >= h) continue
+                    for (dx in -1..1) {
+                        val nx = x + dx
+                        if ((dx == 0 && dy == 0) || nx < 0 || nx >= w) continue
+                        val j = ny * w + nx
+                        if (!coloured[j]) continue
+                        val q = px[j]
+                        sr += (q shr 16) and 0xFF; sg += (q shr 8) and 0xFF; sb += q and 0xFF; c++
+                    }
                 }
-                if (n > 0) updates += intArrayOf(i, ((sr / n) shl 16) or ((sg / n) shl 8) or (sb / n)) else remaining += i
+                if (c > 0) {
+                    updIdx[u] = i; updRgb[u] = ((sr / c) shl 16) or ((sg / c) shl 8) or (sb / c); u++
+                } else {
+                    frontier[remaining++] = i // compacts in place: remaining <= f
+                }
             }
-            // Apply after the scan, so one ring grows per pass (no directional smear).
-            for ((i, rgb) in updates) { px[i] = rgb; coloured[i] = true } // alpha stays 0
-            frontier = remaining
+            // Apply after the scan, so one ring grows per pass (no directional smear). Alpha stays 0.
+            for (k in 0 until u) { px[updIdx[k]] = updRgb[k]; coloured[updIdx[k]] = true }
+            n = remaining
         }
-        for (i in frontier) px[i] = mean
+        for (f in 0 until n) px[frontier[f]] = mean
         return ArgbImage(w, h, px)
     }
 }

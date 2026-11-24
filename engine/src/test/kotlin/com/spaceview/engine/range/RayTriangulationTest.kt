@@ -128,6 +128,23 @@ class RayTriangulationTest {
     }
 
     @Test
+    fun underTheFullWalkAPointWithinTheLimitIsWalkFurtherNotOutOfRange() {
+        // Gate G1: a 350 m target after a 12 m walk: its interval reaches past 500 m, but a longer walk would measure it.
+        val t = target(350.0)
+        val short = camera1 + Vec3(12.0, 0.0, 0.0)
+        val r12 = RayTriangulation.solve(sight(camera1, t, 0.0), sight(short, t, 12.0), 12.0, false, model)
+        assertEquals(RangeOutcome.Rejected(RangeRejection.TOO_UNCERTAIN), r12.outcome)
+        assertNotNull(r12.point)
+        val full = camera1 + Vec3(RangeLimits.MAX_BASELINE_M, 0.0, 0.0)
+        val r30 = RayTriangulation.solve(sight(camera1, t, 0.0), sight(full, t, 30.0), 30.0, false, model)
+        assertTrue(r30.outcome is RangeOutcome.Ok)
+        // With the full walk done, a point whose interval still reaches past 500 m is out of range.
+        val far = target(450.0)
+        val r450 = RayTriangulation.solve(sight(camera1, far, 0.0), sight(full, far, 30.0), 30.0, false, model)
+        assertEquals(RangeOutcome.OutOfRange, r450.outcome)
+    }
+
+    @Test
     fun badInputBecomesNoSightInsteadOfACrash() {
         assertNull(Sight.of(Vec3(Double.NaN, 0.0, 0.0), Vec3(0.0, 0.0, -1.0), aim, 0.0))
         assertNull(Sight.of(Vec3.ZERO, Vec3.ZERO, aim, 0.0))
