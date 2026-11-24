@@ -466,6 +466,7 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
   - Target URL: **https://thejas17d.github.io/SpaceView/privacy/** once the repo owner enables GitHub Pages (Settings → Pages → Deploy from branch `main`, folder `/docs`).
   - It matches Data safety §6.3 and `help_privacy_body`.
   - The developer is not named, only the email.
+- **Terms of Service:** `docs/terms/index.html` → https://thejas17d.github.io/SpaceView/terms/ (Play: App content → trader status = Yes, ToS URL optional; add it once Pages is live).
 - **Next user steps:** create the `pro` subscription (`monthly` ₹129, `yearly` ₹799 with `trial7`, prepaid `pass30` ₹149; the user may lower the prices since 3D is gone), send the licence key (Monetization setup → Licensing), add licence testers, then AdMob IDs.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
