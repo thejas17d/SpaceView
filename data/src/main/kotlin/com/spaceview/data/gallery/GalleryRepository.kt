@@ -120,8 +120,9 @@ interface GalleryTransactions {
  * Budget (PLAN M3 gate): an item is at most [MAX_SCAN_BYTES], checked against the exact bytes written. The picture
  * is stored twice (inside the GLB and as a file for display and sharing), so when it would break the budget the
  * quality, then the size, steps down until it fits (if nothing fits, the item is saved without a photo rather than
- * over budget). A transparent cutout's texture is a straight-alpha PNG (glTF has no WebP in its core), whose long
- * side steps down through [CUTOUT_TEXTURE_SIDES] first.
+ * over budget). A transparent cutout's texture is a straight-alpha PNG (glTF has no WebP in its core), several times
+ * the size of a JPEG, so a transparent cutout has its own documented budget, [MAX_CUTOUT_BYTES] (PLAN v3 review
+ * MINOR 8), and its texture's long side steps down through [CUTOUT_TEXTURE_SIDES] before anything else does.
  *
  * Atomicity:
  * - Save: files are written into a hidden staging directory (each file temp + fsync + rename); the row is inserted
@@ -210,7 +211,10 @@ class GalleryRepository(
             }
         }
         val photoName = if (cutout != null) CUTOUT_PHOTO else PHOTO
-        val staged = Staged(encoded.glb, encoded.front?.takeIf { encoded.thumbnail != null }, encoded.thumbnail?.takeIf { encoded.front != null }, photoName)
+        val staged = Staged(
+            encoded.glb, encoded.front?.takeIf { encoded.thumbnail != null }, encoded.thumbnail?.takeIf { encoded.front != null }, photoName,
+            encoded.budget,
+        )
         return commitLocked(staged) { now ->
             baseRow(draft.kind, w, h, d, draft.quality, draft.calibrated, draft.calibrationFactor, draft.deviceTier, draft.arcoreVersion, draft.label, now)
                 .copy(modelKind = modelKind.name, captureMethod = draft.captureMethod?.name)
@@ -218,7 +222,13 @@ class GalleryRepository(
     }
 
     /** The files of a new item: the model always, a photo and a thumbnail when present. */
-    private class Staged(val model: ByteArray, val photo: ByteArray?, val thumbnail: ByteArray?, val photoName: String = PHOTO)
+    private class Staged(
+        val model: ByteArray,
+        val photo: ByteArray?,
+        val thumbnail: ByteArray?,
+        val photoName: String = PHOTO,
+        val budget: Long = MAX_SCAN_BYTES,
+    )
 
     private fun baseRow(
         kind: ObjectKind, w: Dimension, h: Dimension, d: Dimension, quality: Quality, calibrated: Boolean,
@@ -262,7 +272,7 @@ class GalleryRepository(
             staged.thumbnail?.let { writeAtomic(File(stage, THUMB), it) }
             syncDir(stage)
             val bytes = dirBytes(stage)
-            check(bytes <= MAX_SCAN_BYTES) { "Item is $bytes B, over the $MAX_SCAN_BYTES B budget" }
+            check(bytes <= staged.budget) { "Item is $bytes B, over the ${staged.budget} B budget" }
             val now = clock()
             return transactions.run {
                 val id = dao.insert(row(now))
@@ -636,8 +646,7 @@ class GalleryRepository(
     private fun rebuild(item: GalleryItem, w: Dimension, h: Dimension, d: Dimension, photo: File?, thumbBytes: Long): ByteArray =
         if (item.modelKind == ModelKind.CUTOUT) {
             val bytes = photo?.readBytes()
-            val budget = MAX_SCAN_BYTES - (bytes?.size ?: 0) - thumbBytes
-            cutoutFromPhoto(w, h, displayName(item.kind, item.label), bytes, budget)
+            cutoutFromPhoto(w, h, displayName(item.kind, item.label), bytes, otherBytes = (bytes?.size ?: 0) + thumbBytes)
         } else {
             buildGlb(item.kind, w, h, d, photo?.readBytes(), item.label)
         }
@@ -646,13 +655,21 @@ class GalleryRepository(
 
     /**
      * The files of a new cutout: the picture as `cutout.webp` (≤ 1024 px, keeps alpha), the 256 px thumbnail and the
-     * GLB. An opaque picture gets a JPEG texture at the picture's size and quality; a transparent one a straight-alpha
-     * PNG with bled edges (no halo) whose long side steps down through [CUTOUT_TEXTURE_SIDES] before the picture's size
-     * and quality do. Everything is sized against the **exact** bytes; if nothing fits, a plain panel without a photo.
+     * GLB, sized against the **exact** bytes.
+     * - Opaque picture: a JPEG texture at the picture's size and quality, within [MAX_SCAN_BYTES].
+     * - Transparent picture: a straight-alpha PNG with bled edges (no halo), within [MAX_CUTOUT_BYTES]; its long side
+     *   steps down through [CUTOUT_TEXTURE_SIDES] before the stored picture's size and quality do.
+     * - If even the smallest PNG does not fit, the picture is saved **opaque** (the full rectangle the Review's "Undo
+     *   cutout" shows) rather than as a plain panel; only a picture that fits nowhere gives a plain panel.
      */
     internal fun encodeCutout(w: Dimension, h: Dimension, name: String, image: ArgbImage?): Encoded {
         fun plain() = Encoded(GlbWriter.writeCutout(w.meters, h.meters, null, colorSrgb = FRONT_COLOR, name = name), null, null, 0, 0, 0)
         if (image == null) return plain()
+        if (!image.isOpaque) {
+            encodeTransparentCutout(w, h, name, image)?.let { return it }
+            // Nothing transparent fits: keep the whole picture, opaque (its colour is kept under the alpha).
+            return encodeCutout(w, h, name, ArgbImage(image.width, image.height, IntArray(image.argb.size) { image.argb[it] or OPAQUE }))
+        }
         val thumbImage = codec.fromPixels(CutoutPixels.downscale(image, THUMB_LONG_SIDE))
         val thumb = try {
             thumbImage.webp(THUMB_QUALITY)
@@ -662,24 +679,11 @@ class GalleryRepository(
         val pictures = HashMap<Int, GalleryImage>()
         fun picture(side: Int) = pictures.getOrPut(side) { codec.fromPixels(CutoutPixels.downscale(image, side)) }
         try {
-            if (image.isOpaque) {
-                for (side in FRONT_LONG_SIDES) for (q in FRONT_QUALITIES) {
-                    val img = picture(side)
-                    val glb = GlbWriter.writeCutout(w.meters, h.meters, img.jpeg(q), name = name)
-                    val out = Encoded(glb, img.webp(q), thumb, img.width, img.height, q)
-                    if (out.totalBytes <= MAX_SCAN_BYTES) return out
-                }
-            } else {
-                val photos = HashMap<Pair<Int, Int>, ByteArray>()
-                for (texSide in CUTOUT_TEXTURE_SIDES) {
-                    val glb = GlbWriter.writeCutout(w.meters, h.meters, cutoutPng(image, texSide), GlbWriter.CutoutAlpha.BLEND, name = name)
-                    for (side in FRONT_LONG_SIDES) for (q in FRONT_QUALITIES) {
-                        val img = picture(side)
-                        val photo = photos.getOrPut(side to q) { img.webp(q) }
-                        val out = Encoded(glb, photo, thumb, img.width, img.height, q)
-                        if (out.totalBytes <= MAX_SCAN_BYTES) return out
-                    }
-                }
+            for (side in FRONT_LONG_SIDES) for (q in FRONT_QUALITIES) {
+                val img = picture(side)
+                val glb = GlbWriter.writeCutout(w.meters, h.meters, img.jpeg(q), name = name)
+                val out = Encoded(glb, img.webp(q), thumb, img.width, img.height, q)
+                if (out.totalBytes <= MAX_SCAN_BYTES) return out
             }
         } finally {
             pictures.values.forEach { it.release() }
@@ -687,26 +691,54 @@ class GalleryRepository(
         return plain()
     }
 
+    /** A transparent cutout within [MAX_CUTOUT_BYTES] (see [encodeCutout]), or null when nothing fits. */
+    private fun encodeTransparentCutout(w: Dimension, h: Dimension, name: String, image: ArgbImage): Encoded? {
+        val thumbImage = codec.fromPixels(CutoutPixels.downscale(image, THUMB_LONG_SIDE))
+        val thumb = try {
+            thumbImage.webp(THUMB_QUALITY)
+        } finally {
+            thumbImage.release()
+        }
+        val pictures = HashMap<Int, GalleryImage>()
+        val photos = HashMap<Pair<Int, Int>, ByteArray>()
+        try {
+            for (texSide in CUTOUT_TEXTURE_SIDES) {
+                val png = cutoutPng(image, texSide)
+                val glb = GlbWriter.writeCutout(w.meters, h.meters, png, GlbWriter.CutoutAlpha.BLEND, name = name)
+                if (glb.size + thumb.size > MAX_CUTOUT_BYTES) continue
+                for (side in FRONT_LONG_SIDES) for (q in FRONT_QUALITIES) {
+                    val img = pictures.getOrPut(side) { codec.fromPixels(CutoutPixels.downscale(image, side)) }
+                    val photo = photos.getOrPut(side to q) { img.webp(q) }
+                    val out = Encoded(glb, photo, thumb, img.width, img.height, q, MAX_CUTOUT_BYTES, textureSide = minOf(texSide, maxOf(image.width, image.height)))
+                    if (out.totalBytes <= MAX_CUTOUT_BYTES) return out
+                }
+            }
+        } finally {
+            pictures.values.forEach { it.release() }
+        }
+        return null
+    }
+
     /**
-     * A cutout GLB at W × H from its stored picture ([photo], the item's `cutout.webp`) within [budget] bytes (edits,
-     * repairs, stale models). A transparent picture steps its PNG texture down; a missing or undecodable picture gives
-     * a plain panel.
+     * A cutout GLB at W × H from its stored picture ([photo], the item's `cutout.webp`) for edits, repairs and stale
+     * models, so that the item (GLB + [otherBytes], its picture and thumbnail) stays within its budget: [MAX_CUTOUT_BYTES]
+     * for a transparent picture (its PNG texture steps down), [MAX_SCAN_BYTES] for an opaque one. A transparent picture
+     * that fits nowhere is rebuilt opaque; a missing or undecodable picture gives a plain panel.
      */
-    private fun cutoutFromPhoto(w: Dimension, h: Dimension, name: String, photo: ByteArray?, budget: Long): ByteArray {
+    private fun cutoutFromPhoto(w: Dimension, h: Dimension, name: String, photo: ByteArray?, otherBytes: Long): ByteArray {
         val plain = { GlbWriter.writeCutout(w.meters, h.meters, null, colorSrgb = FRONT_COLOR, name = name) }
         val decoded = photo?.let { codec.decode(it, FRONT_LONG_SIDES.first()) } ?: return plain()
         try {
             val pixels = decoded.pixels()
-            if (pixels.isOpaque) {
-                for (q in FRONT_QUALITIES) {
-                    val glb = GlbWriter.writeCutout(w.meters, h.meters, decoded.jpeg(q), name = name)
-                    if (glb.size <= budget) return glb
-                }
-            } else {
+            if (!pixels.isOpaque) {
                 for (texSide in CUTOUT_TEXTURE_SIDES) {
                     val glb = GlbWriter.writeCutout(w.meters, h.meters, cutoutPng(pixels, texSide), GlbWriter.CutoutAlpha.BLEND, name = name)
-                    if (glb.size <= budget) return glb
+                    if (glb.size + otherBytes <= MAX_CUTOUT_BYTES) return glb
                 }
+            }
+            for (q in FRONT_QUALITIES) {
+                val glb = GlbWriter.writeCutout(w.meters, h.meters, decoded.jpeg(q), name = name)
+                if (glb.size + otherBytes <= MAX_SCAN_BYTES) return glb
             }
         } finally {
             decoded.release()
@@ -730,6 +762,10 @@ class GalleryRepository(
         val frontWidth: Int,
         val frontHeight: Int,
         val frontQuality: Int,
+        /** The budget this item was sized against ([MAX_CUTOUT_BYTES] for a transparent cutout). */
+        val budget: Long = MAX_SCAN_BYTES,
+        /** A transparent cutout's PNG texture long side (px); 0 otherwise. */
+        val textureSide: Int = 0,
     ) {
         val totalBytes: Long get() = glb.size.toLong() + (front?.size ?: 0) + (thumbnail?.size ?: 0)
     }
@@ -882,6 +918,17 @@ class GalleryRepository(
         /** PLAN M3 gate: a saved scan is at most 0.5 MB (decimal, the stricter reading). */
         const val MAX_SCAN_BYTES = 500_000L
 
+        /**
+         * Budget of a **transparent** cutout (PLAN v3 review MINOR 8, decided by Builder B on 2026-11-24): 1 MB (decimal).
+         * Its texture must be a straight-alpha RGBA PNG (core glTF has no WebP, and Filament's support for
+         * `EXT_texture_webp` is unverified), which is several times a JPEG: under [MAX_SCAN_BYTES] a photo-like subject
+         * ended at 320–384 px. With 1 MB it keeps 640–768 px or more (measured in GalleryPlacementTest, printed as
+         * "CUTOUT SIZE"). 20 free items stay ≤ 20 MB. Opaque cutouts and legacy boxes keep [MAX_SCAN_BYTES].
+         */
+        const val MAX_CUTOUT_BYTES = 1_000_000L
+
+        private const val OPAQUE = 0xFF shl 24
+
         /** Front photo long sides tried in order (the first is the normal case). */
         internal val FRONT_LONG_SIDES = intArrayOf(1024, 768, 512)
 
@@ -922,10 +969,10 @@ class GalleryRepository(
         const val CUTOUT_PHOTO = "cutout.webp"
 
         /**
-         * Long sides tried, in order, for a transparent cutout's PNG texture: an RGBA PNG is several times a JPEG, so it
-         * steps down first within [MAX_SCAN_BYTES] (the stored picture stays sharper for the gallery).
+         * Long sides tried, in order, for a transparent cutout's PNG texture within [MAX_CUTOUT_BYTES]: it steps down
+         * before the stored picture's size or quality does (the model in the room matters most).
          */
-        internal val CUTOUT_TEXTURE_SIDES = intArrayOf(512, 448, 384, 320, 256)
+        internal val CUTOUT_TEXTURE_SIDES = intArrayOf(1024, 896, 768, 640, 512, 384, 256)
         const val THUMB = "thumb.webp"
         private const val STAGING_PREFIX = ".tmp-"
         private const val SHARE_DIR = "share"

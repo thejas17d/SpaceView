@@ -142,6 +142,10 @@ internal fun ResultCard(
             )
         }
         Text(stringResource(reading.quality.hintRes()), style = MaterialTheme.typography.bodySmall)
+        // W5 far base (review MINOR 3): a base placed on the floor by Ground range is only right on a level floor.
+        if (reading.assumesLevelFloor) {
+            Text(stringResource(R.string.measure_assumes_level_floor), style = MaterialTheme.typography.bodySmall)
+        }
         if (calibrationDateMillis != null) {
             Text(
                 stringResource(R.string.result_calibrated, DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(calibrationDateMillis))),

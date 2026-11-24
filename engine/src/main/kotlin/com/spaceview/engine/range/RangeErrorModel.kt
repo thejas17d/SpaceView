@@ -11,8 +11,8 @@ import kotlin.math.sqrt
  * @property attitudeSigmaRad error of ARCore's gravity direction (camera pitch / roll) per sight.
  * @property floorHeightSigmaM error of the floor height under the camera (FloorEstimator bins + plane noise).
  * @property scaleSigmaRel relative VIO scale error of AR lengths (camera height, baseline): the device tier's prior.
- * @property levelGroundSigmaRad Ground only: slope of a "level" floor / paved ground along the line of sight. The
- *   badge "assumes level ground" says that a sloped ground is outside this ±.
+ * @property levelGroundSigmaRad Ground only: slope of a "level" floor / paved ground along the line of sight
+ *   ([LEVEL_GROUND_SLOPE_DEG]). The badge "assumes the point is on level ground" says a steeper slope is outside this ±.
  * @property baselineRelSigma 2-sight: VIO position error per axis as a fraction of the path walked between sights.
  * @property baselineDriftM 2-sight: fixed VIO position error per axis between two sights (m).
  * @property baselineDriftPerS 2-sight: VIO position drift per axis per second between sights (m/s).
@@ -24,7 +24,7 @@ class RangeErrorModel(
     val attitudeSigmaRad: Double = Math.toRadians(0.10),
     val floorHeightSigmaM: Double = 0.02,
     val scaleSigmaRel: Double = 0.01,
-    val levelGroundSigmaRad: Double = Math.toRadians(0.15),
+    val levelGroundSigmaRad: Double = Math.toRadians(LEVEL_GROUND_SLOPE_DEG),
     val baselineRelSigma: Double = 0.01,
     val baselineDriftM: Double = 0.01,
     val baselineDriftPerS: Double = 0.002,
@@ -39,6 +39,15 @@ class RangeErrorModel(
         )
         require(all.all { it >= 0 && it.isFinite() }) { "error terms must be finite and >= 0" }
         require(sigmaMargin >= 1.0 && sigmaMargin.isFinite()) { "sigmaMargin must be >= 1" }
+    }
+
+    companion object {
+        /**
+         * Default slope allowance of "level" ground (degrees, 1σ): 0.3° ≈ 1 : 190 (review MINOR 2: 0.15° was optimistic
+         * for outdoor paving with a 1–2% cross-fall). Tunable from the device test; at 0.4° Ground would only reach
+         * about 8 m, i.e. no further than Near.
+         */
+        const val LEVEL_GROUND_SLOPE_DEG = 0.3
     }
 
     /** 2-sight: per-axis σ of the position of sight 1 relative to sight 2 (m). */

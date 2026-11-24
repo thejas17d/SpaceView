@@ -37,11 +37,12 @@ The user tested the app on a **Google Pixel 10a** (ARCore Depth API supported, n
 ### W2. True-size cutout instead of a 3D box (Builder B)
 - **Flat** objects (frames, TVs, posters): the rectified front photo already *is* the object (its corners are the measured corners). Save it as a WebP **with alpha**, cropped exactly to the corners.
 - **Box / Other** objects:
-  - run **ML Kit Subject Segmentation** (Play-services, unbundled: no model in the APK) on the front photo, then crop to the subject mask;
-  - the mask's bounding box maps to the measured W × H;
+  - run **ML Kit Subject Segmentation** (Play-services, unbundled: no model in the APK) on the front photo, and make the background transparent with the subject mask;
+  - **keep the whole rectified canvas: it already is the measured W × H** (its edges are the measured outline). Never crop to the mask's bounding box and stretch it back to W × H: that distorted the object by up to 2× (PLAN v3 review MAJOR 5). Thin parts the mask misses (chair legs) never change the scale; the mask's bounds are only a trust check (they must span ≥ 85 % of the outline on each axis, else the rectangle is kept);
   - if segmentation is unavailable or unsure, fall back to the rectangle crop and say so in Review.
 - **Review** shows the cutout on a checkerboard, so the user sees that the background is gone. An "Undo cutout" option keeps the rectangle.
 - **Model:** a flat GLB (an unlit, double-sided textured quad with alpha, at true W × H; `GlbWriter.writeCutout`). Depth stays a measured number on the item; it is not rendered.
+- **Budget (review MINOR 8):** a transparent cutout's texture must be an RGBA PNG (core glTF has no WebP), so a transparent cutout item has its own 1 MB budget (`MAX_CUTOUT_BYTES`; opaque cutouts and legacy boxes keep 0.5 MB). Its texture steps down 1024 → 256 px before the stored picture does; if nothing transparent fits, the full rectangle is saved opaque.
 - **Gallery thumbnail** = the cutout.
 - **Data safety:** update ML Kit subject segmentation in the Data safety notes and the privacy text (on-device).
 

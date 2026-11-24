@@ -67,7 +67,7 @@ object Routes {
     const val CALIBRATE = "calibrate"
     const val GALLERY = "gallery"
     const val SCAN = "scan"
-    /** PLAN v3 W4: Distance (rangefinder) mode. Saves nothing, so no ads and no visit tracker. */
+    /** PLAN v3 W4: Distance (rangefinder) mode. An AR screen (ArScreenAdGuard); saves nothing, so no visit tracker. */
     const val DISTANCE = "distance"
     private const val GALLERY_ITEM = "gallery_item"
     const val ARG_ID = "id"
@@ -150,6 +150,9 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
             )
         }
         composable(Routes.DISTANCE) {
+            // An AR screen: no ad or consent form may open over it (PLAN v3 review MAJOR 1). It saves nothing, so no
+            // visit tracker.
+            ArScreenAdGuard(ads)
             val vm = viewModel { RangefinderViewModel(container.measureSettings, container.appSettings) }
             RangefinderRoute(onBack = { navController.popBackStack() }, viewModel = vm)
         }

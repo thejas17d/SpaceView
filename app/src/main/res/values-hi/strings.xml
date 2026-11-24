@@ -57,8 +57,6 @@
     <string name="measure_hold_steady">फ़ोन स्थिर रखें…</string>
     <string name="measure_aim_first">पहले पॉइंट पर निशाना लगाएँ, फिर + दबाएँ</string>
     <string name="measure_aim_end">आख़िरी पॉइंट पर निशाना लगाएँ, फिर + दबाएँ</string>
-    <string name="measure_aim_base">नीचे (फ़र्श या टेबल) पर निशाना लगाएँ, फिर + दबाएँ</string>
-    <string name="measure_aim_top">सबसे ऊपर वाले पॉइंट पर निशाना लगाएँ, फिर + दबाएँ</string>
     <string name="measure_aim_corner_1">ऊपर बाएँ कोने पर निशाना लगाएँ, फिर + दबाएँ</string>
     <string name="measure_aim_corner_2">ऊपर दाएँ कोने पर निशाना लगाएँ, फिर + दबाएँ</string>
     <string name="measure_aim_corner_3">नीचे दाएँ कोने पर निशाना लगाएँ, फिर + दबाएँ</string>

@@ -117,6 +117,8 @@ class CalibrationCheck(
  *   (not convex, off-plane, or not square beyond noise); the badge is then ROUGH and the UI says so.
  * @property boxHeight [MeasureMode.BOX] only, once the top point is there: the vertical height above
  *   the base. [primary] is then the width (first base edge), [secondary] the depth (second base edge).
+ * @property assumesLevelFloor a point was placed on the floor far away by Ground range ([HitKind.GROUND], W5): the
+ *   result is only right on a level floor, and the UI says so.
  */
 data class Reading(
     val mode: MeasureMode,
@@ -132,6 +134,7 @@ data class Reading(
     val maxRightAngleDeviationDeg: Double? = null,
     val geometryConsistent: Boolean = true,
     val boxHeight: Measurement? = null,
+    val assumesLevelFloor: Boolean = false,
 )
 
 /** One suggestion shown under a result (UI maps it to copy). Ordered by usual payoff. */
@@ -169,7 +172,8 @@ object MeasurementComposer {
         val isLive = live != null && points.size < mode.requiredPoints
         if (all.size < 2) return null
         val extra = all.maxOf { it.planeBiasRel }
-        return when (mode) {
+        val ground = all.any { it.kind == HitKind.GROUND }
+        val reading = when (mode) {
             MeasureMode.DISTANCE -> lengthReading(mode, all[0], all[1], model, extra, isLive, rounding)
             MeasureMode.HEIGHT -> lengthReading(mode, all[0], all[1], model, extra, isLive, rounding)
             MeasureMode.RECTANGLE -> {
@@ -186,6 +190,7 @@ object MeasurementComposer {
                 else -> boxReading(all.take(4), model, extra, isLive, rounding)
             }
         }
+        return if (ground) reading.copy(assumesLevelFloor = true) else reading
     }
 
     /**

@@ -57,8 +57,6 @@
     <string name="measure_hold_steady">Hold steady…</string>
     <string name="measure_aim_first">Aim at the first point, then tap +</string>
     <string name="measure_aim_end">Aim at the end point, then tap +</string>
-    <string name="measure_aim_base">Aim at the bottom (floor or table), then tap +</string>
-    <string name="measure_aim_top">Aim at the top point, then tap +</string>
     <string name="measure_aim_corner_1">Aim at the top-left corner, then tap +</string>
     <string name="measure_aim_corner_2">Aim at the top-right corner, then tap +</string>
     <string name="measure_aim_corner_3">Aim at the bottom-right corner, then tap +</string>

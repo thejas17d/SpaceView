@@ -243,7 +243,8 @@ internal fun TrackingStatus.messageRes(): Int = when (this) {
 @StringRes
 internal fun instructionRes(mode: MeasureMode, pointCount: Int): Int = when (mode) {
     MeasureMode.DISTANCE -> if (pointCount == 0) R.string.measure_aim_first else R.string.measure_aim_end
-    MeasureMode.HEIGHT -> if (pointCount == 0) R.string.measure_aim_base else R.string.measure_aim_top
+    // W5 (review MINOR 4): the top is read on the vertical line above the base, so the base must be right below it.
+    MeasureMode.HEIGHT -> if (pointCount == 0) R.string.measure_aim_base_below_top else R.string.measure_aim_top_above_base
     MeasureMode.RECTANGLE -> when (pointCount) {
         0 -> R.string.measure_aim_corner_1
         1 -> R.string.measure_aim_corner_2

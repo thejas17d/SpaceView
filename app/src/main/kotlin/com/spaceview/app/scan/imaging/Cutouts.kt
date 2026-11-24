@@ -8,7 +8,10 @@ enum class CutoutStatus {
     /** A flat object (frame, TV): the picture is cropped exactly to its measured corners; there is no background. */
     FLAT,
 
-    /** Box / Other: the background was removed and the subject's bounds map to the measured W × H. */
+    /**
+     * Box / Other: the background was removed. The picture keeps the whole measured W × H canvas (the rectified photo
+     * already is W × H): only the alpha changes, so nothing is cropped or stretched.
+     */
     REMOVED,
 
     /** Segmentation could not run (Google Play services or its model not ready, an error, a timeout): rectangle kept. */
@@ -23,7 +26,9 @@ enum class CutoutStatus {
  *
  * @property rectangle the rectified front photo, opaque, cropped to the measured outline (always available: what
  *   "Undo cutout" keeps).
- * @property cutout the background-free subject cropped to its mask's bounding box, or null when there is none.
+ * @property cutout the same W × H canvas as [rectangle] with the background made transparent (alpha from the mask), or
+ *   null when there is none. Never cropped: the rectified photo's edges are the measured outline, so cropping it to the
+ *   subject and mapping the crop back onto W × H would stretch the object (PLAN v3 review MAJOR 5).
  */
 class CutoutChoice(val rectangle: ArgbImage, val cutout: ArgbImage?, val status: CutoutStatus)
 
@@ -38,18 +43,21 @@ object CutoutMaker {
         if (mask == null || mask.size != photo.argb.size) return CutoutChoice(photo, null, CutoutStatus.NOT_AVAILABLE)
         if (!CutoutPixels.trusted(CutoutPixels.stats(mask))) return CutoutChoice(photo, null, CutoutStatus.NOT_SURE)
         val masked = CutoutPixels.applyMask(photo, mask)
-        val bounds = CutoutPixels.alphaBounds(masked) ?: return CutoutChoice(photo, null, CutoutStatus.NOT_SURE)
-        // A subject squeezed into a sliver of the outline is a wrong mask (another object, a shadow), not the object.
+        // Trust check only (the bounds never crop): the outline was measured around the object, so whatever the mask
+        // keeps visible (any alpha, so faint thin parts such as chair legs count) must nearly fill it on both axes. A
+        // mask that leaves a large part of the outline empty found something else, or lost part of the object: keep
+        // the rectangle rather than save an object with missing parts.
+        val bounds = CutoutPixels.alphaBounds(masked, minAlpha = 1) ?: return CutoutChoice(photo, null, CutoutStatus.NOT_SURE)
         val bw = bounds[2] - bounds[0]; val bh = bounds[3] - bounds[1]
         if (bw < photo.width * MIN_BOUNDS_SHARE || bh < photo.height * MIN_BOUNDS_SHARE) {
             return CutoutChoice(photo, null, CutoutStatus.NOT_SURE)
         }
-        return CutoutChoice(photo, CutoutPixels.crop(masked, bounds), CutoutStatus.REMOVED)
+        return CutoutChoice(photo, masked, CutoutStatus.REMOVED)
     }
 
     /**
-     * The subject's bounds must span at least this share of the measured outline on each axis: the outline was
-     * measured around the object, so its mask should nearly fill it.
+     * The visible part of the mask must span at least this share of the measured outline on each axis (trust check;
+     * PLAN v3 review MAJOR 5 raised it from 0.5).
      */
-    const val MIN_BOUNDS_SHARE = 0.5
+    const val MIN_BOUNDS_SHARE = 0.85
 }

@@ -383,6 +383,43 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
   - W3: Place quad, bottom edge on the floor, frames/TVs default to the wall; fit check uses W/H/D.
   - Open: re-check TESTING §21 naming chip (ML Kit common bump); cutout texture ≤ 512 px may look soft (budget/WebP option); the Help heading key is still `help_templates_title`.
 - **Orchestrator wiring (2026-11-24):** `Routes.DISTANCE` + composable; Home row `home_rangefinder` after Rectangle (`HomeScreen(onDistance)`); **depth ON by default** (MeasureSettingsRepository + MeasureUiSettings/ScanSettings/RangeUiSettings defaults, test flipped, Help wall tip EN/HI updated); TESTING §23 = Builder A's checklist. Full build running.
+- **2026-11-24 full verification (foreground, in pieces after the reaper killed a background build):** tests engine 233 / ar 152 / data 69 (1 skip) / app 340 (1 skip), 0 failures; Kover OK; assembleDebug + assembleRelease OK (release universal 20,264,270 B); lint app release/debug 0 errors 5 warnings, ar + data clean.
+- **Commit 26dd340** (PLAN v3, pre-review) pushed; CI run 45347834875 started. **Reviewer running** → `docs/reviews/PLAN-v3-review.md`. Pre-review test APK for the user: `builds/SpaceView-v3-prereview-debug.apk` (debug: has the Pro (test) switch + the surface debug HUD line).
+- **CI run 45347834875 (26dd340): GREEN.**
+- **PLAN v3 review DONE** → `docs/reviews/PLAN-v3-review.md`: 0 BLOCKER, 5 MAJOR, 11 MINOR.
+  - **MAJOR 1:** the Distance route lacked `ArScreenAdGuard` → **fixed by the orchestrator** (AppNavHost).
+  - **MAJOR 2:** Ground reads off-ground points.
+  - **MAJOR 3:** a tracking loss in RESULT is not recorded before a retake.
+  - **MAJOR 4:** HeightAim chooses the wrong box-top corner.
+  - **MAJOR 5:** cutouts stretched up to 2× by the mask-bbox crop.
+  - **Fix rounds running:** Builder A on MAJORs 2–4 + range/height MINORs (incl. an honest 500 m cap); Builder B on MAJOR 5, cutout texture resolution, the CI grep for the debug HUD, the ML Kit Data safety check, TESTING §22.
+  - **User sign-off needed** on the honest limits: Ground ≈ 13 m; 500 m ≈ ±160 m ("Rough"); PLAN §5's "30 m by Ground" can't pass.
+- 2026-11-24: the usage limit (reset 15:50 IST) stopped both fix agents mid-round (A at the HeightAim box-top rewrite, B at the ML Kit Data safety check); both were resumed after the reset.
+- **Builder B's review fixes DONE (uncommitted):** data 70 / app 341 green (13:14).
+  - **MAJOR 5:** a cutout = the full rectified W×H canvas with the mask as alpha (no crop, no stretch). The mask bounds are a trust check only: they must span ≥ 85 % of each axis, otherwise the rectangle is kept and Review says "not sure".
+  - **MINOR 8:** transparent cutouts get their own budget, `MAX_CUTOUT_BYTES = 1 MB`, with a texture ladder of 1024 → 256 px. Opaque cutouts and boxes stay at 0.5 MB. If nothing fits → opaque rectangle.
+  - **MINOR 10:** the CI grep now includes `dbg track`.
+  - **MINOR 9:** ML Kit's live data-disclosure page (modified 2025-05-14) has no Subject Segmentation section, but its all-features table already covers it → no new Data safety row. Re-check at submission.
+  - **MINOR 11:** TESTING §22 items 12/14/17 updated. `CutoutPixels.crop` is now unused.
+  - Waiting on Builder A.
+- **Builder A's review fixes DONE:**
+  - **MAJOR 2:** raw hits are kept at any range; Ground is refused when something is in the way (`OFF_GROUND` hint, a sticky block per steady aim); Near wins when the two disagree.
+  - **MAJOR 3:** the 2-sight bookkeeping runs in RESULT too, and `canRetake` is false after any loss or pause.
+  - **MAJOR 4:** `HeightAim.sideFace` intersects the 4 side faces, including the implicit corner.
+  - **The 500 m cap is decided on the whole ±95 interval.** So 2-sight numbers stop at about **350–380 m** with a 30 m walk.
+  - **Level-ground slope raised to 0.3°.** So Ground reaches only about **8.5 m**.
+  - **Other MINORs:**
+    - a far-base "assumes level floor" note;
+    - a base-offset σ of 2 cm;
+    - the Retake button shown only when `canRetake`;
+    - repeated frames skipped on the main thread;
+    - no `require` crash;
+    - TESTING §23 rewritten.
+- **Orchestrator:** deleted the unused `measure_aim_base`/`measure_aim_top` strings (EN/HI).
+- **Full verification (foreground pieces):**
+  - **Tests:** engine 236 / ar 160 / data 70 (1 skip) / app 341 (1 skip), 0 failures; Kover OK.
+  - **Builds and lint:** assembleDebug and assembleRelease pass (release 20,281,722 B); lint: app release 0 errors / 5 warnings, ar and data clean.
+  - **Release dex:** 0 debug-only strings.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
 ## Log

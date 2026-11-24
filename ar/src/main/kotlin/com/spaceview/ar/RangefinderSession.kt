@@ -190,6 +190,7 @@ class RangefinderSession(private val depthWanted: Boolean) : ArFrameListener {
             walkedBaselineM = core.walkedBaselineM,
             preview = core.preview,
             result = core.result,
+            canRetake = core.canRetake,
         )
         val phaseChanged = next.phase != _state.value.phase
         if (!force && !phaseChanged && now - lastPublishMs < PUBLISH_INTERVAL_MS) return

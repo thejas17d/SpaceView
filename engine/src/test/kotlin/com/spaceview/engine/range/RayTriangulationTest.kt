@@ -51,40 +51,89 @@ class RayTriangulationTest {
         }
     }
 
-    @Test
-    fun monteCarloCoverageIsAtLeast95PercentFrom2To500Metres() {
-        val rnd = Random(20261124)
-        for (d in DISTANCES) {
-            val b = RayTriangulation.requiredBaseline(d, aim, model)
-            val walkS = b / WALK_SPEED
-            val camera2 = camera1 + Vec3(b, 0.0, 0.0)
-            val t = target(d)
-            val truth = t.distanceTo(camera2)
-            val heading = model.headingSigma(walkS)
-            val sigmaB = model.baselineSigma(b, walkS)
-            var inside = 0
-            var ok = 0
-            var refused = 0
-            repeat(TRIALS) {
-                val d1 = perturb(t - camera1, aim, rnd)
-                val d2 = perturb(perturb(t - camera2, aim, rnd), heading, rnd)
-                // Sight 1's position relative to sight 2: VIO scale error on the baseline plus per-axis drift.
-                val scale = 1 + model.scaleSigmaRel * rnd.nextGaussian()
-                val o1 = camera2 + (camera1 - camera2) * scale +
-                    Vec3(rnd.nextGaussian(), rnd.nextGaussian(), rnd.nextGaussian()) * sigmaB
-                val r = RayTriangulation.solve(Sight(o1, d1, aim, 0.0), Sight(camera2, d2, aim, walkS), b, false, model, Double.MAX_VALUE)
-                val outcome = r.outcome
-                if (outcome is RangeOutcome.Ok) {
-                    ok++
-                    if (abs(outcome.reading.distance.value - truth) <= outcome.reading.distance.bound95) inside++
-                } else {
-                    refused++
+    /** One Monte-Carlo trial at the 1σ model inputs, with the product cap ON. */
+    private fun trial(d: Double, rnd: Random): Pair<RangeOutcome, Double> {
+        val b = RayTriangulation.requiredBaseline(d, aim, model)
+        val walkS = b / WALK_SPEED
+        val camera2 = camera1 + Vec3(b, 0.0, 0.0)
+        val t = target(d)
+        val heading = model.headingSigma(walkS)
+        val sigmaB = model.baselineSigma(b, walkS)
+        val d1 = perturb(t - camera1, aim, rnd)
+        val d2 = perturb(perturb(t - camera2, aim, rnd), heading, rnd)
+        // Sight 1's position relative to sight 2: VIO scale error on the baseline plus per-axis drift.
+        val scale = 1 + model.scaleSigmaRel * rnd.nextGaussian()
+        val o1 = camera2 + (camera1 - camera2) * scale + Vec3(rnd.nextGaussian(), rnd.nextGaussian(), rnd.nextGaussian()) * sigmaB
+        val r = RayTriangulation.solve(Sight(o1, d1, aim, 0.0), Sight(camera2, d2, aim, walkS), b, false, model)
+        return r.outcome to t.distanceTo(camera2)
+    }
+
+    private class Tally(var ok: Int = 0, var inside: Int = 0, var outOfRange: Int = 0, var refused: Int = 0) {
+        val wrongNumbers: Int get() = ok - inside
+    }
+
+    private fun tally(d: Double, rnd: Random): Tally {
+        val t = Tally()
+        repeat(TRIALS) {
+            val (o, truth) = trial(d, rnd)
+            when (o) {
+                is RangeOutcome.Ok -> {
+                    t.ok++
+                    if (abs(o.reading.distance.value - truth) <= o.reading.distance.bound95) t.inside++
                 }
+                RangeOutcome.OutOfRange -> t.outOfRange++
+                is RangeOutcome.Rejected -> t.refused++
             }
-            val coverage = inside.toDouble() / ok
-            assertTrue("coverage at $d m = $coverage", coverage >= 0.95)
-            assertTrue("refused at $d m = $refused of $TRIALS", refused <= TRIALS * 0.02)
         }
+        return t
+    }
+
+    @Test
+    fun monteCarloCoverageIsAtLeast95PercentFrom2To300MetresWithTheCapOn() {
+        val rnd = Random(20261124)
+        for (d in listOf(2.0, 10.0, 50.0, 150.0, 300.0)) {
+            val t = tally(d, rnd)
+            val coverage = t.inside.toDouble() / t.ok
+            assertTrue("coverage at $d m = $coverage", coverage >= 0.95)
+            assertTrue("refused at $d m = ${t.refused} of $TRIALS", t.refused <= TRIALS * 0.02)
+            assertTrue("out of range at $d m = ${t.outOfRange} of $TRIALS", t.outOfRange <= TRIALS * 0.02)
+        }
+    }
+
+    @Test
+    fun atAndBeyondTheLimitTheCapIsHonest() {
+        val rnd = Random(500600)
+        // A true 500 m: almost always "may be over 500 m"; a number that misses the truth stays rare.
+        val at = tally(500.0, rnd)
+        assertTrue("out of range at 500 m = ${at.outOfRange}", at.outOfRange >= TRIALS * 0.9)
+        assertTrue("wrong numbers at 500 m = ${at.wrongNumbers}", at.wrongNumbers <= TRIALS * 0.05)
+        // A true 600 m: essentially never a number.
+        val beyond = tally(600.0, rnd)
+        assertTrue("numbers at 600 m = ${beyond.ok}", beyond.ok <= TRIALS * 0.005)
+    }
+
+    @Test
+    fun aNumberIsShownOnlyWhenItsWholeIntervalIsWithin500Metres() {
+        for ((d, expectNumber) in listOf(300.0 to true, 450.0 to false)) {
+            val b = RayTriangulation.requiredBaseline(d, aim, model)
+            val c2 = camera1 + Vec3(b, 0.0, 0.0)
+            val o = RayTriangulation.solve(sight(camera1, target(d), 0.0), sight(c2, target(d), b), b, false, model).outcome
+            if (expectNumber) {
+                val m = (o as RangeOutcome.Ok).reading.distance
+                assertTrue(m.high95 <= RangeLimits.MAX_RANGE_M)
+            } else {
+                assertEquals(RangeOutcome.OutOfRange, o)
+            }
+        }
+    }
+
+    @Test
+    fun badInputBecomesNoSightInsteadOfACrash() {
+        assertNull(Sight.of(Vec3(Double.NaN, 0.0, 0.0), Vec3(0.0, 0.0, -1.0), aim, 0.0))
+        assertNull(Sight.of(Vec3.ZERO, Vec3.ZERO, aim, 0.0))
+        assertNull(Sight.of(Vec3.ZERO, Vec3(0.0, 0.0, -1.0), Double.NaN, 0.0))
+        assertNull(Sight.of(Vec3.ZERO, Vec3(0.0, 0.0, -1.0), aim, Double.POSITIVE_INFINITY))
+        assertNotNull(Sight.of(Vec3.ZERO, Vec3(0.0, 0.0, -1.0), aim, 0.0))
     }
 
     @Test

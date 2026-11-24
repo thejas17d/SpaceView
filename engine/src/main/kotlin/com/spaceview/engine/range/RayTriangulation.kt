@@ -20,6 +20,18 @@ class Sight(val origin: Vec3, direction: Vec3, val aimSigmaRad: Double, val time
     init {
         require(origin.isFinite && this.direction.isFinite && aimSigmaRad.isFinite() && aimSigmaRad >= 0 && timeS.isFinite())
     }
+
+    companion object {
+        /**
+         * A sight, or null when any input is non-finite or the direction is degenerate. The AR frame loop uses this
+         * instead of the constructor, so a bad frame is refused and never throws on the main thread (review MINOR 7).
+         */
+        fun of(origin: Vec3, direction: Vec3, aimSigmaRad: Double, timeS: Double): Sight? {
+            if (!origin.isFinite || !direction.isFinite || !(direction.length > 1e-9)) return null
+            if (!aimSigmaRad.isFinite() || aimSigmaRad < 0 || !timeS.isFinite()) return null
+            return Sight(origin, direction, aimSigmaRad, timeS)
+        }
+    }
 }
 
 /**
@@ -125,6 +137,9 @@ object RayTriangulation {
         if (distance > maxRangeM) return result(RangeOutcome.OutOfRange, expectedMiss)
         val m = RangeUncertainty.inverseLaw(distance, rel, model.sigmaMargin)
             ?: return result(RangeOutcome.Rejected(RangeRejection.TOO_UNCERTAIN), expectedMiss)
+        // The cap is decided on the interval, not the point estimate (review MINOR 1): a number only when the whole
+        // ±95 interval is within the limit; otherwise the point may be beyond it.
+        if (m.high95 > maxRangeM) return result(RangeOutcome.OutOfRange, expectedMiss)
         return result(RangeOutcome.Ok(RangeReading(m, RangeMethod.TWO_SIGHT)), expectedMiss)
     }
 

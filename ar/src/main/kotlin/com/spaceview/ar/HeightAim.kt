@@ -18,8 +18,9 @@ import kotlin.math.max
  *   The aim error is stretched by 1 / cos(grazing) and the base's depth error leaks in through the ray's slope; beyond
  *   [VerticalPlaneAim.MAX_GRAZING_DEG] the point is refused ([Top.TooSteep]).
  * - **Top of a box:** a real surface hit on the box's top face (horizontal, above the base, inside its footprint) is
- *   used as before; otherwise the vertical plane through the base corner the crosshair is aimed above (a wardrobe
- *   taller than the eye, a box whose top cannot be seen).
+ *   used as before; otherwise the crosshair ray ∩ the first **vertical side face** of the measured prism it meets (all
+ *   four base corners, including the implicit c0 + c2 − c1), within that face's width (review MAJOR 4). For a box this
+ *   point is exact: aiming at a top edge lands on that edge, whichever face it belongs to. No face → no point.
  * - **Far base of a height:** with no surface hit, the crosshair ray ∩ the tracked floor (Ground range), only while the
  *   Ground ±95 stays within [com.spaceview.engine.range.RangeLimits.GROUND_MAX_REL95].
  */
@@ -31,11 +32,16 @@ internal object HeightAim {
         data object None : Top
     }
 
-    /** The top point of a height whose base is [base], or why there is none. */
+    /**
+     * The top point of a height whose base is [base], or why there is none. Besides the base's own σ, the leak term
+     * carries [BASE_OFFSET_SIGMA_M]: the aimed top is never exactly above the base (review MINOR 4), and an offset d
+     * along the plane normal moves the height by d · |d.y / (d · n)|.
+     */
     fun top(base: Vec3, baseSigmaAlong: (Vec3) -> Double, ray: Ray, forward: Vec3): Top =
         when (val r = VerticalPlaneAim.intersect(base, ray, forward)) {
             is VerticalPlaneAim.Hit -> {
-                val leak = baseSigmaAlong(r.normal) * r.verticalPerBaseOffset
+                val s = baseSigmaAlong(r.normal)
+                val leak = kotlin.math.sqrt(s * s + BASE_OFFSET_SIGMA_M * BASE_OFFSET_SIGMA_M) * r.verticalPerBaseOffset
                 Top.Point(
                     ChosenPoint(
                         position = r.point, normal = r.normal, kind = HitKind.VERTICAL_PLANE, range = r.range,
@@ -51,14 +57,58 @@ internal object HeightAim {
         top(base.point.position, { n -> base.point.sigmaAlong(n) }, ray, forward)
 
     /**
-     * The top of a box over the three committed [base] corners: [surface] when it is the box's top face, else the
-     * vertical plane through the corner the crosshair is aimed above.
+     * The top of a box over the three committed [base] corners: [surface] when it is the box's top face, else the first
+     * vertical side face of the prism the ray meets ([sideFace]).
      */
-    fun boxTop(base: List<EndpointData>, surface: ChosenPoint?, ray: Ray, forward: Vec3): Top {
+    fun boxTop(base: List<EndpointData>, surface: ChosenPoint?, ray: Ray): Top {
         if (base.size < 3) return Top.None
         if (surface != null && isOnTopFace(base.map { it.point.position }, surface)) return Top.Point(surface)
-        val corner = cornerUnderRay(base.map { it.point.position }, ray) ?: return Top.None
-        return top(base[corner], ray, forward)
+        return sideFace(base, ray)
+    }
+
+    /**
+     * The crosshair [ray] ∩ the nearest vertical side face of the prism over the base parallelogram c0, c1, c2,
+     * c3 = c0 + c2 − c1 that it meets in front of the camera, within the face's width ± [FACE_MARGIN_M]. The aim error
+     * is stretched by 1 / cos(grazing) and the corners' σ across the face leaks into the height through the ray's
+     * slope. Refused beyond [VerticalPlaneAim.MAX_GRAZING_DEG] ([Top.TooSteep]); no face met → [Top.None].
+     */
+    fun sideFace(base: List<EndpointData>, ray: Ray): Top {
+        if (base.size < 3) return Top.None
+        val c = base.take(3).map { it.point.position }
+        val corners = listOf(c[0], c[1], c[2], c[0] + c[2] - c[1])
+        var bestT = Double.MAX_VALUE
+        var bestN: Vec3? = null
+        var bestDn = 0.0
+        for (i in 0 until 4) {
+            val a = corners[i]
+            val b = corners[(i + 1) % 4]
+            val e = Vec3(b.x - a.x, 0.0, b.z - a.z)
+            val len = e.length
+            if (len < 1e-6) continue
+            val n = Vec3(e.z, 0.0, -e.x) / len // horizontal, perpendicular to the edge
+            val dn = ray.direction dot n
+            if (abs(dn) < 1e-9) continue
+            val t = ((a - ray.origin) dot n) / dn
+            if (!(t > 0) || t >= bestT) continue
+            val p = ray.pointAt(t)
+            val u = ((p.x - a.x) * e.x + (p.z - a.z) * e.z) / len
+            if (u < -FACE_MARGIN_M || u > len + FACE_MARGIN_M) continue
+            bestT = t
+            bestN = n
+            bestDn = dn
+        }
+        val n = bestN ?: return Top.None
+        val cos = abs(bestDn)
+        if (cos < COS_MAX_GRAZING) return Top.TooSteep
+        val facing = if (bestDn > 0) -n else n // towards the camera
+        val sigma = base.take(3).maxOf { it.point.sigmaAlong(n) }
+        val leak = sigma * abs(ray.direction.y / bestDn)
+        return Top.Point(
+            ChosenPoint(
+                position = ray.pointAt(bestT), normal = facing, kind = HitKind.VERTICAL_PLANE, range = bestT,
+                planeBiasRel = 0.0, aimInflation = 1.0 / cos, extraSigmaM = leak,
+            ),
+        )
     }
 
     /** A hit is on the box's top face when its surface is horizontal, it is above the base and inside its footprint. */
@@ -79,25 +129,6 @@ internal object HeightAim {
         val ma = max(FOOTPRINT_MARGIN_REL, FOOTPRINT_MARGIN_M / max(e1.length, 1e-6))
         val mb = max(FOOTPRINT_MARGIN_REL, FOOTPRINT_MARGIN_M / max(e2.length, 1e-6))
         return a >= -ma && a <= 1 + ma && b >= -mb && b <= 1 + mb
-    }
-
-    /** Index of the corner whose vertical line passes closest (seen from above) to the crosshair [ray], in front of it. */
-    fun cornerUnderRay(corners: List<Vec3>, ray: Ray): Int? {
-        val dx = ray.direction.x
-        val dz = ray.direction.z
-        val l = kotlin.math.sqrt(dx * dx + dz * dz)
-        if (l < 1e-6) return null
-        var best: Int? = null
-        var bestD = Double.MAX_VALUE
-        for (i in corners.indices) {
-            val vx = corners[i].x - ray.origin.x
-            val vz = corners[i].z - ray.origin.z
-            val along = (vx * dx + vz * dz) / l
-            if (along <= 0) continue
-            val off = abs(vx * dz - vz * dx) / l
-            if (off < bestD) { bestD = off; best = i }
-        }
-        return best
     }
 
     /**
@@ -125,6 +156,17 @@ internal object HeightAim {
 
     /** A top-face hit's normal must be within ~20° of vertical. */
     private val TOP_FACE_COS = kotlin.math.cos(Math.toRadians(20.0))
+
+    private val COS_MAX_GRAZING = kotlin.math.cos(Math.toRadians(VerticalPlaneAim.MAX_GRAZING_DEG))
+
+    /** A box side face counts as hit up to this far (m) beyond its corners (aiming exactly at a vertical edge). Tunable. */
+    const val FACE_MARGIN_M = 0.03
+
+    /**
+     * 1σ horizontal offset between a height's base and the point aimed at above it (m): the base is never exactly below
+     * the top (review MINOR 4). Tunable; the hint asks for the base "exactly below the top".
+     */
+    const val BASE_OFFSET_SIGMA_M = 0.02
 
     /** Footprint margin: this fraction of each edge … */
     const val FOOTPRINT_MARGIN_REL = 0.10

@@ -271,19 +271,28 @@ class GalleryPlacementTest {
         Quality.GOOD, false, DeviceTier.DEPTH, null, label, "1.57.0", cutout = CutoutDraft(image),
     )
 
-    /** A photo-like subject (noisy) on a transparent background: a "chair" filling ~55% of its bounding box. */
-    private fun transparentSubject(w: Int = 700, h: Int = 1000): ArgbImage {
+    /**
+     * A chair on a transparent background over the **whole** measured canvas (PLAN v3 review MAJOR 5: never cropped):
+     * seat + back + legs ≈ 55 % of the canvas. [noisy] = the pessimistic busy, noisy subject; else photo-like pixels.
+     */
+    private fun transparentSubject(w: Int = 700, h: Int = 1000, noisy: Boolean = false): ArgbImage {
         val rnd = java.util.Random(4)
+        val photo = TestPhotos.typicalFrame(w, h)
         val px = IntArray(w * h) { i ->
             val x = i % w; val y = i / w
             val inSeat = y in (h * 45 / 100) until (h * 60 / 100)
             val inBack = y < h * 45 / 100 && x in (w / 10) until (w * 9 / 10)
             val inLegs = y >= h * 60 / 100 && (x < w / 8 || x >= w * 7 / 8)
-            val r = (120 + 40 * kotlin.math.sin(x * 0.05) + rnd.nextGaussian() * 12).toInt().coerceIn(0, 255)
-            val g = (80 + 30 * kotlin.math.cos(y * 0.03) + rnd.nextGaussian() * 12).toInt().coerceIn(0, 255)
-            val b = (60 + rnd.nextGaussian() * 12).toInt().coerceIn(0, 255)
+            val rgb = if (noisy) {
+                val r = (120 + 40 * kotlin.math.sin(x * 0.05) + rnd.nextGaussian() * 12).toInt().coerceIn(0, 255)
+                val g = (80 + 30 * kotlin.math.cos(y * 0.03) + rnd.nextGaussian() * 12).toInt().coerceIn(0, 255)
+                val b = (60 + rnd.nextGaussian() * 12).toInt().coerceIn(0, 255)
+                (r shl 16) or (g shl 8) or b
+            } else {
+                photo[i] and 0xFFFFFF
+            }
             val a = if (inSeat || inBack || inLegs) 255 else 0
-            (a shl 24) or (r shl 16) or (g shl 8) or b
+            (a shl 24) or rgb
         }
         return ArgbImage(w, h, px)
     }
@@ -318,17 +327,35 @@ class GalleryPlacementTest {
         assertEquals(ModelKind.CUTOUT, p.modelKind)
     }
 
-    @Test fun transparentCutoutBlendsAPngTextureWithinTheBudget() = runTest {
+    @Test fun transparentCutoutBlendsAPngTextureWithinItsOwnBudget() = runTest {
         val repo = repo()
         val id = repo.save(chair(transparentSubject()))
         val item = repo.get(id)!!
         assertEquals(ModelKind.CUTOUT, item.modelKind)
-        assertTrue("${item.bytes} B", item.bytes <= GalleryRepository.MAX_SCAN_BYTES)
+        assertTrue("${item.bytes} B", item.bytes <= GalleryRepository.MAX_CUTOUT_BYTES)
         val glb = item.modelFile.readBytes()
         val text = String(glb, Charsets.ISO_8859_1)
         assertTrue("alpha cutout: BLEND + PNG", "\"alphaMode\":\"BLEND\"" in text && "image/png" in text)
         assertEquals(0.48, GlbReader.readInfo(glb)!!.widthM, 0.0)
-        println("CUTOUT SIZE: model.glb=${item.modelFile.length()} B, cutout.webp=${item.photoFile?.length()} B, thumb=${item.thumbnailFile?.length()} B")
+        println("CUTOUT SIZE (photo-like, saved): model.glb=${item.modelFile.length()} B, cutout.webp=${item.photoFile?.length()} B, thumb=${item.thumbnailFile?.length()} B, total=${item.bytes} B")
+    }
+
+    /** MINOR 8: the texture sizes a transparent cutout actually gets (recorded in TESTING §22 and the HANDOFF). */
+    @Test fun transparentCutoutTextureKeepsAtLeast640PxForAPhotoLikeSubject() {
+        val repo = repo()
+        val w = Dimension.measured(0.48, 0.01); val h = Dimension.measured(0.86, 0.012)
+        for ((label, image) in listOf("photo-like 700x1000" to transparentSubject(), "photo-like 1024x1024" to transparentSubject(1024, 1024),
+            "noisy 700x1000" to transparentSubject(noisy = true))) {
+            val e = repo.encodeCutout(w, h, "Chair", image)
+            println("CUTOUT TEXTURE [$label]: ${e.textureSide} px PNG, glb=${e.glb.size} B, picture=${e.frontWidth}x${e.frontHeight} q${e.frontQuality} ${e.front?.size} B, total=${e.totalBytes} B")
+            assertTrue(label, e.totalBytes <= GalleryRepository.MAX_CUTOUT_BYTES)
+            assertTrue("$label: transparent, never a plain panel", e.textureSide > 0)
+            if (label.startsWith("photo-like")) assertTrue("$label: ${e.textureSide} px", e.textureSide >= 640)
+        }
+        // An opaque picture keeps the scan budget and a JPEG texture.
+        val opaque = repo.encodeCutout(w, h, "Frame", ArgbImage(640, 480, TestPhotos.typicalFrame(640, 480)))
+        assertEquals(0, opaque.textureSide)
+        assertTrue(opaque.totalBytes <= GalleryRepository.MAX_SCAN_BYTES)
     }
 
     @Test fun cutoutWithoutAPhotoIsAPlainPanel() = runTest {

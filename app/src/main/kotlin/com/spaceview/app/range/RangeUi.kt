@@ -25,6 +25,7 @@ internal object RangeUi {
         RangeIssue.NEED_FLOOR -> R.string.range_issue_need_floor
         RangeIssue.ABOVE_HORIZON -> R.string.range_issue_above_horizon
         RangeIssue.GROUND_TOO_FAR -> R.string.range_issue_ground_too_far
+        RangeIssue.OFF_GROUND -> R.string.range_issue_off_ground
         RangeIssue.OUT_OF_RANGE -> R.string.range_out_of_range
     }
 

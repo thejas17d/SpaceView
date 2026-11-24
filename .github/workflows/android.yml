@@ -154,10 +154,11 @@ jobs:
           # "Test: unlock Pro" button exist only behind BuildConfig.FAKE_BILLING (a constant false in release), so R8
           # must strip them with the fake billing gateway. Their class names and their (deliberately unlocalised)
           # texts are searched for; any hit means test-only code shipped. (The 3D Scan Lab left v1 with PLAN v3.)
-          HITS=$(unzip -p "$APK" 'classes*.dex' | grep -a -c -E 'FakeBillingControls|FakeBillingGateway|FakeUnlockProButton|fake_billing|fake_pro_switch|fake_unlock_pro|Pro \(test\)|Test: unlock Pro|Developer \(debug build only\)' || true)
+          # "dbg track" is the W6 surface-timing HUD line (MeasureHud, behind BuildConfig.DEBUG; review MINOR 10).
+          HITS=$(unzip -p "$APK" 'classes*.dex' | grep -a -c -E 'FakeBillingControls|FakeBillingGateway|FakeUnlockProButton|fake_billing|fake_pro_switch|fake_unlock_pro|Pro \(test\)|Test: unlock Pro|Developer \(debug build only\)|dbg track' || true)
           echo "Debug-only references in release dex: $HITS"
           if [ "$HITS" != "0" ]; then
-            echo "::error::Debug-only code (Pro test switch / fake billing UI) found in the release APK."
+            echo "::error::Debug-only code (Pro test switch / fake billing UI / debug HUD) found in the release APK."
             exit 1
           fi
 

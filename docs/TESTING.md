@@ -437,12 +437,12 @@ Phone: **Google Pixel 10a**. Install the v3 APK **over** the build you tested be
 **W2: background-free cutouts** (debug or release; internet once, so Google Play services can fetch the ML Kit model)
 10. **First run of the background removal:** the model comes with Google Play services (no APK download). Right after a fresh install it may not be ready yet: Review then says "Couldn't remove the background on this phone right now…" and keeps the rectangle. After a few minutes on Wi-Fi it must work. Note how long it took.
 11. **Photo frame (flat):** scan a frame on a wall. Review shows the photo cut **exactly to its corners** on a checkerboard, with "Cut exactly to the measured corners." No "Undo cutout" button. Saved size and ± are as before.
-12. **Chair (Other) or a carton (Box):** scan it in front of a wall. While "Removing the background…" shows, Save waits. Then the chair appears **without its background** on the checkerboard (the checkerboard shows through between the legs), at the measured W:H, with "Background removed: only the object is saved, at its measured size."
+12. **Chair (Other) or a carton (Box):** scan it in front of a wall. While "Removing the background…" shows, Save waits. Then the chair appears **without its background** on the checkerboard (the checkerboard shows through between the legs), with "Background removed: only the object is saved, at its measured size." The picture is the **whole measured outline** (W:H of the measured width and height) with the background transparent: the chair is never stretched (review MAJOR 5). Faint thin parts (legs) may look semi-transparent; if the mask loses a large part of the object (less than 85 % of the outline's width or height), Review keeps the rectangle and says "Couldn't find the object's edges clearly…" instead. Check with a tape: the chair's seat height in the picture matches the real chair (proportions, not just the outline).
 13. **Undo cutout:** tap "Undo cutout": the full rectangle photo comes back and the note says the background is kept. "Remove background again" restores the cutout. Save stores the one shown.
-14. **Hard background:** scan a box against a busy background of the same colour. If the edges are not clear, Review says "Couldn't find the object's edges clearly…" and keeps the rectangle (no crash, Save works).
+14. **Hard background:** scan a box against a busy background of the same colour. If the edges are not clear (a confused mask, or one that leaves much of the outline empty), Review says "Couldn't find the object's edges clearly…" and keeps the rectangle (no crash, Save works). "Undo cutout" is then not offered (there is nothing to undo).
 15. Gallery: the grid thumbnail and the item photo are the cutout (checkerboard behind a removed background). The item's size, ±, depth and the "Edit dimensions" flow are unchanged; after an edit the model is rebuilt at the new size (still a cutout).
 16. Share from the item and from Saved: WhatsApp and Gmail receive the picture (a `.webp`). Note whether WhatsApp shows the transparent area as black or white (cosmetic; report it).
-17. Size: Settings → Delete my data still clears everything; each saved scan is ≤ 0.5 MB (About → storage, or `adb shell du`).
+17. Size (review MINOR 8): Settings → Delete my data still clears everything. A **transparent** cutout has its own budget of **1 MB** (`MAX_CUTOUT_BYTES`: its texture must be an RGBA PNG); a flat (frame/TV) or undone cutout stays ≤ 0.5 MB. Check with `adb shell run-as com.spaceview.app.debug du -b files/gallery/<id>` and record the sizes and, for the chair, the texture size (expected ≥ 640–768 px for a real photo; JVM measurements are in the HANDOFF). If even the smallest PNG did not fit, the item is saved as the opaque rectangle (never as a plain panel).
 18. Hindi: every new Review note and button is in Hindi; Help → "Scans and cutouts" and the privacy text mention on-device background removal.
 
 **W3: flat Place in room**
@@ -461,28 +461,41 @@ Phone: Google Pixel 10a. **"Use depth" is now ON by default**, so first check it
 
 1. **Surface, textured floor:** from a fresh Measure open, read the debug HUD line (`dbg track · hit · lock · now · depth · rep`). Targets: hit ≤ 2 s, lock ≤ 2.5 s. Do 5 runs with depth on and 5 with it off, and record the times, the first hit source and `rep`.
 2. **Surface, plain painted wall:** target hit ≤ 4 s. Expect a depth point first when depth is on; with it off, expect a slow hit or none.
-3. **Height, tilt:** a 2 m door from 3 m away, with the base at the door's foot.
+3. **Height, tilt:** a 2 m door from 3 m away, with the base exactly below the top (the hint now says so).
    - Tilting up to 60°, the point stays on the door's vertical line and the result is inside its ±.
-   - The ± grows as you tilt.
+   - The ± grows as you tilt. It also carries a 2 cm "base not exactly below the top" allowance (`HeightAim.BASE_OFFSET_SIGMA_M`).
    - Past about 75°, the "Too steep" hint shows.
-4. **Height, far base:** about 10 m away on level floor, the base lands on the floor. Record the distance (about 13–25 m) at which the far base is refused.
+   - Put the base 10 cm in front of the door line and tilt to 60°: the height is off by about 17 cm. This is expected (outside the 2 cm allowance); note it.
+4. **Height, far base:**
+   - About 7–8 m away on a level floor, with nothing under the crosshair for 5 frames, the base lands on the floor.
+   - The result card says "The base is on the floor far away: this assumes a level floor."
+   - Record the distance at which the far base is refused (about 8–9 m at hand height with the 0.3° slope allowance).
 5. **Scan box height:**
    - On a low box, the top-face hit is used and H matches a tape measure.
-   - On a wardrobe taller than eye level, aim above its front corner: the point slides up and H is inside its ±.
+   - On a wardrobe taller than eye level, aim at the top edge of the face you see, anywhere along it: the point lands on that face's top edge and H is inside its ±.
+   - Aim at the top edge 10 cm off centre, and from a diagonal view at the far vertical edge: H still matches. These cases used the wrong corner before the fix.
 6. **Distance, Near:** a 5 m tape check is inside the ±, with the badge "AR point".
-7. **Distance, Ground:** at 8 m and 12 m on level paving, the reading is inside the ± and shows the badges "Ground" and "Assumes level ground". At 30 m it says "Too far for one sight. Use 2 sights."
+7. **Distance, Ground:**
+   - At 6 m and 8 m on level paving, the reading is inside the ± and shows the badges "Ground" and "Assumes the point is on level ground".
+   - At 12 m it usually says "Too far for one sight. Use 2 sights." (the slope allowance is now 0.3°).
+   - Aim at the foot of a wall or a car about 9 m away: it says "Something is in the way before the ground…", never a Ground number.
+   - Aim at a box top about 3 m away: it shows "AR point", never "Ground".
+   - **Slope check:** on paving with a known 1–2% fall, record the error against a tape. If it is outside the ±, raise `RangeErrorModel.LEVEL_GROUND_SLOPE_DEG` towards 0.4°.
 8. **Distance, 2-sight:** at 100 m and 300 m, check against a map, GPS or a known distance.
    - The ± covers the truth.
    - The app asks for a walk of about 12 m at 100 m and about 30 m at 300 m.
    - The walked distance and the preview update while you walk.
-   - **Honest limit as built:** a 500 m target ends near ±160 m (aim error 0.24°). See HANDOFF for the improvement proposal.
+   - **Honest limit as built:** a number is shown only when its whole ±95 interval is within 500 m. With a 30 m walk and the 0.24° aim error, that holds up to about 350–380 m; further targets show "Out of range: may be over 500 m".
 9. **Refusals:**
    - Cover the camera between sights → "tracking lost", and no retake is offered.
+   - Get a refusal, cover the camera while the result is on screen, then uncover it → Retake is no longer offered.
+   - Leave the app with a result on screen and come back → Retake is not offered.
    - Aim sight 2 at a different object → "different things".
-   - Walk 1 m on a 200 m target → "near-parallel".
-10. **Out of range:** a point at 600 m shows "Out of range (over 500 m)", never a number.
+   - Walk 1 m on a 200 m target → "near-parallel" (sometimes "Not accurate enough yet": the measured angle is noisy).
+10. **Out of range:** a point at 600 m shows "Out of range: may be over 500 m". It is never a number (fewer than 1 in 200 tries in the Monte-Carlo test). A target at exactly 500 m also usually shows "Out of range".
 11. **TalkBack:** Hold and every 2-sight result are spoken once, in words. The live value is spoken once it settles.
 12. **Ads:** no ad appears on the Distance screen or when leaving it.
+    - On a first launch (or with consent still pending), tap "How far?" straight after Home: no consent form appears over the camera.
 13. **Hindi:** in the Hindi locale, every Distance string shows in Hindi.
 14. **Imperial units:** decimal feet, never with more digits than the ± supports.
 

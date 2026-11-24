@@ -13,8 +13,8 @@
     <string name="range_method_near">AR पॉइंट</string>
     <string name="range_method_ground">ज़मीन</string>
     <string name="range_method_two_sight">2 निशाने</string>
-    <string name="range_assumes_level">ज़मीन समतल मानी गई है</string>
-    <string name="range_out_of_range">रेंज से बाहर (500 m से ज़्यादा)</string>
+    <string name="range_assumes_level">माना गया है कि यह जगह समतल ज़मीन पर है</string>
+    <string name="range_out_of_range">रेंज से बाहर: 500 m से ज़्यादा हो सकता है</string>
     <string name="range_hold">रोकें</string>
     <string name="range_live">लाइव</string>
     <string name="range_two_sight">दूर की जगह: 2 निशाने</string>
@@ -30,12 +30,13 @@
     <string name="range_done">हो गया</string>
     <string name="range_cancel">रद्द करें</string>
     <string name="range_result_a11y">दूरी %1$s। तरीका: %2$s।</string>
-    <string name="range_out_of_range_a11y">रेंज से बाहर। 500 मीटर से ज़्यादा।</string>
+    <string name="range_out_of_range_a11y">रेंज से बाहर। यह जगह 500 मीटर से ज़्यादा दूर हो सकती है।</string>
 
     <string name="range_issue_hold_steady">फ़ोन स्थिर रखें।</string>
     <string name="range_issue_need_floor">एक बार अपने पास के फ़र्श पर निशाना रखें, ताकि SpaceView जान सके कि फ़ोन कितनी ऊँचाई पर है। या 2 निशाने इस्तेमाल करें।</string>
     <string name="range_issue_above_horizon">यहाँ नापने को कुछ नहीं है। ज़मीन पर निशाना रखें, या दूर की जगह के लिए 2 निशाने इस्तेमाल करें।</string>
     <string name="range_issue_ground_too_far">एक निशाने के लिए बहुत दूर है। 2 निशाने इस्तेमाल करें।</string>
+    <string name="range_issue_off_ground">ज़मीन से पहले कोई चीज़ बीच में है। एक निशाना सिर्फ़ ज़मीन पर की जगह नापता है: 2 निशाने इस्तेमाल करें।</string>
 
     <string name="range_reject_tracking_lost">दोनों निशानों के बीच ट्रैकिंग छूट गई। फिर से शुरू करें।</string>
     <string name="range_reject_near_parallel">दोनों निशाने लगभग समानांतर हैं। और बगल में चलें और निशाना 2 फिर से लें।</string>
@@ -46,5 +47,8 @@
     <string name="range_sight_not_steady">निशाना स्थिर नहीं रहा। फिर से कोशिश करें।</string>
     <string name="range_sight_not_tracking">ट्रैकिंग छूट गई। धीरे चलें और फिर से कोशिश करें।</string>
 
+    <string name="measure_aim_base_below_top">बेस पॉइंट ठीक उस ऊपर वाले सिरे के नीचे रखें जिसे आप नापेंगे।</string>
+    <string name="measure_aim_top_above_base">बेस पॉइंट के ठीक ऊपर वाले सिरे पर निशाना रखें। फ़ोन झुकाना ठीक है।</string>
+    <string name="measure_assumes_level_floor">बेस दूर फ़र्श पर है: यह माना गया है कि फ़र्श समतल है।</string>
     <string name="measure_height_too_steep">बहुत खड़ा कोण है। पीछे हटें, ताकि ऊपर का सिरा 75° से कम ऊपर हो।</string>
 </resources>

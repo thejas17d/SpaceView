@@ -61,11 +61,11 @@ class RangefinderCoreTest {
 
     @Test
     fun groundReadsAPointOnTheFloorBeyondTheHitRange() {
-        val target = groundPoint(9.0)
+        val target = groundPoint(7.0)
         hold(40, eye, target)
         val live = core.live!!
         assertEquals(RangeMethod.GROUND, live.method)
-        assertEquals(9.0, live.distance.value, 1e-6)
+        assertEquals(7.0, live.distance.value, 1e-6)
         assertTrue(live.assumesLevelGround)
         assertTrue(core.floorKnown)
     }
@@ -77,8 +77,49 @@ class RangefinderCoreTest {
         assertEquals(RangeIssue.GROUND_TOO_FAR, core.liveIssue)
         hold(40, eye, Vec3(0.0, 30.0, -200.0)) // above the horizon, nothing hit
         assertEquals(RangeIssue.ABOVE_HORIZON, core.liveIssue)
-        hold(40, eye, groundPoint(9.0).let { it }, floorY = null)
+        hold(40, eye, groundPoint(7.0), floorY = null)
         assertEquals(RangeIssue.NEED_FLOOR, core.liveIssue)
+    }
+
+    @Test
+    fun aHitAboveTheFloorBeyondNearRangeBlocksGround() {
+        // Review MAJOR 2: the foot of a wall 0.3 m above the paving, 9 m away, from a phone 2.5 m up (on steps), where
+        // Ground of the floor behind it (about 10.3 m, inside its 10% gate) would otherwise be shown.
+        val high = Vec3(0.0, 2.5, 0.0)
+        val wallFoot = Vec3(0.0, 0.3, -sqrt(81.0 - 2.2 * 2.2))
+        hold(40, high, wallFoot) // no hit yet: Ground is shown for the floor behind
+        assertEquals(RangeMethod.GROUND, core.live!!.method)
+        assertTrue(core.live!!.distance.value > 10.0)
+        val hit = HitSample(wallFoot, Vec3(0.0, 0.0, 1.0), HitKind.DEPTH_POINT, wallFoot.distanceTo(high))
+        hold(5, high, wallFoot, hit)
+        assertNull(core.live)
+        assertEquals(RangeIssue.OFF_GROUND, core.liveIssue)
+        // The hit dropping out for a few frames of the same steady aim does not let Ground back in.
+        hold(10, high, wallFoot)
+        assertNull(core.live)
+        assertEquals(RangeIssue.OFF_GROUND, core.liveIssue)
+    }
+
+    @Test
+    fun aNearPointAboveTheFloorIsShownAsNearNeverAsGround() {
+        // A box top 0.3 m high, 3 m away: Near reads it; Ground (the floor behind it, ~3.8 m) is refused.
+        val top = Vec3(0.0, 0.3, -sqrt(9.0 - 1.2 * 1.2))
+        val hit = HitSample(top, Vec3.UP, HitKind.PLANE, top.distanceTo(eye))
+        hold(60, eye, top, hit)
+        assertEquals(RangeMethod.NEAR, core.live!!.method)
+        assertEquals(3.0, core.live!!.distance.value, 1e-6)
+        // Without the hit (dropped out), still no Ground for this aim.
+        hold(5, eye, top)
+        assertTrue(core.live == null || core.live!!.method == RangeMethod.NEAR)
+    }
+
+    @Test
+    fun aHitOnTheFloorItselfAgreesWithGround() {
+        val p = groundPoint(6.0)
+        val hit = HitSample(p, Vec3.UP, HitKind.PLANE, p.distanceTo(eye))
+        hold(60, eye, p, hit)
+        val live = core.live!!
+        assertEquals(6.0, live.distance.value, 1e-3)
     }
 
     @Test
@@ -124,6 +165,7 @@ class RangefinderCoreTest {
         assertEquals(truth, reading.distance.value, 1e-3)
         assertTrue(core.drainEvents().any { it is RangeEvent.Result })
         // Retake keeps sight 1.
+        assertTrue(core.canRetake)
         assertTrue(core.retakeSight2())
         assertEquals(RangePhase.WALK, core.phase)
         core.backToLive()
@@ -146,6 +188,32 @@ class RangefinderCoreTest {
     }
 
     @Test
+    fun trackingLostWhileTheResultIsShownForbidsARetake() {
+        // Review MAJOR 3: refused sight 2, then the camera is covered while the result is on screen.
+        val target = Vec3(0.0, 4.0, -80.0)
+        hold(30, eye, target)
+        core.startTwoSight()
+        core.takeSight()
+        hold(RangefinderCore.SIGHT_SAMPLES, eye, target)
+        var pos = eye
+        while (pos.x < 8.0) {
+            pos += Vec3(0.02, 0.0, 0.0)
+            frame(pos, target)
+        }
+        hold(30, pos, target)
+        core.takeSight()
+        hold(RangefinderCore.SIGHT_SAMPLES, pos, Vec3(0.0, 9.0, -80.0)) // aimed at something else
+        assertEquals(RangePhase.RESULT, core.phase)
+        assertEquals(RangeOutcome.Rejected(RangeRejection.INCONSISTENT_SIGHTS), core.result)
+        assertTrue(core.canRetake)
+        frame(pos, target, tracking = CameraTracking.PAUSED)
+        frame(pos, target)
+        assertFalse(core.canRetake)
+        assertFalse(core.retakeSight2())
+        assertEquals(RangePhase.RESULT, core.phase)
+    }
+
+    @Test
     fun aPausedSessionLosesAPendingTwoSight() {
         val target = Vec3(0.0, 4.0, -80.0)
         hold(30, eye, target)
@@ -154,6 +222,7 @@ class RangefinderCoreTest {
         hold(RangefinderCore.SIGHT_SAMPLES, eye, target)
         core.reset()
         assertEquals(RangeOutcome.Rejected(RangeRejection.TRACKING_LOST), core.result)
+        assertFalse(core.canRetake) // review MINOR 5: the UI offers no dead Retake button
         assertFalse(core.retakeSight2())
     }
 

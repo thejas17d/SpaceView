@@ -287,6 +287,10 @@ class MeasureSession(
     /** The floor under the camera (W5 far base): robust lowest horizontal surface of this session. */
     private val floor = FloorEstimator()
     private var frameCounter = 0
+    /** Camera timestamp of the last processed frame (repeats are skipped on main, W6). */
+    private var lastFrameTs = Long.MIN_VALUE
+    /** Repeated SceneView frames in the first seconds of the session (W6 diagnostics). */
+    @Volatile private var repeatedFrames = 0
     /** Elapsed-realtime ms when the current ARCore session started running (W6 diagnostics), -1 before. */
     @Volatile private var sessionStartMs = -1L
     /** Bumped on every new ARCore session: the worker resets its per-session state and diagnostics. */
@@ -367,6 +371,8 @@ class MeasureSession(
         floor.reset()
         sessionEpoch++
         sessionStartMs = -1L
+        lastFrameTs = Long.MIN_VALUE
+        repeatedFrames = 0
         liveAim = null
         intrinsics = null
         cpuCamera = null
@@ -380,7 +386,11 @@ class MeasureSession(
         if (closed) return
         this.session = session
         live = true
-        if (sessionStartMs < 0) sessionStartMs = SystemClock.elapsedRealtime()
+        // Diagnostics are timed from every resume (review MINOR 6), and the worker starts a fresh epoch.
+        sessionStartMs = SystemClock.elapsedRealtime()
+        repeatedFrames = 0
+        lastFrameTs = Long.MIN_VALUE
+        sessionEpoch++
         _state.update { it.copy(sessionRunning = true) }
     }
 
@@ -420,12 +430,24 @@ class MeasureSession(
     /** `onSessionUpdated`: once per ARCore frame, main thread. */
     @MainThread
     override fun onFrame(session: Session, frame: Frame) {
-        latestCentreHit = null
-        if (closed || viewW <= 0 || viewH <= 0) return
+        if (closed || viewW <= 0 || viewH <= 0) {
+            latestCentreHit = null
+            return
+        }
         this.session = session
         live = true // a frame means the session is running
         if (sessionStartMs < 0) sessionStartMs = SystemClock.elapsedRealtime()
         if (!_state.value.sessionRunning) _state.update { it.copy(sessionRunning = true) }
+        // W6 (review MINOR 6): SceneView repeats the camera frame at the display rate. A repeated frame has the same
+        // hit, cloud and depth: skip the native reads and the worker sample; keep [latestCentreHit] (still this frame's)
+        // and keep serving a pending "+" so its wait does not stretch.
+        if (frame.timestamp == lastFrameTs) {
+            if (sessionStartMs >= 0 && SystemClock.elapsedRealtime() - sessionStartMs < DIAG_REPEAT_WINDOW_MS) repeatedFrames++
+            processCommitRequest(session, lastTracking)
+            return
+        }
+        lastFrameTs = frame.timestamp
+        latestCentreHit = null
         val camera = frame.camera
         val tracking = FrameReaders.tracking(camera.trackingState)
         lastTracking = tracking
@@ -988,6 +1010,9 @@ class MeasureSession(
         var lastStatus: TrackingStatus? = null
         var lowLightSeen = false
         var lastTs = Long.MIN_VALUE
+        var noSurfaceRun = 0
+        var kindRun = 0
+        var lastGround = false
         var epoch = -1
         var diag = SurfaceDiagnostics()
         var surfaceSeen = false
@@ -1007,14 +1032,10 @@ class MeasureSession(
                 // in between. A repeated frame is not a new sample: averaging it would shrink the ± dishonestly.
                 val repeated = s.timestampNs == lastTs
                 lastTs = s.timestampNs
-                if (repeated) {
-                    // Counted over the first seconds only, so the snapshot stops changing (no 10 Hz recomposition).
-                    val start = sessionStartMs
-                    if (start >= 0 && SystemClock.elapsedRealtime() - start < DIAG_REPEAT_WINDOW_MS) {
-                        diag = diag.copy(repeatedFrames = diag.repeatedFrames + 1)
-                    }
-                    if (s.generation == lastGeneration) continue
-                }
+                // Main already skips repeated frames; this is a safety net for any that still arrive.
+                if (repeated && s.generation == lastGeneration) continue
+                val reps = repeatedFrames
+                if (diag.repeatedFrames != reps) diag = diag.copy(repeatedFrames = reps)
                 val gateResult = gate.update(s.timestampNs, s.tracking, s.reason, s.cameraPose, s.light)
                 if (s.endpoints.isEmpty()) lowLightSeen = false
                 if (gateResult.lowLight) lowLightSeen = true
@@ -1035,8 +1056,13 @@ class MeasureSession(
                         is HeightAim.Top.Point -> aimed.chosen
                         HeightAim.Top.TooSteep -> { tooSteep = true; null }
                         HeightAim.Top.None -> null
-                        null -> SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs)
-                            ?: farBase(s, ray)
+                        null -> {
+                            val surfacePoint = SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs)
+                            noSurfaceRun = if (surfacePoint == null) noSurfaceRun + 1 else 0
+                            // Far base only after a run of frames with nothing under the crosshair (review MINOR 3): a hit
+                            // that drops out for a frame must not flip the base to the floor behind it.
+                            surfacePoint ?: if (noSurfaceRun >= FAR_BASE_MIN_MISSES) farBase(s, ray) else null
+                        }
                     }
                 } else {
                     null
@@ -1055,7 +1081,10 @@ class MeasureSession(
                     // While the user works on a frozen still, tracking stays fresh but nothing is averaged.
                     // NOT_TRACKING resets the stabiliser even without a position (M2 review minor 4).
                     active.add(chosen?.position, range, gateResult.sampleQuality, loc)
-                    (if (ground) stabilizer else groundStabilizer).reset()
+                    // The other window is dropped only after a steady run of this kind, never on a one-frame switch.
+                    kindRun = if (ground == lastGround) kindRun + 1 else 1
+                    lastGround = ground
+                    if (kindRun == KIND_SWITCH_FRAMES) (if (ground) stabilizer else groundStabilizer).reset()
                 }
                 val est = active.estimate
                 val liveData: EndpointData? = if (chosen != null) {
@@ -1145,7 +1174,7 @@ class MeasureSession(
     private fun chooseW5(s: FrameSample, ray: com.spaceview.engine.Ray, surface: LocalSurfaceModel): HeightAim.Top? = when {
         s.mode == MeasureMode.HEIGHT && s.endpoints.size == 1 -> HeightAim.top(s.endpoints[0], ray, s.cameraPose.forward)
         s.mode == MeasureMode.BOX && s.endpoints.size == 3 -> HeightAim.boxTop(
-            s.endpoints, SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs), ray, s.cameraPose.forward,
+            s.endpoints, SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs), ray,
         )
         else -> null
     }
@@ -1236,6 +1265,10 @@ class MeasureSession(
         private val FLOOR_NORMAL_COS = kotlin.math.cos(Math.toRadians(15.0))
         /** ARCore's upward planes are offered to the floor estimate every this many frames (~1 s at 30 fps). */
         private const val FLOOR_PLANE_EVERY = 30
+        /** W5 far base: this many consecutive frames with no surface under the crosshair before the floor is used. */
+        const val FAR_BASE_MIN_MISSES = 5
+        /** A stabiliser of the other kind (ground / surface) is reset only after this many frames of one kind. */
+        const val KIND_SWITCH_FRAMES = 5
         /** W6 diagnostics count repeated SceneView frames over this long after the session starts. */
         private const val DIAG_REPEAT_WINDOW_MS = 10_000L
         /** "Same spot" window of a far ground base (W5): absolute part (m) ... */

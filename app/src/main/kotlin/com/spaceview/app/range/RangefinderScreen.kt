@@ -363,8 +363,8 @@ private fun Controls(state: RangeState, session: RangefinderSession) {
             PrimaryAction(R.string.range_take_sight_2, enabled = tracking && state.phase == RangePhase.WALK) { session.takeSight() }
         }
         RangePhase.RESULT -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            val rejected = state.result as? RangeOutcome.Rejected
-            if (rejected == null || RangeUi.canRetake(rejected.reason)) SecondaryAction(R.string.range_retake) { session.retakeSight2() }
+            // Offered only when the core can really retake (no tracking loss or pause since sight 1; review MINOR 5).
+            if (state.canRetake) SecondaryAction(R.string.range_retake) { session.retakeSight2() }
             SecondaryAction(R.string.range_start_over) { session.startTwoSight() }
             PrimaryAction(R.string.range_done) { session.backToLive() }
         }

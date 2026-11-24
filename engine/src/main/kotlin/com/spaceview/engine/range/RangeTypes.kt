@@ -62,7 +62,10 @@ class RangeReading(val distance: Measurement, val method: RangeMethod) {
 sealed interface RangeOutcome {
     data class Ok(val reading: RangeReading) : RangeOutcome
 
-    /** Beyond [RangeLimits.MAX_RANGE_M]: never shown as a number. */
+    /**
+     * The point may be beyond [RangeLimits.MAX_RANGE_M]: the reading's ±95 interval reaches past the limit. Never shown
+     * as a number (the UI says "may be over 500 m"), so a number is shown only when it is credibly within 500 m.
+     */
     data object OutOfRange : RangeOutcome
 
     data class Rejected(val reason: RangeRejection) : RangeOutcome
@@ -70,7 +73,10 @@ sealed interface RangeOutcome {
 
 /** Hard limits and gates of the rangefinder (docs/PLAN-v3-2D.md W4). Tunables are marked. */
 object RangeLimits {
-    /** Product limit: beyond this the app shows "out of range", never a number. */
+    /**
+     * Product limit: a number is shown only when its whole ±95 interval is within this; otherwise "out of range". With
+     * the default aim model a 2-sight target therefore shows a number up to about 350–380 m (its ± reaches 500 m beyond).
+     */
     const val MAX_RANGE_M = 500.0
 
     /** AR hits further than this are not trusted as Near readings (tunable from the device test). */

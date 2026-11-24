@@ -78,8 +78,9 @@ class HeightAimTest {
     @Test
     fun theBaseDepthErrorLeaksIntoASteepTop() {
         val c = (aimAt(60.0) as HeightAim.Top.Point).chosen
-        // Base σ along the plane normal × tan 60°.
-        val expected = base().point.sigmaAlong(Vec3(0.0, 0.0, 1.0)) * tan(Math.toRadians(60.0))
+        // Base σ along the plane normal ⊕ the base-not-under-the-top allowance, × tan 60° (review MINOR 4).
+        val sb = base().point.sigmaAlong(Vec3(0.0, 0.0, 1.0))
+        val expected = sqrt(sb * sb + HeightAim.BASE_OFFSET_SIGMA_M * HeightAim.BASE_OFFSET_SIGMA_M) * tan(Math.toRadians(60.0))
         assertEquals(expected, c.extraSigmaM, 1e-9)
         val plain = AimModel.aim(c.range, intr)!!
         val loc = c.localisation(plain)!!
@@ -88,29 +89,59 @@ class HeightAimTest {
         assertEquals(sqrt(px * px + extraPx * extraPx), loc.pixelErrorPx, 1e-9)
     }
 
+    /** The box of review MAJOR 4: front edge z = −2 (x −0.5..0.5), back edge z = −3, 0.8 m tall. */
+    private val box = listOf(Vec3(-0.5, 0.0, -2.0), Vec3(0.5, 0.0, -2.0), Vec3(0.5, 0.0, -3.0)).map { base(it) }
+    private val boxH = 0.8
+
+    private fun boxTopAimedAt(from: Vec3, target: Vec3, surface: ChosenPoint? = null): HeightAim.Top =
+        HeightAim.boxTop(box, surface, Ray(from, target - from))
+
     @Test
-    fun boxTopUsesTheTopFaceWhenItIsHitElseTheVerticalPlaneOverTheNearestCorner() {
-        val corners = listOf(Vec3(-0.5, 0.0, -2.0), Vec3(0.5, 0.0, -2.0), Vec3(0.5, 0.0, -3.0)).map { base(it) }
-        val f = forward(-10.0)
-        val ray = Ray(camera, f)
-        val topFace = ChosenPoint(Vec3(0.0, 0.8, -2.5), Vec3.UP, HitKind.PLANE, 2.6, 0.0)
-        val onTop = HeightAim.boxTop(corners, topFace, ray, f) as HeightAim.Top.Point
+    fun boxTopUsesTheTopFaceHitWhenThereIsOne() {
+        val topFace = ChosenPoint(Vec3(0.0, boxH, -2.5), Vec3.UP, HitKind.PLANE, 2.6, 0.0)
+        val onTop = boxTopAimedAt(camera, Vec3(0.0, boxH, -2.5), topFace) as HeightAim.Top.Point
         assertSame(topFace, onTop.chosen)
-        // A hit on the wall behind the box (outside its footprint): the vertical plane instead.
-        val wall = ChosenPoint(Vec3(0.0, 1.2, -4.0), Vec3(0.0, 0.0, 1.0), HitKind.PLANE, 4.0, 0.0)
-        val tall = forward(40.0)
-        val viaPlane = HeightAim.boxTop(corners, wall, Ray(camera, tall), tall) as HeightAim.Top.Point
-        assertEquals(HitKind.VERTICAL_PLANE, viaPlane.chosen.kind)
-        // The crosshair is above the middle of the front edge: the nearest corner's plane is 2 m ahead.
-        assertEquals(-2.0, viaPlane.chosen.position.z, 1e-9)
-        assertSame(HeightAim.Top.None, HeightAim.boxTop(corners.take(2), null, ray, f))
+        assertSame(HeightAim.Top.None, HeightAim.boxTop(box.take(2), null, Ray(camera, Vec3(0.0, -0.2, -1.0))))
     }
 
     @Test
-    fun cornerUnderRayIgnoresCornersBehindTheCamera() {
-        val corners = listOf(Vec3(0.0, 0.0, 2.0), Vec3(0.3, 0.0, -3.0), Vec3(-2.0, 0.0, -3.0))
-        assertEquals(1, HeightAim.cornerUnderRay(corners, Ray(camera, Vec3(0.0, 0.2, -1.0))))
-        assertNull(HeightAim.cornerUnderRay(corners, Ray(camera, Vec3.UP)))
+    fun aimingAtTheTopFrontEdgeOffCentreLandsOnTheFrontFaceNotABackCorner() {
+        // 10 cm right of centre: the old nearest-line rule picked the back-right corner and read 0.45 m.
+        val hitOnFrontFace = ChosenPoint(Vec3(0.1, boxH - 0.01, -2.0), Vec3(0.0, 0.0, 1.0), HitKind.PLANE, 2.3, 0.0)
+        val top = boxTopAimedAt(camera, Vec3(0.1, boxH, -2.0), hitOnFrontFace) as HeightAim.Top.Point
+        assertEquals(HitKind.VERTICAL_PLANE, top.chosen.kind)
+        assertEquals(boxH, top.chosen.position.y, 1e-9)
+        assertEquals(-2.0, top.chosen.position.z, 1e-9)
+        assertTrue(top.chosen.normal!!.approxEquals(Vec3(0.0, 0.0, 1.0), 1e-12)) // faces the camera
+    }
+
+    @Test
+    fun aDiagonalViewOfTheImplicitFourthCornerUsesItsSideFace() {
+        // From behind-left the nearest corner is c0 + c2 − c1 = (−0.5, 0, −3), which is never tapped.
+        val from = Vec3(-3.0, 1.5, -5.0)
+        val top = boxTopAimedAt(from, Vec3(-0.5, boxH, -2.9)) as HeightAim.Top.Point
+        assertEquals(boxH, top.chosen.position.y, 1e-9)
+        assertEquals(-0.5, top.chosen.position.x, 1e-9)
+        // The same view onto the back face, 20 cm from that corner.
+        val back = boxTopAimedAt(from, Vec3(-0.3, boxH, -3.0)) as HeightAim.Top.Point
+        assertEquals(boxH, back.chosen.position.y, 1e-9)
+        assertEquals(-3.0, back.chosen.position.z, 1e-9)
+    }
+
+    @Test
+    fun aTallWardrobeTopIsReadOnItsFrontFaceWhenTheTopCannotBeSeen() {
+        val tall = 2.2
+        val top = boxTopAimedAt(camera, Vec3(-0.2, tall, -2.0)) as HeightAim.Top.Point
+        assertEquals(tall, top.chosen.position.y, 1e-9)
+        assertTrue(top.chosen.aimInflation > 1.0)
+    }
+
+    @Test
+    fun aRayMissingEveryFaceGivesNoPointAndAGrazingFaceIsTooSteep() {
+        // Aimed 1 m to the left of the box: no side face within its width.
+        assertSame(HeightAim.Top.None, boxTopAimedAt(camera, Vec3(-1.6, 0.5, -2.0)))
+        // Looking almost straight down onto the front face from just in front of it.
+        assertSame(HeightAim.Top.TooSteep, boxTopAimedAt(Vec3(0.0, 3.0, -1.9), Vec3(0.0, 0.0, -2.0)))
     }
 
     @Test
@@ -138,5 +169,18 @@ class HeightAimTest {
         assertTrue(MeasureSession.aimsW5(MeasureMode.BOX, 3))
         assertTrue(!MeasureSession.aimsW5(MeasureMode.HEIGHT, 0))
         assertTrue(!MeasureSession.aimsW5(MeasureMode.DISTANCE, 1))
+    }
+
+    @Test
+    fun aHeightOnAFarFloorBaseSaysItAssumesALevelFloor() {
+        val d = 6.0
+        val dir = Vec3(0.0, -1.5 / d, -sqrt(1 - (1.5 / d) * (1.5 / d)))
+        val g = HeightAim.groundBase(Ray(camera, dir), 0.0, AimModel.DEFAULT_AIM_SIGMA_RAD, DeviceTier.DEPTH.scaleSigmaRel)!!
+        val baseEp = EndpointData(UncertainPoint(g.position, g.extraCovariance!!, includesLocalisation = true), Vec3.UP, HitKind.GROUND, g.range)
+        val f = forward(10.0)
+        val top = (HeightAim.top(baseEp, Ray(camera, f), f) as HeightAim.Top.Point).chosen
+        val reading = MeasurementComposer.compose(MeasureMode.HEIGHT, listOf(baseEp), liveTop(top), model)!!
+        assertTrue(reading.assumesLevelFloor)
+        assertTrue(!MeasurementComposer.compose(MeasureMode.HEIGHT, listOf(base()), liveTop(top), model)!!.assumesLevelFloor)
     }
 }

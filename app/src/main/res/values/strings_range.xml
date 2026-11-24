@@ -15,8 +15,8 @@
     <string name="range_method_near">AR point</string>
     <string name="range_method_ground">Ground</string>
     <string name="range_method_two_sight">2 sights</string>
-    <string name="range_assumes_level">Assumes level ground</string>
-    <string name="range_out_of_range">Out of range (over 500 m)</string>
+    <string name="range_assumes_level">Assumes the point is on level ground</string>
+    <string name="range_out_of_range">Out of range: may be over 500 m</string>
     <string name="range_hold">Hold</string>
     <string name="range_live">Live</string>
     <string name="range_two_sight">Far point: 2 sights</string>
@@ -32,13 +32,14 @@
     <string name="range_done">Done</string>
     <string name="range_cancel">Cancel</string>
     <string name="range_result_a11y">Distance %1$s. Method: %2$s.</string>
-    <string name="range_out_of_range_a11y">Out of range. More than 500 metres.</string>
+    <string name="range_out_of_range_a11y">Out of range. The point may be more than 500 metres away.</string>
 
     <!-- Why there is no live number -->
     <string name="range_issue_hold_steady">Hold the phone steady.</string>
     <string name="range_issue_need_floor">Point at the floor near you once, so SpaceView knows how high the phone is. Or use 2 sights.</string>
     <string name="range_issue_above_horizon">Nothing to measure here. Aim at the ground, or use 2 sights for a far point.</string>
     <string name="range_issue_ground_too_far">Too far for one sight. Use 2 sights.</string>
+    <string name="range_issue_off_ground">Something is in the way before the ground. One sight only measures a point on the ground: use 2 sights.</string>
 
     <!-- 2-sight refusals -->
     <string name="range_reject_tracking_lost">Tracking was lost between the sights. Start over.</string>
@@ -51,5 +52,8 @@
     <string name="range_sight_not_tracking">Tracking lost. Move slowly and try again.</string>
 
     <!-- Measure (W5 / W6) -->
+    <string name="measure_aim_base_below_top">Put the base point exactly below the top you will measure.</string>
+    <string name="measure_aim_top_above_base">Aim at the top, straight above the base point. Tilting the phone is fine.</string>
+    <string name="measure_assumes_level_floor">The base is on the floor far away: this assumes a level floor.</string>
     <string name="measure_height_too_steep">Too steep. Step back until the top is less than 75° up.</string>
 </resources>

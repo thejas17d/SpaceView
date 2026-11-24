@@ -69,7 +69,8 @@ object GroundRange {
     }
 
     /**
-     * Gated Ground reading: [RangeOutcome.Ok] only within [RangeLimits.GROUND_MAX_REL95] and [RangeLimits.MAX_RANGE_M].
+     * Gated Ground reading: [RangeOutcome.Ok] only within [RangeLimits.GROUND_MAX_REL95] and with the whole ±95 interval
+     * within [RangeLimits.MAX_RANGE_M].
      */
     fun solve(cameraHeightM: Double, depressionRad: Double, aimSigmaRad: Double, model: RangeErrorModel = RangeErrorModel()): RangeOutcome {
         if (!valid(cameraHeightM, depressionRad, aimSigmaRad)) return RangeOutcome.Rejected(RangeRejection.INVALID_INPUT)
@@ -78,6 +79,7 @@ object GroundRange {
         if (lineOfSight(cameraHeightM, depressionRad) > RangeLimits.MAX_RANGE_M) return RangeOutcome.OutOfRange
         val f = fix(cameraHeightM, depressionRad, aimSigmaRad, model) ?: return RangeOutcome.Rejected(RangeRejection.TOO_UNCERTAIN)
         if (!f.usable) return RangeOutcome.Rejected(RangeRejection.TOO_UNCERTAIN)
+        if (f.distance.high95 > RangeLimits.MAX_RANGE_M) return RangeOutcome.OutOfRange
         return RangeOutcome.Ok(RangeReading(f.distance, RangeMethod.GROUND))
     }
 

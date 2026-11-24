@@ -57,6 +57,9 @@ enum class RangeIssue {
     /** A point on the ground, but too far for Ground's ±: use 2-sight. */
     GROUND_TOO_FAR,
 
+    /** Something (a hit above the floor, or nearer than the Ground interval) is in the way: not a ground point. */
+    OFF_GROUND,
+
     /** Beyond 500 m. */
     OUT_OF_RANGE,
 }
@@ -86,6 +89,7 @@ sealed class RangeEvent {
  * @property preview 2-sight: what sight 2 would give right now (while walking and aiming).
  * @property result 2-sight outcome in [RangePhase.RESULT].
  * @property floorKnown the camera's height above the floor is known (Ground possible).
+ * @property canRetake "Retake sight 2" is possible (sight 1 still valid, no tracking loss since).
  */
 data class RangeState(
     val sessionRunning: Boolean = false,
@@ -101,6 +105,7 @@ data class RangeState(
     val walkedBaselineM: Double = 0.0,
     val preview: RangeReading? = null,
     val result: RangeOutcome? = null,
+    val canRetake: Boolean = false,
 )
 
 /** One distinct camera frame, copied out of ARCore by [RangefinderSession] (or built by a test). */
@@ -172,6 +177,8 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
     private var lastPosition: Vec3? = null
     private var collectStartMs = 0L
     private var lastAimSigma = AimModel.DEFAULT_AIM_SIGMA_RAD
+    /** [DirectionWindow.generation] of the steady aim in which something blocked the ray before the floor (-1: none). */
+    private var blockedAim = -1
 
     private val pending = ArrayList<RangeEvent>(2)
 
@@ -187,8 +194,9 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
         val ray = f.centreRay
         floorKnown = f.floorY != null && pos.y - f.floorY >= RangeLimits.MIN_CAMERA_HEIGHT_M
 
-        // ---- 2-sight bookkeeping: any loss of tracking after sight 1 breaks the shared world frame.
-        if (sight1 != null && phase != RangePhase.RESULT) {
+        // ---- 2-sight bookkeeping: any loss of tracking after sight 1 breaks the shared world frame. It runs in every
+        // phase, RESULT included, so a later "Retake sight 2" can never triangulate across a loss (review MAJOR 3).
+        if (sight1 != null) {
             if (q == TrackingQuality.NOT_TRACKING) {
                 lostSinceSight1 = true
             } else {
@@ -197,8 +205,10 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
             }
         }
 
-        // ---- Near: an AR hit close enough to trust, averaged like a measuring point.
-        val hit = f.hit?.takeIf { it.distance <= RangeLimits.NEAR_MAX_M && q != TrackingQuality.NOT_TRACKING }
+        // ---- Near: an AR hit close enough to trust, averaged like a measuring point. The raw hit is kept at any range:
+        // beyond Near it is still evidence that the ray is blocked before the floor (review MAJOR 2).
+        val rawHit = f.hit?.takeIf { q != TrackingQuality.NOT_TRACKING && it.distance.isFinite() && it.distance > 0 }
+        val hit = rawHit?.takeIf { it.distance <= RangeLimits.NEAR_MAX_M }
         near.add(hit?.position, hit?.distance ?: 0.0, q, hit?.let { f.nearLocalisation(it.distance) })
         val nearReading = near.estimate?.let { est ->
             val camera = UncertainPoint(pos, Cov3.ZERO, includesLocalisation = true)
@@ -217,11 +227,37 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
         } else {
             null
         }
-        val groundReading = (ground as? RangeOutcome.Ok)?.reading
-        live = listOfNotNull(nearReading, groundReading).minByOrNull { it.distance.bound95 }
+        // Ground is only for a point ON the floor. Any hit along the ray that is above the floor, or nearer than the
+        // Ground interval, shows something is in the way; it blocks Ground for the rest of this steady aim, so a hit
+        // that drops out for a frame cannot let the floor behind the object through (review MAJOR 2).
+        val groundOk = (ground as? RangeOutcome.Ok)?.reading
+        val floorY = f.floorY
+        if (rawHit != null && floorY != null) {
+            val above = rawHit.position.y - floorY > max(OFF_FLOOR_MIN_M, OFF_FLOOR_REL * rawHit.distance)
+            val nearer = groundOk != null && rawHit.distance < groundOk.distance.low95
+            if (above || nearer) blockedAim = aim.generation
+        }
+        val nearEst = near.estimate
+        if (nearReading != null && nearEst != null && floorY != null &&
+            nearEst.position.y - floorY > max(OFF_FLOOR_MIN_M, OFF_FLOOR_REL * nearReading.distance.value)
+        ) {
+            blockedAim = aim.generation
+        }
+        val groundBlocked = blockedAim == aim.generation
+        val groundReading = groundOk?.takeIf { !groundBlocked }
+        // A direct AR measurement wins whenever both exist and disagree; when they agree the smaller ± is shown.
+        live = when {
+            nearReading != null && groundReading != null -> if (agree(nearReading, groundReading)) {
+                listOf(nearReading, groundReading).minBy { it.distance.bound95 }
+            } else {
+                nearReading
+            }
+            else -> nearReading ?: groundReading
+        }
         liveIssue = when {
             live != null -> null
             q != TrackingQuality.TRACKING -> RangeIssue.HOLD_STEADY
+            groundBlocked || (rawHit != null && rawHit.distance > RangeLimits.NEAR_MAX_M) -> RangeIssue.OFF_GROUND
             ground == RangeOutcome.OutOfRange -> RangeIssue.OUT_OF_RANGE
             ground == RangeOutcome.Rejected(RangeRejection.TOO_UNCERTAIN) -> RangeIssue.GROUND_TOO_FAR
             ground == RangeOutcome.Rejected(RangeRejection.ABOVE_HORIZON) -> RangeIssue.ABOVE_HORIZON
@@ -236,6 +272,21 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
             else -> Unit
         }
     }
+
+    /** Near and Ground agree when their difference is within their combined ±95. */
+    private fun agree(a: RangeReading, b: RangeReading): Boolean {
+        val d = kotlin.math.abs(a.distance.value - b.distance.value)
+        val tol = sqrt(a.distance.bound95 * a.distance.bound95 + b.distance.bound95 * b.distance.bound95)
+        return d <= tol
+    }
+
+    /** A 2-sight result can be retaken: sight 1 exists, tracking never broke since, and the refusal is fixable. */
+    val canRetake: Boolean
+        get() {
+            if (phase != RangePhase.RESULT || sight1 == null || lostSinceSight1) return false
+            val r = result as? RangeOutcome.Rejected ?: return true
+            return r.reason != RangeRejection.TRACKING_LOST && r.reason != RangeRejection.INVALID_INPUT
+        }
 
     // ---- commands -------------------------------------------------------------------------------
 
@@ -270,7 +321,7 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
 
     /** From a 2-sight result: keep sight 1 and take sight 2 again (only while tracking was never lost). */
     fun retakeSight2(): Boolean {
-        if (phase != RangePhase.RESULT || sight1 == null || lostSinceSight1) return false
+        if (!canRetake) return false
         result = null
         phase = RangePhase.WALK
         return true
@@ -338,8 +389,13 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
             sightWindow.add(ray.direction, ray.origin)
         }
         if (sightWindow.size >= SIGHT_SAMPLES) {
-            val sight = Sight(sightWindow.meanOrigin(), sightWindow.meanDirection(), sightWindow.sigma(f.aimSigmaRad), f.timestampNs / 1e9)
+            // Sight.of refuses non-finite input instead of throwing on the AR main thread (review MINOR 7).
+            val sight = Sight.of(sightWindow.meanOrigin(), sightWindow.meanDirection(), sightWindow.sigma(f.aimSigmaRad), f.timestampNs / 1e9)
             sightWindow.clear()
+            if (sight == null) {
+                failSight(SightFailure.NOT_STEADY, first)
+                return
+            }
             if (first) {
                 sight1 = sight
                 lostSinceSight1 = false
@@ -380,8 +436,9 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
         }
         walkedBaselineM = (RayTriangulation.perpendicularBaseline(s1, f.cameraPose.translation) * 10).roundToInt() / 10.0
         preview = if (ray != null && q == TrackingQuality.TRACKING) {
-            val now = Sight(ray.origin, ray.direction, f.aimSigmaRad, f.timestampNs / 1e9)
-            (RayTriangulation.solve(s1, now, pathLength, false, errors).outcome as? RangeOutcome.Ok)?.reading
+            Sight.of(ray.origin, ray.direction, f.aimSigmaRad, f.timestampNs / 1e9)?.let { now ->
+                (RayTriangulation.solve(s1, now, pathLength, false, errors).outcome as? RangeOutcome.Ok)?.reading
+            }
         } else {
             null
         }
@@ -399,11 +456,16 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
         private val origins = ArrayDeque<Vec3>(capacity)
         val size: Int get() = dirs.size
 
+        /** Bumped every time the window restarts (a new steady aim). */
+        var generation = 0
+            private set
+
         fun add(direction: Vec3, origin: Vec3) {
             if (dirs.size == capacity) {
                 dirs.removeFirst()
                 origins.removeFirst()
             }
+            if (!direction.isFinite || !origin.isFinite || !(direction.length > 1e-9)) return
             dirs.addLast(direction.normalized())
             origins.addLast(origin)
             // A turn of the phone (new target) restarts the window.
@@ -417,11 +479,15 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
         }
 
         fun clear() {
+            if (dirs.isNotEmpty()) generation++
             dirs.clear()
             origins.clear()
         }
 
-        fun meanDirection(): Vec3 = dirs.fold(Vec3.ZERO) { a, d -> a + d }.normalized()
+        fun meanDirection(): Vec3 {
+            val sum = dirs.fold(Vec3.ZERO) { a, d -> a + d }
+            return if (sum.length > 1e-9) sum.normalized() else dirs.lastOrNull() ?: Vec3(0.0, 0.0, -1.0)
+        }
         fun meanOrigin(): Vec3 = origins.fold(Vec3.ZERO) { a, o -> a + o } / origins.size.toDouble()
 
         /** Angle (rad) between [direction] and the mean of the window. */
@@ -466,6 +532,12 @@ internal class RangefinderCore(private val clockMs: () -> Long) {
 
         /** Consecutive frames are correlated (hand tremor is slow): the jitter's effective sample size is n / this. */
         const val CORRELATION_FRAMES = 3.0
+
+        /** A hit this far above the floor (m) ... */
+        const val OFF_FLOOR_MIN_M = 0.10
+
+        /** ... or this fraction of its range, whichever is larger, is not on the ground (Ground refused). Tunable. */
+        const val OFF_FLOOR_REL = 0.02
 
         /** 2-sight guidance before any estimate exists (m): a medium-range guess, refined while walking. */
         const val DEFAULT_GUESS_M = 50.0
