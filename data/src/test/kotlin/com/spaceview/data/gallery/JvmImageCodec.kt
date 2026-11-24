@@ -10,8 +10,9 @@ import kotlin.math.roundToInt
  * Desktop-JVM [GalleryImageCodec] for unit tests, so the size budget is measured with a real JPEG encoder.
  *
  * Android unit tests compile against android.jar, which has no `javax.imageio`; the JDK running the
- * tests does, so it is reached through reflection. The JDK has no WebP encoder: thumbnails are encoded
- * as JPEG at the same quality, a conservative stand-in (lossy WebP is typically 25–35% smaller).
+ * tests does, so it is reached through reflection. The JDK has no WebP encoder: thumbnails (and cutout pictures) are
+ * encoded as JPEG at the same quality, a conservative stand-in (lossy WebP is typically 25–35% smaller; the JPEG
+ * stand-in drops a cutout's alpha, so a decoded cutout picture reads back opaque).
  */
 internal object JvmImageCodec : GalleryImageCodec {
     override fun decode(encoded: ByteArray, maxLongSide: Int): GalleryImage? {
@@ -19,6 +20,8 @@ internal object JvmImageCodec : GalleryImageCodec {
         val (w, h, px) = runCatching { JvmImageIo.decode(encoded) }.getOrNull() ?: return null
         return JvmImage(w, h, px).scaled(maxLongSide)
     }
+
+    override fun fromPixels(image: com.spaceview.engine.ArgbImage): GalleryImage = JvmImage(image.width, image.height, image.argb.copyOf())
 }
 
 internal class JvmImage(override val width: Int, override val height: Int, val argb: IntArray) : GalleryImage {
@@ -34,6 +37,8 @@ internal class JvmImage(override val width: Int, override val height: Int, val a
     override fun jpeg(quality: Int): ByteArray = JvmImageIo.encodeJpeg(width, height, argb, quality / 100f)
 
     override fun webp(quality: Int): ByteArray = JvmImageIo.encodeJpeg(width, height, argb, quality / 100f)
+
+    override fun pixels(): com.spaceview.engine.ArgbImage = com.spaceview.engine.ArgbImage(width, height, argb.copyOf())
 
     override fun release() = Unit
 

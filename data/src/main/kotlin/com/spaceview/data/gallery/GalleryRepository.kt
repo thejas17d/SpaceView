@@ -3,7 +3,9 @@ package com.spaceview.data.gallery
 import androidx.room.withTransaction
 import com.spaceview.data.SpaceViewDatabase
 import com.spaceview.data.StorageLayout
+import com.spaceview.engine.ArgbImage
 import com.spaceview.engine.BoxOrigin
+import com.spaceview.engine.CutoutPixels
 import com.spaceview.engine.DeviceTier
 import com.spaceview.engine.GLB_VERSION
 import com.spaceview.engine.GlbInfo
@@ -11,8 +13,7 @@ import com.spaceview.engine.GlbReader
 import com.spaceview.engine.GlbWriter
 import com.spaceview.engine.Measurement
 import com.spaceview.engine.ModelKind
-import com.spaceview.engine.Palette
-import com.spaceview.engine.Part
+import com.spaceview.engine.PngEncoder
 import com.spaceview.engine.Quality
 import com.spaceview.engine.Uncertainty
 import kotlinx.coroutines.CancellationException
@@ -42,13 +43,15 @@ import kotlin.math.abs
  * @property measuredWidth / [measuredHeight] / [measuredDepth] the values as measured when the scan was saved
  *   (null for a side that was not measured); edits never change them.
  * @property calibrationFactor scale factor applied to the measured values (1.0 = none, null = unknown).
- * @property modelFile true-size GLB (1 unit = 1 m; FRAME/TV origin at the back-face centre, others at the bottom
- *   centre). Its file name changes on every edit: always use the current item's path.
- * @property photoFile rectified front photo (≤ 1024 px), null when the scan had none.
- * @property thumbnailFile 256 px WebP, null when the scan had no photo.
+ * @property modelFile true-size GLB (1 unit = 1 m). A cutout is a flat quad centred on its origin; a legacy proxy box
+ *   has its origin at the back-face centre (FRAME/TV) or the bottom centre. Its file name changes on every edit:
+ *   always use the current item's path.
+ * @property photoFile the cutout picture (`cutout.webp`, ≤ 1024 px, transparent background when it was removed) or, for
+ *   a legacy proxy box, the rectified front photo (`front.jpg`); null when the scan had none.
+ * @property thumbnailFile 256 px WebP (transparent background for a cutout), null when the scan had no photo.
  * @property bytes total size of the item's files on disk.
  * @property modelKind where the model's geometry came from (v3; legacy rows are PROXY_BOX).
- * @property templateId / [templateParams] the furniture template (TEMPLATE only; params null if unreadable).
+ * @property templateId the furniture template of a legacy TEMPLATE row (earlier test builds; v1 makes none).
  * @property meshExtents the scanned mesh's §7.1.5 measured extents and ± (meshes only); never the item's size.
  * @property glbExtents the mesh GLB's own bounding box (meshes only; null for rows saved before it was stored).
  * @property meshInfo JSON diagnostics of a mesh scan.
@@ -77,7 +80,6 @@ data class GalleryItem(
     val calibrationFactor: Double? = null,
     val modelKind: ModelKind = ModelKind.PROXY_BOX,
     val templateId: String? = null,
-    val templateParams: Map<String, Double>? = null,
     val meshExtents: MeshExtents? = null,
     val glbExtents: GlbExtents? = null,
     val meshInfo: String? = null,
@@ -106,16 +108,20 @@ interface GalleryTransactions {
 
 /**
  * AR Gallery storage: Room rows plus, per item, `filesDir/gallery/<id>/` with
- * - `model.glb` (`model-<time>.glb` after an edit or a regeneration): the true-size model (engine [GlbWriter]):
- *   a proxy box (front face textured with the photo, other faces neutral) for scans, a multi-part model for
- *   furniture templates ([saveTemplate]), or a mesh for 3D scans ([saveMesh]);
- * - `front.jpg`: the rectified front photo, long side ≤ 1024 px, JPEG q82;
- * - `thumb.webp`: 256 px lossy WebP.
+ * - `model.glb` (`model-<time>.glb` after an edit or a regeneration): the true-size model (engine [GlbWriter]). v1
+ *   scans are **cutouts** (PLAN v3 W2, `GlbWriter.writeCutout`): a flat, unlit, double-sided quad at the measured
+ *   W × H showing the object's picture, with the background transparent when it was removed. Legacy rows keep their
+ *   model: a proxy box, or a furniture template / 3D-scan mesh saved by earlier test builds (placed from the stored
+ *   GLB; never regenerated in v1);
+ * - `cutout.webp` (cutouts): the picture, long side ≤ 1024 px, lossy WebP with alpha; `front.jpg` (legacy proxy box):
+ *   the rectified front photo, JPEG;
+ * - `thumb.webp`: 256 px lossy WebP (with alpha for a cutout).
  *
- * Budget (PLAN M3 gate): an item is at most [MAX_SCAN_BYTES], checked against the exact bytes written. The photo
- * is stored twice (inside the GLB and as `front.jpg` for display and sharing), so when a very detailed photo
- * would break the budget the JPEG quality, then the size, steps down until it fits (if nothing fits, the item is
- * saved without a photo rather than over budget).
+ * Budget (PLAN M3 gate): an item is at most [MAX_SCAN_BYTES], checked against the exact bytes written. The picture
+ * is stored twice (inside the GLB and as a file for display and sharing), so when it would break the budget the
+ * quality, then the size, steps down until it fits (if nothing fits, the item is saved without a photo rather than
+ * over budget). A transparent cutout's texture is a straight-alpha PNG (glTF has no WebP in its core), whose long
+ * side steps down through [CUTOUT_TEXTURE_SIDES] first.
  *
  * Atomicity:
  * - Save: files are written into a hidden staging directory (each file temp + fsync + rename); the row is inserted
@@ -144,8 +150,6 @@ class GalleryRepository(
     private val cacheDir: File? = null,
     /** fsyncs a directory after a rename into it (no-op on the JVM; `Os.fsync` on Android). */
     private val syncDir: (File) -> Unit = {},
-    /** Rebuilds template parts for regeneration (Builder B's registry); [TemplateModelSource.NONE] = unknown. */
-    private val templates: TemplateModelSource = TemplateModelSource.NONE,
 ) {
     private val layout = StorageLayout(filesDir)
     private val writeLock = Mutex()
@@ -169,9 +173,6 @@ class GalleryRepository(
             .map<Int, Int?> { it }
             .flowOn(io)
             .catch { e -> if (e is CancellationException) throw e else emit(null) }
-
-    /** Saved on-device 3D scans (`model_kind = MESH_DEVICE`), a floor under the Free lifetime quota of 5 (the app keeps the lifetime counter). Throws like [count]. */
-    suspend fun countDeviceScans(): Int = withContext(io) { dao.countModelKind(ModelKind.MESH_DEVICE.name) }
 
     /** One item (null when deleted or unreadable). Never throws. */
     fun observe(id: Long): Flow<GalleryItem?> =
@@ -199,94 +200,25 @@ class GalleryRepository(
         val h = normalised(draft.height)
         val d = normalised(draft.depth)
         for (dim in listOf(w, h, d)) validate(dim, forSave = true)
-        val encoded = withContext(cpu) { encode(draft.kind, w, h, d, draft.label, draft.frontJpeg) }
-        val staged = Staged(encoded.glb, encoded.front?.takeIf { encoded.thumbnail != null }, encoded.thumbnail?.takeIf { encoded.front != null })
-        return commitLocked(staged) { now ->
-            baseRow(draft.kind, w, h, d, draft.quality, draft.calibrated, draft.calibrationFactor, draft.deviceTier, draft.arcoreVersion, draft.label, now)
-                .copy(modelKind = ModelKind.PROXY_BOX.name, captureMethod = draft.captureMethod?.name)
-        }
-    }
-
-    /**
-     * Saves a furniture template item (contract K10) and returns its id. The GLB is `writeParts` of the draft's
-     * parts (BOTTOM_CENTER, `modelKind` TEMPLATE); there is no photo. Throws [IllegalArgumentException] for an
-     * invalid draft (dimensions, parameters, parts whose union box is not W×H×D to 0.1 mm) and [IOException] when
-     * nothing could be saved. Same atomicity and budget as [save].
-     */
-    suspend fun saveTemplate(draft: TemplateDraft): Long {
-        val w = normalised(draft.width)
-        val h = normalised(draft.height)
-        val d = normalised(draft.depth)
-        for (dim in listOf(w, h, d)) validate(dim, forSave = true)
-        require(draft.templateId.isNotBlank() && draft.templateId.length <= MAX_TEMPLATE_ID) { "Invalid template id" }
-        val params = TemplateParamsCodec.encode(draft.params)
-        val glb = withContext(cpu) {
-            GlbWriter.writeParts(draft.parts, draft.palette, BoxOrigin.BOTTOM_CENTER, displayName(ObjectKind.FURNITURE, draft.label), ModelKind.TEMPLATE)
-        }
-        val info = GlbReader.readInfo(glb)
-        require(info != null && matches(info, w.meters, h.meters, d.meters)) {
-            "Template parts span ${info?.widthM} x ${info?.heightM} x ${info?.depthM} m, not the item's W x H x D"
-        }
-        val quality = measuredQuality(w, h, d) ?: Quality.ROUGH
-        return commitLocked(Staged(glb, null, null)) { now ->
-            baseRow(ObjectKind.FURNITURE, w, h, d, quality, draft.calibrated, draft.calibrationFactor, draft.deviceTier, draft.arcoreVersion, draft.label, now)
-                .copy(
-                    modelKind = ModelKind.TEMPLATE.name,
-                    templateId = draft.templateId,
-                    templateParams = params,
-                    captureMethod = draft.captureMethod?.name,
-                )
-        }
-    }
-
-    /**
-     * Saves a 3D scan (contract K10) and returns its id. The row's W/H/D are the **measured box** (ADR-013); the
-     * §7.1.5 extents go to the `mesh_extent_*` columns and the GLB's own box to `mesh_glb_*`. The GLB must be a mesh
-     * written by `GlbWriter.writeMesh` (BOTTOM_CENTER, `modelKind` MESH_DEVICE or MESH_CLOUD) whose extras equal
-     * [MeshDraft.glbExtents] to 0.1 mm (M4 review MAJOR 2: not the §7.1.5 extents, which differ by the floor cut);
-     * the thumbnail is a 256 px WebP of [MeshDraft.thumbnailSource] (none if absent or undecodable). The whole item
-     * must fit [MAX_SCAN_BYTES] (the caller decimates to the budget, §7.1.7). Same atomicity as [save].
-     */
-    suspend fun saveMesh(draft: MeshDraft): Long {
-        val w = normalised(draft.width)
-        val h = normalised(draft.height)
-        val d = normalised(draft.depth)
-        for (dim in listOf(w, h, d)) validate(dim, forSave = true)
-        require(draft.modelKind == ModelKind.MESH_DEVICE || draft.modelKind == ModelKind.MESH_CLOUD) { "Not a mesh kind: ${draft.modelKind}" }
-        val e = draft.meshExtents
-        for (v in listOf(e.widthM, e.heightM, e.depthM)) require(isValidSide(v)) { "Mesh extents must be in [$MIN_SIDE_M, ${GlbWriter.MAX_SIDE_M}] m" }
-        for (v in listOf(e.widthBound95, e.heightBound95, e.depthBound95)) require(v.isFinite() && v >= 0) { "Mesh extent ± must be finite and >= 0" }
-        val g = draft.glbExtents
-        val info = GlbReader.readInfo(draft.glb)
-        require(info != null && info.modelKind == draft.modelKind && info.origin == BoxOrigin.BOTTOM_CENTER) { "Not a ${draft.modelKind} mesh GLB with origin BOTTOM_CENTER" }
-        require(matches(info, g.widthM, g.heightM, g.depthM)) { "Mesh GLB extras do not match glbExtents" }
-        require(draft.glb.size <= MAX_SCAN_BYTES) { "Mesh GLB is ${draft.glb.size} B, over the $MAX_SCAN_BYTES B budget" }
-        val thumb = draft.thumbnailSource?.let { src ->
-            withContext(cpu) {
-                try {
-                    thumbnailOf(src)
-                } catch (ex: CancellationException) {
-                    throw ex
-                } catch (ex: Exception) {
-                    null
-                }
+        val cutout = draft.cutout
+        val modelKind = if (cutout != null) ModelKind.CUTOUT else ModelKind.PROXY_BOX
+        val encoded = withContext(cpu) {
+            if (cutout != null) {
+                encodeCutout(w, h, displayName(draft.kind, draft.label), cutout.image)
+            } else {
+                encode(draft.kind, w, h, d, draft.label, draft.frontJpeg)
             }
         }
-        return commitLocked(Staged(draft.glb, null, thumb)) { now ->
+        val photoName = if (cutout != null) CUTOUT_PHOTO else PHOTO
+        val staged = Staged(encoded.glb, encoded.front?.takeIf { encoded.thumbnail != null }, encoded.thumbnail?.takeIf { encoded.front != null }, photoName)
+        return commitLocked(staged) { now ->
             baseRow(draft.kind, w, h, d, draft.quality, draft.calibrated, draft.calibrationFactor, draft.deviceTier, draft.arcoreVersion, draft.label, now)
-                .copy(
-                    modelKind = draft.modelKind.name,
-                    meshExtentW = e.widthM, meshExtentH = e.heightM, meshExtentD = e.depthM,
-                    meshExtentWBound95 = e.widthBound95, meshExtentHBound95 = e.heightBound95, meshExtentDBound95 = e.depthBound95,
-                    meshGlbW = g.widthM, meshGlbH = g.heightM, meshGlbD = g.depthM,
-                    meshInfo = draft.meshInfo?.take(MAX_MESH_INFO),
-                    captureMethod = draft.captureMethod?.name,
-                )
+                .copy(modelKind = modelKind.name, captureMethod = draft.captureMethod?.name)
         }
     }
 
     /** The files of a new item: the model always, a photo and a thumbnail when present. */
-    private class Staged(val model: ByteArray, val photo: ByteArray?, val thumbnail: ByteArray?)
+    private class Staged(val model: ByteArray, val photo: ByteArray?, val thumbnail: ByteArray?, val photoName: String = PHOTO)
 
     private fun baseRow(
         kind: ObjectKind, w: Dimension, h: Dimension, d: Dimension, quality: Quality, calibrated: Boolean,
@@ -326,7 +258,7 @@ class GalleryRepository(
         try {
             if (!stage.mkdir()) throw IOException("Cannot create $stage")
             writeAtomic(File(stage, MODEL), staged.model)
-            staged.photo?.let { writeAtomic(File(stage, PHOTO), it) }
+            staged.photo?.let { writeAtomic(File(stage, staged.photoName), it) }
             staged.thumbnail?.let { writeAtomic(File(stage, THUMB), it) }
             syncDir(stage)
             val bytes = dirBytes(stage)
@@ -344,7 +276,7 @@ class GalleryRepository(
                 dao.setFiles(
                     id,
                     modelPath = relative(id, MODEL),
-                    photoPath = if (staged.photo != null) relative(id, PHOTO) else null,
+                    photoPath = if (staged.photo != null) relative(id, staged.photoName) else null,
                     thumbnailPath = if (staged.thumbnail != null) relative(id, THUMB) else null,
                     totalBytes = bytes,
                 )
@@ -368,9 +300,9 @@ class GalleryRepository(
      * recorded at save time are kept. The badge can only stay or get worse (an edit never upgrades a measurement).
      * False for invalid values, a missing item or a storage failure; the item is then unchanged.
      *
-     * By model kind: a proxy box is regenerated at the new size; a **mesh** keeps its model (it describes the scanned
-     * shape, never the item's size, ADR-013) and only the row changes; a **template** is not editable here (its
-     * size is a template parameter: re-open it in the furniture flow), so this returns false.
+     * By model kind: a cutout or a proxy box is regenerated at the new size; a legacy **mesh** keeps its model (it
+     * describes the scanned shape, never the item's size, ADR-013) and only the row changes; a legacy **template** is
+     * not editable (its size is a template parameter and v1 has no template library), so this returns false.
      */
     suspend fun updateDimensions(id: Long, widthM: Double? = null, heightM: Double? = null, depthM: Double? = null): Boolean {
         val edits = listOf(widthM, heightM, depthM)
@@ -399,7 +331,8 @@ class GalleryRepository(
                         ) > 0
                     }
                     val photo = item.photoFile?.takeIf { it.isFile }
-                    val glb = withContext(cpu) { buildGlb(item.kind, w, h, d, photo?.readBytes(), item.label) }
+                    val thumbBytes = item.thumbnailFile?.takeIf { it.isFile }?.length() ?: 0L
+                    val glb = withContext(cpu) { rebuild(item, w, h, d, photo, thumbBytes) }
                     val dir = layout.itemDir(id.toString())
                     if (!dir.isDirectory && !dir.mkdirs()) throw IOException("Cannot create $dir")
                     val newModel = File(dir, nextModelName(dir, item.modelFile.name))
@@ -539,7 +472,7 @@ class GalleryRepository(
         val dir = layout.itemDir(ref.id.toString())
         if (!dir.isDirectory && !dir.mkdirs()) return false
         val keptPhoto = photo?.takeIf { it.isFile }
-        // A scan's thumbnail is made from its photo; a 3D scan's comes from a keyframe and has no photo.
+        // A scan's (or a cutout's) thumbnail is made from its photo; a legacy 3D scan's came from a keyframe, without one.
         val thumbFromPhoto = item.modelKind.regenerable
         var keptThumb = thumb?.takeIf { it.isFile && (keptPhoto != null || !thumbFromPhoto) }
         if (keptPhoto != null && keptThumb == null) {
@@ -554,8 +487,8 @@ class GalleryRepository(
         if (keptPhoto == null && thumbFromPhoto) thumb?.delete()
         var modelFile = model?.takeIf { it.isFile }
         if (modelFile == null) {
-            // A mesh is never regenerated (ADR-014): placement falls back to the measured box instead.
-            val glb = if (item.modelKind.regenerable) withContext(cpu) { regenerate(item, keptPhoto) } else null
+            // A mesh or a template is never regenerated (ADR-014, PLAN v3): placement falls back to the row's box.
+            val glb = if (item.modelKind.regenerable) withContext(cpu) { regenerate(item, keptPhoto, keptThumb?.length() ?: 0L) } else null
             modelFile = glb?.let { bytes -> File(dir, nextModelName(dir, model?.name ?: MODEL)).also { writeAtomic(it, bytes) } }
         }
         syncDir(dir)
@@ -574,14 +507,14 @@ class GalleryRepository(
     /**
      * The model Place should render for item [id] (K4, K8), or null when the item is missing or unreadable.
      * Reads only the GLB's header and JSON chunk (~3 KB).
-     * - **Proxy box / template:** the stored model is used when its extras match the row's W/H/D to 0.1 mm, it was
-     *   written for the expected origin, and `glbVersion >= GLB_VERSION`. Otherwise (a stale M3 model, a mismatch,
-     *   a missing file) it is regenerated once through the versioned-file path: new file, one UPDATE, then the old
-     *   file is deleted (NonCancellable, under the write lock). A template whose parts cannot be rebuilt
-     *   ([TemplateModelSource]) keeps a usable stored model, or falls back to a box of the row's size in the cache.
-     * - **Mesh:** never regenerated and never rescaled. A missing, unreadable or mismatched mesh (extras vs the
-     *   `mesh_glb_*` columns) falls back to a proxy box of the **measured** size written to the cache
-     *   ([PlacementModel.meshFallback]); the row is not touched.
+     * - **Cutout / proxy box:** the stored model is used when its extras match the row (a cutout: W × H; a box:
+     *   W × H × D) to 0.1 mm, it was written for the expected origin, and `glbVersion >= GLB_VERSION`. Otherwise (a
+     *   stale M3 model, a mismatch, a missing file) it is regenerated once through the versioned-file path: new file,
+     *   one UPDATE, then the old file is deleted (NonCancellable, under the write lock).
+     * - **Legacy template / mesh** (earlier test builds, PLAN v3 W1): never regenerated and never rescaled. The stored
+     *   GLB is placed when it is readable and matches (a template: the row's W × H × D; a mesh: the `mesh_glb_*`
+     *   columns); otherwise a proxy box of the row's size is written to the cache ([PlacementModel.meshFallback]) and
+     *   the row is not touched. Nothing here fails because a template can't be rebuilt.
      * Runs on [io]; regeneration CPU work on [cpu]. Never throws (null on storage failure).
      */
     suspend fun modelForPlacement(id: Long): PlacementModel? = (placementModel(id) as? PlacementResult.Ready)?.model
@@ -620,6 +553,9 @@ class GalleryRepository(
     private fun usable(item: GalleryItem, info: GlbInfo?): Boolean {
         if (info == null) return false
         return when (item.modelKind) {
+            ModelKind.CUTOUT ->
+                info.glbVersion >= GLB_VERSION && info.origin == BoxOrigin.CENTER && info.modelKind == ModelKind.CUTOUT &&
+                    abs(info.widthM - item.width.meters) <= PLACEMENT_MATCH_M && abs(info.heightM - item.height.meters) <= PLACEMENT_MATCH_M
             ModelKind.PROXY_BOX, ModelKind.TEMPLATE ->
                 info.glbVersion >= GLB_VERSION && info.origin == originOf(item) &&
                     (info.modelKind ?: ModelKind.PROXY_BOX) == item.modelKind &&
@@ -639,8 +575,9 @@ class GalleryRepository(
         val item = row.toDomain() ?: return@withLock null
         readInfo(item.modelFile)?.let { if (usable(item, it)) return@withLock placement(item, item.modelFile, it, fallback = false) }
         val photo = item.photoFile?.takeIf { it.isFile }
-        val glb = withContext(cpu) { regenerate(item, photo) }
-            ?: return@withLock fallbackBox(item) // a template we cannot rebuild: show its measured box, row untouched
+        val thumbBytes = item.thumbnailFile?.takeIf { it.isFile }?.length() ?: 0L
+        val glb = withContext(cpu) { regenerate(item, photo, thumbBytes) }
+            ?: return@withLock fallbackBox(item) // nothing to rebuild from: show the row's box, row untouched
         val dir = layout.itemDir(id.toString())
         if (!dir.isDirectory && !dir.mkdirs()) throw IOException("Cannot create $dir")
         val newModel = File(dir, nextModelName(dir, item.modelFile.name))
@@ -691,23 +628,97 @@ class GalleryRepository(
         centre = info.centre,
     )
 
-    /** A fresh model for a regenerable item, or null for a template whose parts are unknown. */
-    private fun regenerate(item: GalleryItem, photo: File?): ByteArray? = when (item.modelKind) {
-        ModelKind.TEMPLATE -> {
-            val id = item.templateId
-            val params = item.templateParams
-            val parts = if (id != null && params != null) templates.parts(id, params) else null
-            val palette = if (id != null && params != null) templates.palette(id, params) else null
-            parts?.let { buildTemplateGlb(it, palette ?: Palette.DEFAULT, item.label) }
-                ?.takeIf { glb -> GlbReader.readInfo(glb)?.let { matches(it, item.width.meters, item.height.meters, item.depth.meters) } == true }
+    /** A fresh model of the row's size for a regenerable item, or null for one that can't be rebuilt (template, mesh). */
+    private fun regenerate(item: GalleryItem, photo: File?, thumbBytes: Long): ByteArray? =
+        if (item.modelKind.regenerable) rebuild(item, item.width, item.height, item.depth, photo, thumbBytes) else null
+
+    /** A regenerable item's model at W × H × D: a cutout from its stored picture, a proxy box from its front photo. */
+    private fun rebuild(item: GalleryItem, w: Dimension, h: Dimension, d: Dimension, photo: File?, thumbBytes: Long): ByteArray =
+        if (item.modelKind == ModelKind.CUTOUT) {
+            val bytes = photo?.readBytes()
+            val budget = MAX_SCAN_BYTES - (bytes?.size ?: 0) - thumbBytes
+            cutoutFromPhoto(w, h, displayName(item.kind, item.label), bytes, budget)
+        } else {
+            buildGlb(item.kind, w, h, d, photo?.readBytes(), item.label)
         }
-        ModelKind.PROXY_BOX -> buildGlb(item.kind, item.width, item.height, item.depth, photo?.readBytes(), item.label)
-        else -> null
+
+    // ---- cutouts (PLAN v3 W2) -----------------------------------------------------------------------
+
+    /**
+     * The files of a new cutout: the picture as `cutout.webp` (≤ 1024 px, keeps alpha), the 256 px thumbnail and the
+     * GLB. An opaque picture gets a JPEG texture at the picture's size and quality; a transparent one a straight-alpha
+     * PNG with bled edges (no halo) whose long side steps down through [CUTOUT_TEXTURE_SIDES] before the picture's size
+     * and quality do. Everything is sized against the **exact** bytes; if nothing fits, a plain panel without a photo.
+     */
+    internal fun encodeCutout(w: Dimension, h: Dimension, name: String, image: ArgbImage?): Encoded {
+        fun plain() = Encoded(GlbWriter.writeCutout(w.meters, h.meters, null, colorSrgb = FRONT_COLOR, name = name), null, null, 0, 0, 0)
+        if (image == null) return plain()
+        val thumbImage = codec.fromPixels(CutoutPixels.downscale(image, THUMB_LONG_SIDE))
+        val thumb = try {
+            thumbImage.webp(THUMB_QUALITY)
+        } finally {
+            thumbImage.release()
+        }
+        val pictures = HashMap<Int, GalleryImage>()
+        fun picture(side: Int) = pictures.getOrPut(side) { codec.fromPixels(CutoutPixels.downscale(image, side)) }
+        try {
+            if (image.isOpaque) {
+                for (side in FRONT_LONG_SIDES) for (q in FRONT_QUALITIES) {
+                    val img = picture(side)
+                    val glb = GlbWriter.writeCutout(w.meters, h.meters, img.jpeg(q), name = name)
+                    val out = Encoded(glb, img.webp(q), thumb, img.width, img.height, q)
+                    if (out.totalBytes <= MAX_SCAN_BYTES) return out
+                }
+            } else {
+                val photos = HashMap<Pair<Int, Int>, ByteArray>()
+                for (texSide in CUTOUT_TEXTURE_SIDES) {
+                    val glb = GlbWriter.writeCutout(w.meters, h.meters, cutoutPng(image, texSide), GlbWriter.CutoutAlpha.BLEND, name = name)
+                    for (side in FRONT_LONG_SIDES) for (q in FRONT_QUALITIES) {
+                        val img = picture(side)
+                        val photo = photos.getOrPut(side to q) { img.webp(q) }
+                        val out = Encoded(glb, photo, thumb, img.width, img.height, q)
+                        if (out.totalBytes <= MAX_SCAN_BYTES) return out
+                    }
+                }
+            }
+        } finally {
+            pictures.values.forEach { it.release() }
+        }
+        return plain()
     }
 
-    private fun buildTemplateGlb(parts: List<Part>, palette: Palette, label: String?): ByteArray? = runCatching {
-        GlbWriter.writeParts(parts, palette, BoxOrigin.BOTTOM_CENTER, displayName(ObjectKind.FURNITURE, label), ModelKind.TEMPLATE)
-    }.getOrNull()
+    /**
+     * A cutout GLB at W × H from its stored picture ([photo], the item's `cutout.webp`) within [budget] bytes (edits,
+     * repairs, stale models). A transparent picture steps its PNG texture down; a missing or undecodable picture gives
+     * a plain panel.
+     */
+    private fun cutoutFromPhoto(w: Dimension, h: Dimension, name: String, photo: ByteArray?, budget: Long): ByteArray {
+        val plain = { GlbWriter.writeCutout(w.meters, h.meters, null, colorSrgb = FRONT_COLOR, name = name) }
+        val decoded = photo?.let { codec.decode(it, FRONT_LONG_SIDES.first()) } ?: return plain()
+        try {
+            val pixels = decoded.pixels()
+            if (pixels.isOpaque) {
+                for (q in FRONT_QUALITIES) {
+                    val glb = GlbWriter.writeCutout(w.meters, h.meters, decoded.jpeg(q), name = name)
+                    if (glb.size <= budget) return glb
+                }
+            } else {
+                for (texSide in CUTOUT_TEXTURE_SIDES) {
+                    val glb = GlbWriter.writeCutout(w.meters, h.meters, cutoutPng(pixels, texSide), GlbWriter.CutoutAlpha.BLEND, name = name)
+                    if (glb.size <= budget) return glb
+                }
+            }
+        } finally {
+            decoded.release()
+        }
+        return plain()
+    }
+
+    /** The straight-alpha PNG texture of a transparent cutout at [side] px, edges bled so no halo can appear. */
+    private fun cutoutPng(image: ArgbImage, side: Int): ByteArray {
+        val small = CutoutPixels.bleedEdges(CutoutPixels.downscale(image, side))
+        return PngEncoder.encodeRgba(small.width, small.height, small.argb)
+    }
 
     // ---- internals ------------------------------------------------------------------------------
 
@@ -784,7 +795,11 @@ class GalleryRepository(
             modelKind = ModelKind.PROXY_BOX,
         )
 
-    private fun originOf(item: GalleryItem): BoxOrigin = if (item.modelKind == ModelKind.PROXY_BOX) originOf(item.kind) else BoxOrigin.BOTTOM_CENTER
+    private fun originOf(item: GalleryItem): BoxOrigin = when (item.modelKind) {
+        ModelKind.PROXY_BOX -> originOf(item.kind)
+        ModelKind.CUTOUT -> BoxOrigin.CENTER
+        else -> BoxOrigin.BOTTOM_CENTER
+    }
 
     /**
      * Row → item. Unknown enum names (a later rename, a downgrade) fall back to the most cautious value instead of
@@ -814,7 +829,6 @@ class GalleryRepository(
             calibrationFactor = calibrationFactor,
             modelKind = enumOr(modelKind, ModelKind.PROXY_BOX),
             templateId = templateId,
-            templateParams = TemplateParamsCodec.decode(templateParams),
             meshExtents = meshExtentsOf(),
             glbExtents = glbExtentsOf(),
             meshInfo = meshInfo,
@@ -886,8 +900,6 @@ class GalleryRepository(
 
         const val MAX_LABEL = 80
         private const val MAX_VERSION = 40
-        private const val MAX_TEMPLATE_ID = 40
-        private const val MAX_MESH_INFO = 4000
         private const val PLACE_DIR = "place"
 
         /** GLB extras must match the row to this (m): 0.1 mm (§3.3). */
@@ -905,6 +917,15 @@ class GalleryRepository(
 
         const val MODEL = "model.glb"
         const val PHOTO = "front.jpg"
+
+        /** A cutout's picture (PLAN v3 W2): lossy WebP with alpha. */
+        const val CUTOUT_PHOTO = "cutout.webp"
+
+        /**
+         * Long sides tried, in order, for a transparent cutout's PNG texture: an RGBA PNG is several times a JPEG, so it
+         * steps down first within [MAX_SCAN_BYTES] (the stored picture stays sharper for the gallery).
+         */
+        internal val CUTOUT_TEXTURE_SIDES = intArrayOf(512, 448, 384, 320, 256)
         const val THUMB = "thumb.webp"
         private const val STAGING_PREFIX = ".tmp-"
         private const val SHARE_DIR = "share"
@@ -990,7 +1011,7 @@ class GalleryRepository(
          * Repository on the app's Room database (opened lazily) and `filesDir`. Call once per
          * process (AppContainer); Room types stay internal to `:data`.
          */
-        fun create(context: android.content.Context, templates: TemplateModelSource = TemplateModelSource.NONE): GalleryRepository {
+        fun create(context: android.content.Context): GalleryRepository {
             val app = context.applicationContext
             val db = SpaceViewDatabase.get(app)
             return GalleryRepository(
@@ -1000,7 +1021,6 @@ class GalleryRepository(
                 transactions = RoomGalleryTransactions(db),
                 cacheDir = app.cacheDir,
                 syncDir = ::fsyncDirectory,
-                templates = templates,
             )
         }
     }

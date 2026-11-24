@@ -3,11 +3,14 @@ package com.spaceview.app.place
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.spaceview.ar.PlacedItem
 import com.spaceview.ar.SurfaceTarget
 import com.spaceview.data.gallery.GalleryRepository
+import com.spaceview.data.gallery.ObjectKind
 import com.spaceview.data.gallery.PlacementModel
 import com.spaceview.data.gallery.PlacementResult
 import com.spaceview.engine.BoxOrigin
+import com.spaceview.engine.ModelKind
 import com.spaceview.engine.UnitPreference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -143,7 +146,7 @@ class PlaceViewModel(
                     is PlacementLookup.Ready -> {
                         val model = r.model
                         val bytes = withContext(io) { model.file.readBytes() }
-                        if (_target.value == null) setTarget(defaultTarget(model.origin))
+                        if (_target.value == null) setTarget(defaultTarget(model))
                         PlaceLoad.Ready(LoadedModel(model, bytes))
                     }
                 }
@@ -205,7 +208,36 @@ class PlaceViewModel(
         const val KEY_SPACE = "place_space"
         const val KEY_HEIGHT = "place_centre_height_m"
 
-        /** Wall items (BACK_CENTER: frames, TVs) go on a wall; everything else on the floor. */
+        /**
+         * Where an item goes first: wall items (frames and TVs; a legacy box hangs from its BACK_CENTER) on a wall,
+         * everything else on the floor. The user can switch surface at any time.
+         */
+        fun defaultTarget(model: PlacementModel): SurfaceTarget = when {
+            model.modelKind == ModelKind.CUTOUT && !model.meshFallback ->
+                if (model.kind == ObjectKind.FRAME || model.kind == ObjectKind.TV) SurfaceTarget.WALL else SurfaceTarget.FLOOR
+            else -> defaultTarget(model.origin)
+        }
+
+        /** By origin alone: BACK_CENTER (a legacy wall box) on a wall, everything else on the floor. */
         fun defaultTarget(origin: BoxOrigin): SurfaceTarget = if (origin == BoxOrigin.BACK_CENTER) SurfaceTarget.WALL else SurfaceTarget.FLOOR
+
+        /**
+         * A cutout's thickness for placement (m): the GLB is a flat quad (depth 0), so placement gets a hair of depth.
+         * It stands with its bottom edge on a floor (the quad's centre is its origin) and hangs flat on a wall, half of
+         * this away from it. Never used for the fit check, which takes the row's measured W × H (× D).
+         */
+        const val CUTOUT_THICKNESS_M = 0.002
+
+        /**
+         * The item as placement sees it (PLAN v3 W3). A cutout is placed by its own quad (W × H, centred origin) with
+         * [CUTOUT_THICKNESS_M]; every other model by its GLB box, origin and declared centre (legacy boxes, templates,
+         * meshes, and fallback boxes).
+         */
+        fun placedItem(model: PlacementModel): PlacedItem =
+            if (model.modelKind == ModelKind.CUTOUT && !model.meshFallback && model.depthM < CUTOUT_THICKNESS_M) {
+                PlacedItem(model.widthM, model.heightM, CUTOUT_THICKNESS_M, BoxOrigin.CENTER, null)
+            } else {
+                PlacedItem(model.widthM, model.heightM, model.depthM, model.origin, model.centre)
+            }
     }
 }

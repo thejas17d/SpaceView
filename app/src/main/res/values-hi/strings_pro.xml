@@ -6,8 +6,6 @@
 
     <string name="pro_reason_no_ads">SpaceView बिना विज्ञापनों के इस्तेमाल करें।</string>
     <string name="pro_reason_gallery">मुफ़्त गैलरी में %1$d चीज़ें सेव होती हैं। Pro में जितनी चाहें उतनी सेव करें। आपकी सेव की हुई कोई भी चीज़ कभी छिपाई या हटाई नहीं जाती।</string>
-    <string name="pro_reason_device_scan">आपने अपने सभी %1$d मुफ़्त 3D स्कैन इस्तेमाल कर लिए हैं। स्कैन मिटाने से नया स्कैन वापस नहीं मिलता। Pro में बिना किसी सीमा के स्कैन करें। आपके सेव किए गए स्कैन आपके ही रहेंगे।</string>
-    <string name="pro_reason_templates">यह फ़र्नीचर टेम्पलेट Pro का हिस्सा है। सोफ़ा, बेड और अलमारी मुफ़्त रहेंगे।</string>
     <string name="pro_reason_compare">मुफ़्त में एक बार में %1$d चीज़ों की तुलना होती है। Pro में जितनी चाहें उतनी चीज़ों की तुलना करें।</string>
     <string name="pro_reason_export_glb">3D मॉडल एक्सपोर्ट करना Pro का हिस्सा है।</string>
     <string name="pro_reason_export_pdf">PDF एक्सपोर्ट Pro का हिस्सा है।</string>
@@ -15,8 +13,6 @@
     <string name="pro_benefits_title">Pro में</string>
     <string name="pro_benefit_no_ads">कहीं कोई विज्ञापन नहीं</string>
     <string name="pro_benefit_gallery">गैलरी में असीमित सेव</string>
-    <string name="pro_benefit_device_scan">असीमित 3D स्कैन</string>
-    <string name="pro_benefit_templates">सभी फ़र्नीचर टेम्पलेट</string>
     <string name="pro_benefit_compare">कितनी भी चीज़ों की तुलना</string>
     <string name="pro_benefit_export_glb">3D मॉडल (GLB) एक्सपोर्ट</string>
     <string name="pro_benefit_export_pdf">नाप के साथ PDF एक्सपोर्ट</string>

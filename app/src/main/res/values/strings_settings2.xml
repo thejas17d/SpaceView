@@ -11,7 +11,7 @@
     <string name="settings_delete_data">Delete my data</string>
     <string name="settings_delete_data_detail">History, Gallery, calibration and settings on this phone</string>
     <string name="settings_delete_data_title">Delete all your data?</string>
-    <string name="settings_delete_data_body">This permanently deletes from this phone: your History, every Gallery item with its photos and 3D models, your calibration and your settings (units, sounds, depth, hands-free). It can\'t be undone.\n\nKept: your SpaceView Pro purchase status (the subscription is managed by Google Play; to cancel it, use Manage subscription), your ad privacy choices, and the counters that limit how often ads and review requests appear.</string>
+    <string name="settings_delete_data_body">This permanently deletes from this phone: your History, every Gallery item with its pictures and models, your calibration and your settings (units, sounds, depth, hands-free). It can\'t be undone.\n\nKept: your SpaceView Pro purchase status (the subscription is managed by Google Play; to cancel it, use Manage subscription), your ad privacy choices, and the counters that limit how often ads and review requests appear.</string>
     <string name="settings_delete_data_confirm">Delete everything</string>
     <string name="settings_delete_data_running">Deleting…</string>
     <string name="settings_delete_data_done">Your data was deleted.</string>

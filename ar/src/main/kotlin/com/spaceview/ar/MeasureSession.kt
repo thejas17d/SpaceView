@@ -55,6 +55,11 @@ import kotlin.math.abs
  * @property pointsTracking false while committed points are not tracked (tracking lost).
  * @property lowLight the scene is dark.
  * @property pendingCommit "+" was pressed and we are waiting for a steady point.
+ * @property aimTooSteep W5: the height / box-top point is refused because the phone points nearly straight up or down
+ *   (the crosshair grazes the vertical measuring plane by more than 75°).
+ * @property surfaceSeen W6: a usable surface point has been found at least once in this ARCore session (until then the
+ *   UI coaches "move the phone slowly side to side").
+ * @property diagnostics W6: surface-finding timings for the debug HUD line.
  */
 data class MeasureState(
     val mode: MeasureMode = MeasureMode.DISTANCE,
@@ -74,9 +79,30 @@ data class MeasureState(
     val capabilities: ArCapabilities? = null,
     val isFrozen: Boolean = false,
     val pendingCommit: Boolean = false,
+    val aimTooSteep: Boolean = false,
+    val surfaceSeen: Boolean = false,
+    val diagnostics: SurfaceDiagnostics? = null,
 ) {
     val requiredPoints: Int get() = mode.requiredPoints
 }
+
+/**
+ * W6 surface-finding diagnostics of one ARCore session (debug HUD line; record the numbers in TESTING). Times are
+ * milliseconds since the session started running.
+ *
+ * @property trackingMs first frame with ARCore tracking.
+ * @property firstHitMs first frame with a usable surface point under the crosshair, and [firstHitKind] its source.
+ * @property firstLockMs first steady (committable) point.
+ * @property repeatedFrames frames SceneView delivered again with an unchanged camera timestamp during the first 10 s
+ *   (skipped by the averaging since W6: they used to be averaged as if they were new samples).
+ */
+data class SurfaceDiagnostics(
+    val trackingMs: Long? = null,
+    val firstHitMs: Long? = null,
+    val firstHitKind: HitKind? = null,
+    val firstLockMs: Long? = null,
+    val repeatedFrames: Int = 0,
+)
 
 /** Why "+" did not place a point. */
 enum class CommitFailure {
@@ -257,6 +283,18 @@ class MeasureSession(
     private var cpuCamera: CpuImageCamera? = null
     private var lastCameraPose: com.spaceview.engine.Pose? = null
 
+    // ---- W5 / W6, main thread ----
+    /** The floor under the camera (W5 far base): robust lowest horizontal surface of this session. */
+    private val floor = FloorEstimator()
+    private var frameCounter = 0
+    /** Elapsed-realtime ms when the current ARCore session started running (W6 diagnostics), -1 before. */
+    @Volatile private var sessionStartMs = -1L
+    /** Bumped on every new ARCore session: the worker resets its per-session state and diagnostics. */
+    @Volatile private var sessionEpoch = 0
+    /** The worker's latest W5 aim point (height top / box top / far base) for the overlay, and its wall time. */
+    @Volatile private var liveAim: Vec3? = null
+    @Volatile private var liveAimWallNs = 0L
+
     /** Bumped (main thread) on every change to [endpoints]; the worker drops older results. */
     @Volatile private var generation = 0
 
@@ -326,6 +364,10 @@ class MeasureSession(
         this.session = session
         lastPlaneHit = null
         lastPointCloudTs = -1L
+        floor.reset()
+        sessionEpoch++
+        sessionStartMs = -1L
+        liveAim = null
         intrinsics = null
         cpuCamera = null
         cancelFrontCapture()
@@ -338,6 +380,7 @@ class MeasureSession(
         if (closed) return
         this.session = session
         live = true
+        if (sessionStartMs < 0) sessionStartMs = SystemClock.elapsedRealtime()
         _state.update { it.copy(sessionRunning = true) }
     }
 
@@ -381,6 +424,7 @@ class MeasureSession(
         if (closed || viewW <= 0 || viewH <= 0) return
         this.session = session
         live = true // a frame means the session is running
+        if (sessionStartMs < 0) sessionStartMs = SystemClock.elapsedRealtime()
         if (!_state.value.sessionRunning) _state.update { it.copy(sessionRunning = true) }
         val camera = frame.camera
         val tracking = FrameReaders.tracking(camera.trackingState)
@@ -415,6 +459,14 @@ class MeasureSession(
                 cloudCount = n
             }
             if (capabilities?.depthActive == true) depth = FrameReaders.depthPatch(frame, centreX, centreY)
+            // W5 far base: the floor from horizontal hits under the crosshair and (every ~second) ARCore's upward planes.
+            hit?.let { h ->
+                val n = h.normal
+                if (n != null && (n dot Vec3.UP) >= FLOOR_NORMAL_COS) {
+                    floor.add(h.position.x, h.position.y, h.position.z, h.kind == HitKind.PLANE, frame.timestamp)
+                }
+            }
+            if (frameCounter++ % FLOOR_PLANE_EVERY == 0) FrameReaders.feedFloorPlanes(session, floor, frame.timestamp)
         }
 
         // Anchor refinement: read the current pose of every committed, anchored point. Points left
@@ -454,6 +506,8 @@ class MeasureSession(
         sample.viewPxPerImagePx = viewPxPerImagePx
         sample.mode = mode
         sample.frozen = frozenCapture != null
+        sample.floorY = floor.floorY() ?: Double.NaN
+        sample.epoch = sessionEpoch
         // DROP_OLDEST: a dropped sample goes back to the pool through onUndeliveredElement.
         if (frames.trySend(sample).isFailure) samplePool.offer(sample)
 
@@ -461,7 +515,10 @@ class MeasureSession(
         overlay.points.clear()
         for (e in endpoints) overlay.points += e.data.point.position
         overlay.live = if (endpoints.size < mode.requiredPoints && tracking == CameraTracking.TRACKING) {
-            candidate?.takeIf { frame.timestamp - it.timestampNs < STALE_NS }?.data?.point?.position ?: hit?.position
+            // W5: the height top / box top / far base is not the raw hit: never fall back to the hit for those.
+            val aimed = liveAim?.takeIf { SystemClock.elapsedRealtimeNanos() - liveAimWallNs < STALE_NS }
+            candidate?.takeIf { frame.timestamp - it.timestampNs < STALE_NS }?.data?.point?.position
+                ?: aimed ?: hit?.position?.takeIf { !aimsW5(mode, endpoints.size) }
         } else {
             null
         }
@@ -922,15 +979,42 @@ class MeasureSession(
     private suspend fun runWorker() {
         val gate = TrackingGate()
         val stabilizer = SampleStabilizer()
+        // W5 far base: a ground point jitters by cot(depression) x the hand's tremor, so it gets a wider "same spot" window.
+        val groundStabilizer = SampleStabilizer(moveAbsM = GROUND_MOVE_ABS_M, moveRel = GROUND_MOVE_REL)
         val surface = LocalSurfaceModel()
         val depthPoints = FloatArray(3 * MAX_DEPTH_POINTS)
         var lastPublishMs = 0L
         var lastGeneration = -1
         var lastStatus: TrackingStatus? = null
         var lowLightSeen = false
-
+        var lastTs = Long.MIN_VALUE
+        var epoch = -1
+        var diag = SurfaceDiagnostics()
+        var surfaceSeen = false
         for (s in frames) {
             try {
+                if (s.epoch != epoch) {
+                    epoch = s.epoch
+                    diag = SurfaceDiagnostics()
+                    surfaceSeen = false
+                    lastTs = Long.MIN_VALUE
+                    gate.reset()
+                    stabilizer.reset()
+                    groundStabilizer.reset()
+                    surface.clear()
+                }
+                // W6: SceneView calls onSessionUpdated at the display rate and repeats the camera frame (same timestamp)
+                // in between. A repeated frame is not a new sample: averaging it would shrink the ± dishonestly.
+                val repeated = s.timestampNs == lastTs
+                lastTs = s.timestampNs
+                if (repeated) {
+                    // Counted over the first seconds only, so the snapshot stops changing (no 10 Hz recomposition).
+                    val start = sessionStartMs
+                    if (start >= 0 && SystemClock.elapsedRealtime() - start < DIAG_REPEAT_WINDOW_MS) {
+                        diag = diag.copy(repeatedFrames = diag.repeatedFrames + 1)
+                    }
+                    if (s.generation == lastGeneration) continue
+                }
                 val gateResult = gate.update(s.timestampNs, s.tracking, s.reason, s.cameraPose, s.light)
                 if (s.endpoints.isEmpty()) lowLightSeen = false
                 if (gateResult.lowLight) lowLightSeen = true
@@ -938,31 +1022,54 @@ class MeasureSession(
 
                 // Raw 3-D points for our own plane fit, pre-filtered to a cone around the reticle ray.
                 val ray = s.centreRay
-                if (s.cloudCount > 0) surface.addPoints(s.cloud, s.cloudCount, s.timestampNs, ray)
-                s.depth?.let { patch ->
-                    val n = patch.toWorldPoints(depthPoints)
-                    if (n > 0) surface.addPoints(depthPoints, n, s.timestampNs, ray)
+                if (!repeated) {
+                    if (s.cloudCount > 0) surface.addPoints(s.cloud, s.cloudCount, s.timestampNs, ray)
+                    s.depth?.let { patch ->
+                        val n = patch.toWorldPoints(depthPoints)
+                        if (n > 0) surface.addPoints(depthPoints, n, s.timestampNs, ray)
+                    }
                 }
-
+                var tooSteep = false
                 val chosen = if (tracked && ray != null) {
-                    SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs)
+                    when (val aimed = chooseW5(s, ray, surface)) {
+                        is HeightAim.Top.Point -> aimed.chosen
+                        HeightAim.Top.TooSteep -> { tooSteep = true; null }
+                        HeightAim.Top.None -> null
+                        null -> SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs)
+                            ?: farBase(s, ray)
+                    }
                 } else {
                     null
                 }
+                if (aimsW5(s.mode, s.endpoints.size) || chosen?.kind == HitKind.GROUND) {
+                    liveAim = chosen?.position
+                    liveAimWallNs = SystemClock.elapsedRealtimeNanos()
+                } else {
+                    liveAim = null
+                }
                 val range = chosen?.range ?: 0.0
-                val loc = s.intrinsics?.let { AimModel.aim(range, it, s.viewPxPerImagePx) }
-                if (!s.frozen) {
+                val loc = chosen?.localisation(s.intrinsics?.let { AimModel.aim(range, it, s.viewPxPerImagePx) })
+                val ground = chosen?.kind == HitKind.GROUND
+                val active = if (ground) groundStabilizer else stabilizer
+                if (!s.frozen && !repeated) {
                     // While the user works on a frozen still, tracking stays fresh but nothing is averaged.
                     // NOT_TRACKING resets the stabiliser even without a position (M2 review minor 4).
-                    stabilizer.add(chosen?.position, range, gateResult.sampleQuality, loc)
+                    active.add(chosen?.position, range, gateResult.sampleQuality, loc)
+                    (if (ground) stabilizer else groundStabilizer).reset()
                 }
-
-                val est = stabilizer.estimate
+                val est = active.estimate
                 val liveData: EndpointData? = if (chosen != null) {
                     val normal = chosen.normal
                     val incidence = if (normal != null && ray != null) abs(normal dot ray.direction) else null
-                    // The estimate already carries the aim term (engine-localised); a raw live point gets it here.
-                    val point = est?.point ?: loc?.let { UncertainPoint(chosen.position).withLocalisation(it) } ?: UncertainPoint(chosen.position)
+                    val extra = chosen.extraCovariance
+                    // The estimate already carries the aim term (engine-localised); a raw live point gets it here. A ground
+                    // point carries its full Ground covariance instead (aim included), never an extra aim term.
+                    val point = if (extra != null) {
+                        val p = est?.point ?: UncertainPoint(chosen.position)
+                        UncertainPoint(p.position, p.covariance + extra, includesLocalisation = true)
+                    } else {
+                        est?.point ?: loc?.let { UncertainPoint(chosen.position).withLocalisation(it) } ?: UncertainPoint(chosen.position)
+                    }
                     EndpointData(
                         point, normal, chosen.kind, range, chosen.planeBiasRel, est?.spreadRms ?: 0.0, incidence,
                         loc?.focalLengthPx ?: 0.0, loc?.pixelErrorPx ?: 0.0,
@@ -970,6 +1077,14 @@ class MeasureSession(
                 } else {
                     null
                 }
+                // W6 diagnostics: time to tracking, to the first usable point and to the first steady one.
+                val sinceStart = sessionStartMs.let { if (it < 0) null else SystemClock.elapsedRealtime() - it }
+                if (sinceStart != null) {
+                    if (diag.trackingMs == null && gateResult.sampleQuality != TrackingQuality.NOT_TRACKING) diag = diag.copy(trackingMs = sinceStart)
+                    if (diag.firstHitMs == null && chosen != null) diag = diag.copy(firstHitMs = sinceStart, firstHitKind = chosen.kind)
+                    if (diag.firstLockMs == null && active.isLocked) diag = diag.copy(firstLockMs = sinceStart)
+                }
+                if (chosen != null) surfaceSeen = true
                 // Only a full-quality frame may offer a commit (never during the post-loss warm-up).
                 candidate = if (liveData != null && est != null && gateResult.sampleQuality == TrackingQuality.TRACKING) {
                     CommitCandidate(liveData, est.isStable, s.timestampNs, SystemClock.elapsedRealtimeNanos())
@@ -990,8 +1105,8 @@ class MeasureSession(
                     MeasurementComposer.compose(s.mode, s.endpoints, if (complete) null else liveData, model)
                 }.getOrNull()
                 val tip = if (complete && reading != null) MeasurementComposer.tipFor(reading, s.endpoints, lowLightSeen) else null
-                val stability = if (chosen == null) 0f else ((stabilizer.progress * 10).toInt() / 10f)
-                val locked = stabilizer.isLocked
+                val stability = if (chosen == null) 0f else ((active.progress * 10).toInt() / 10f)
+                val locked = active.isLocked
                 // Merge only the worker-owned fields, and only while the points are still those of this frame.
                 _state.update { cur ->
                     if (s.generation != generation) {
@@ -1008,6 +1123,9 @@ class MeasureSession(
                             tip = tip,
                             pointsTracking = s.pointsTracking,
                             lowLight = gateResult.lowLight,
+                            aimTooSteep = tooSteep,
+                            surfaceSeen = surfaceSeen,
+                            diagnostics = diag,
                         )
                     }
                 }
@@ -1018,6 +1136,25 @@ class MeasureSession(
                 samplePool.offer(s)
             }
         }
+    }
+
+    /**
+     * W5: the aimed point of a height top (vertical plane through the base) or a box top (top-face hit, else the vertical
+     * plane through the corner aimed above). Null when the mode / point count does not use it.
+     */
+    private fun chooseW5(s: FrameSample, ray: com.spaceview.engine.Ray, surface: LocalSurfaceModel): HeightAim.Top? = when {
+        s.mode == MeasureMode.HEIGHT && s.endpoints.size == 1 -> HeightAim.top(s.endpoints[0], ray, s.cameraPose.forward)
+        s.mode == MeasureMode.BOX && s.endpoints.size == 3 -> HeightAim.boxTop(
+            s.endpoints, SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs), ray, s.cameraPose.forward,
+        )
+        else -> null
+    }
+
+    /** W5 far base: the floor under the crosshair (Ground range) when no surface was hit, for a height's first point. */
+    private fun farBase(s: FrameSample, ray: com.spaceview.engine.Ray): ChosenPoint? {
+        if (s.mode != MeasureMode.HEIGHT || s.endpoints.isNotEmpty()) return null
+        val aim = AimModel.angularSigma(s.intrinsics, s.viewPxPerImagePx)
+        return HeightAim.groundBase(ray, s.floorY, aim, model.effectiveScaleSigmaRel)
     }
 
     private fun decodeStill(still: StillCapture): Bitmap? = runCatching {
@@ -1066,6 +1203,10 @@ class MeasureSession(
         var viewPxPerImagePx = Double.POSITIVE_INFINITY
         var mode = MeasureMode.DISTANCE
         var frozen = false
+        /** The floor height (world y) under the camera, NaN when unknown (W5 far base). */
+        var floorY = Double.NaN
+        /** [sessionEpoch] when filled. */
+        var epoch = 0
     }
 
     companion object {
@@ -1091,5 +1232,19 @@ class MeasureSession(
 
         /** Samples in the pool: 4 queued + 1 in the worker + 1 being filled, plus slack. */
         private const val SAMPLE_POOL = 8
+        /** A hit counts as floor-like (W5 floor estimate) when its normal is within ~15° of up. */
+        private val FLOOR_NORMAL_COS = kotlin.math.cos(Math.toRadians(15.0))
+        /** ARCore's upward planes are offered to the floor estimate every this many frames (~1 s at 30 fps). */
+        private const val FLOOR_PLANE_EVERY = 30
+        /** W6 diagnostics count repeated SceneView frames over this long after the session starts. */
+        private const val DIAG_REPEAT_WINDOW_MS = 10_000L
+        /** "Same spot" window of a far ground base (W5): absolute part (m) ... */
+        const val GROUND_MOVE_ABS_M = 0.05
+        /** ... and relative to the range. */
+        const val GROUND_MOVE_REL = 0.03
+
+        /** True when the live point of [mode] with [points] committed comes from W5 aiming, not from the raw hit. */
+        internal fun aimsW5(mode: MeasureMode, points: Int): Boolean =
+            (mode == MeasureMode.HEIGHT && points == 1) || (mode == MeasureMode.BOX && points == 3)
     }
 }

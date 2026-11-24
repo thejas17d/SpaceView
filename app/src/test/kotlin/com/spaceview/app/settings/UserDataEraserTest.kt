@@ -87,6 +87,7 @@ class UserDataEraserTest {
 
     private val noCodec = object : GalleryImageCodec {
         override fun decode(encoded: ByteArray, maxLongSide: Int) = null
+        override fun fromPixels(image: com.spaceview.engine.ArgbImage) = throw UnsupportedOperationException()
     }
 
     private val measurementDao = Measurements()

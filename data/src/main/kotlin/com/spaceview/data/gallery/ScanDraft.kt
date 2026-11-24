@@ -2,7 +2,7 @@ package com.spaceview.data.gallery
 
 /**
  * What a gallery item is. Stored by name: never rename an entry (unknown names read back as [OTHER]).
- * [FURNITURE] is a parametric template (v3, K10).
+ * [FURNITURE] is a parametric template saved by earlier test builds (v1 makes none, PLAN v3).
  */
 enum class ObjectKind { FRAME, TV, APPLIANCE, BOX, OTHER, FURNITURE }
 
@@ -39,8 +39,21 @@ data class Dimension(val meters: Double, val bound95: Double, val source: Dimens
 }
 
 /**
- * Everything the scan flow hands to the gallery. frontJpeg is the already-rectified front photo (W:H aspect).
+ * The v1 scan model (PLAN v3 W2): the object's picture, already cropped so that its edges are the measured W × H
+ * (a flat object's rectified front, or a segmented subject's mask bounding box). Straight-alpha pixels: the
+ * background has alpha 0 when it was removed; a fully opaque picture is a plain rectangle (flat objects, "Undo
+ * cutout", or a segmentation that could not be trusted).
  *
+ * @property image null = no photo: the model is a plain, true-size panel.
+ */
+class CutoutDraft(val image: com.spaceview.engine.ArgbImage?)
+
+/**
+ * Everything the scan flow hands to the gallery.
+ *
+ * @property cutout v1 (PLAN v3): the flat, background-free, true-size picture; the item becomes a
+ *   [com.spaceview.engine.ModelKind.CUTOUT]. Null = the M3 proxy box path with [frontJpeg] (kept for legacy callers).
+ * @property frontJpeg the already-rectified front photo (W:H aspect) for the proxy box path; ignored with a [cutout].
  * @property calibrationFactor scale factor that was applied to the measured sizes (1.0 = none; null = unknown).
  *   With the stored measured values it gives the raw (uncalibrated) lengths for a later re-tune.
  */
@@ -55,4 +68,5 @@ class ScanDraft(
     val arcoreVersion: String?,
     val calibrationFactor: Double? = null,
     val captureMethod: CaptureMethod? = CaptureMethod.MANUAL,
+    val cutout: CutoutDraft? = null,
 )

@@ -22,16 +22,12 @@ class FeatureGateTest {
         fun free(f: ProFeature) = ProCatalog.rule(f).free
         assertEquals(Allowance.None, free(ProFeature.NO_ADS))
         assertEquals(Allowance.Count(20), free(ProFeature.GALLERY_UNLIMITED))
-        assertEquals(Allowance.Count(5), free(ProFeature.DEVICE_SCAN))
         assertEquals(Allowance.Count(2), free(ProFeature.COMPARE))
-        // Gate T1: the 3 core templates are Free (by template id); the rest of the library is Pro.
-        assertEquals(Allowance.Only(setOf("sofa_v1", "bed_v1", "wardrobe_v1")), free(ProFeature.FURNITURE_TEMPLATES))
         assertEquals(Allowance.None, free(ProFeature.EXPORT_GLB))
         assertEquals(Allowance.None, free(ProFeature.EXPORT_PDF))
         ProFeature.entries.forEach { assertEquals("Pro is unlimited for $it", Allowance.Unlimited, ProCatalog.rule(it).pro) }
         assertEquals("every feature has exactly one rule", ProFeature.entries.toSet(), ProCatalog.rules.map { it.feature }.toSet())
         assertEquals(ProFeature.entries.size, ProCatalog.rules.size)
-        assertEquals(setOf("sofa_v1", "bed_v1", "wardrobe_v1"), ProCatalog.FREE_TEMPLATE_IDS)
         assertEquals(7L * 24 * 60 * 60 * 1000, ProCatalog.OFFLINE_GRACE_MS)
     }
 
@@ -44,37 +40,10 @@ class FeatureGateTest {
 
     @Test
     fun `paywall advertises only shipped features`() {
-        assertEquals(listOf(ProFeature.NO_ADS, ProFeature.GALLERY_UNLIMITED, ProFeature.FURNITURE_TEMPLATES), ProCatalog.advertised)
-        assertTrue("templates shipped with T", ProCatalog.rule(ProFeature.FURNITURE_TEMPLATES).shipped)
-    }
-
-    @Test
-    fun `core templates are free by id, the rest of the library needs Pro`() {
-        val f = Entitlement.Free
-        for (id in listOf("sofa_v1", "bed_v1", "wardrobe_v1")) {
-            assertEquals(GateState.Allowed, FeatureRules.evaluate(ProFeature.FURNITURE_TEMPLATES, f, 0, id))
-            assertTrue(ProCatalog.isCoreTemplate(id))
-        }
-        for (id in listOf("lsofa_v1", "dining_table_v1", "dining_chair_v1", "tv_unit_v1", "bookshelf_v1", "study_table_v1", "unknown_v1")) {
-            assertEquals(id, GateState.NeedsPro(3), FeatureRules.evaluate(ProFeature.FURNITURE_TEMPLATES, f, 0, id))
-            assertFalse(ProCatalog.isCoreTemplate(id))
-        }
-        // Usage never counts against core templates: the 100th sofa is still free (the gallery cap is separate).
-        assertEquals(GateState.Allowed, FeatureRules.evaluate(ProFeature.FURNITURE_TEMPLATES, f, 100, "sofa_v1"))
-        // Without an id (picker badges): "some are free".
-        assertEquals(GateState.Limited(3, 3), FeatureRules.evaluate(ProFeature.FURNITURE_TEMPLATES, f, 0))
-        assertEquals(GateState.Allowed, FeatureRules.evaluate(ProFeature.FURNITURE_TEMPLATES, pro, 0, "lsofa_v1"))
-        assertEquals(GateState.NeedsPro(3), FeatureRules.evaluate(ProFeature.FURNITURE_TEMPLATES, Entitlement.Pending("pro"), 0, "lsofa_v1"))
-    }
-
-    @Test
-    fun `check passes the template id through`() = runTest {
-        val entitlement = MutableStateFlow<Entitlement>(Entitlement.Free)
-        val gate = EntitlementFeatureGate(entitlement)
-        assertTrue(gate.check(ProFeature.FURNITURE_TEMPLATES, itemId = "bed_v1").allowed)
-        assertFalse(gate.check(ProFeature.FURNITURE_TEMPLATES, itemId = "tv_unit_v1").allowed)
-        entitlement.value = pro
-        assertTrue(gate.check(ProFeature.FURNITURE_TEMPLATES, itemId = "tv_unit_v1").allowed)
+        // PLAN v3 (2D v1): no ads and unlimited saves are what Pro really offers; nothing 3D is advertised.
+        assertEquals(listOf(ProFeature.NO_ADS, ProFeature.GALLERY_UNLIMITED), ProCatalog.advertised)
+        val names = ProFeature.entries.map { it.name }
+        assertTrue("no 3D scan or template feature in v1", names.none { it.contains("DEVICE_SCAN") || it.contains("TEMPLATE") })
     }
 
     @Test
@@ -92,9 +61,9 @@ class FeatureGateTest {
         assertEquals(GateState.Limited(2, 20), FeatureRules.evaluate(ProFeature.GALLERY_UNLIMITED, f, 18))
         assertEquals(GateState.Limited(1, 20), FeatureRules.evaluate(ProFeature.GALLERY_UNLIMITED, f, 19))
         assertEquals(GateState.NeedsPro(20), FeatureRules.evaluate(ProFeature.GALLERY_UNLIMITED, f, 20))
-        assertEquals(GateState.Limited(1, 5), FeatureRules.evaluate(ProFeature.DEVICE_SCAN, f, 4))
-        assertEquals(GateState.NeedsPro(5), FeatureRules.evaluate(ProFeature.DEVICE_SCAN, f, 5))
-        assertEquals(GateState.Limited(5, 5), FeatureRules.evaluate(ProFeature.DEVICE_SCAN, f, -5))
+        assertEquals(GateState.Limited(1, 2), FeatureRules.evaluate(ProFeature.COMPARE, f, 1))
+        assertEquals(GateState.NeedsPro(2), FeatureRules.evaluate(ProFeature.COMPARE, f, 2))
+        assertEquals(GateState.Limited(2, 2), FeatureRules.evaluate(ProFeature.COMPARE, f, -5))
         assertEquals(GateState.NeedsPro(0), FeatureRules.evaluate(ProFeature.EXPORT_GLB, f, 0))
     }
 

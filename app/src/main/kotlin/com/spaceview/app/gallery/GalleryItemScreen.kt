@@ -197,6 +197,7 @@ private fun ItemContent(
             version = item.updatedAt,
             contentDescription = stringResource(R.string.gallery_photo_of, title),
             modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 360.dp),
+            checkerboard = item.modelKind == ModelKind.CUTOUT,
         )
         SpecBlock(state, item)
         Button(
@@ -209,15 +210,15 @@ private fun ItemContent(
             OutlinedButton(
                 onClick = {
                     scope.launch {
-                        val copy = if (item.photoFile != null) shareCopy(GalleryShare.fileName(title)) else null
+                        val copy = if (item.photoFile != null) shareCopy(GalleryShare.fileName(title, item.photoFile)) else null
                         if (!GalleryShare.share(context, copy, shareText, chooserTitle)) onShareFailed()
                     }
                 },
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                 shape = MaterialTheme.shapes.medium,
             ) { Text(stringResource(R.string.gallery_share)) }
-            // A furniture template's size is one of its parameters (the repository refuses a size edit): resize it by
-            // making it again in the furniture flow.
+            // A legacy furniture template (older test builds) keeps its size: its parts can't be rebuilt in v1, so the
+            // repository refuses a size edit.
             if (item.modelKind != ModelKind.TEMPLATE) {
                 OutlinedButton(
                     onClick = onEdit,

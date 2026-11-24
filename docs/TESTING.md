@@ -238,6 +238,8 @@ Install the M4 APK **over M3**, without uninstalling, so the v2→v3 database up
 
 ## 19. Furniture templates + 3D Scan Lab spike (from `docs/reviews/T-D0-gate.md` §7)
 
+> **Parked (PLAN v3, 2026-11-24):** furniture templates and the 3D Scan Lab are not in v1; they live on branch `next/3d-engine`. Run this section only on a build of that branch. For v1, see §22 (legacy template / mesh items must still open and place).
+
 **Spike phone (user, 2026-11-23): Google Pixel 10a.** It is on Google's ARCore list with **Depth API support**; it has no hardware ToF sensor, so its depth is software (motion stereo). Record its results as the non-ToF case of ARCH §7.1.10. A ToF phone is still wanted for comparison but is not required.
 
 **T: Furniture templates** (release or debug app; Free first, then Pro through FakeBilling on debug or a licence tester on release)
@@ -405,7 +407,84 @@ Release-signed build installed **over** the previous one, unless a step says oth
 19. A glossy floor that ARCore does **not** track, a coffee table that it does: look over the floor for at least 3 s, then do the wall–floor taps. They are accepted, and the wall centre height is right.
 20. A polished floor that ARCore **does** track, with a table reflected in it: the floor never jumps down to the reflection (wall–floor taps keep working). Note the result for `FloorEstimator.AREA_RATIO`.
 
+## 22. PLAN v3 (2D v1), Builder B: 3D removed, Pro testing, background-free cutouts, flat Place (`docs/PLAN-v3-2D.md` W1, W7, W2, W3)
+
+Phone: **Google Pixel 10a**. Install the v3 APK **over** the build you tested before (756b2bd or older), without uninstalling, so legacy gallery rows are tested. Room stays at **v3**: there is no database migration in this build.
+
+**W1: 3D removed; legacy items still work**
+1. Home has no "Furniture" row; Settings has no "3D Scan Lab" button; the Gallery's empty state has no "Add furniture" button.
+2. **Legacy items (mandatory first):** every item saved by an earlier test build still opens, shares, deletes and **places**:
+   - an M3/M4 scan (proxy box);
+   - a furniture template (sofa, bed…): placed from its stored model; "Edit dimensions" is not offered;
+   - a 3D scan (if you made one in the Lab): placed from its stored mesh ("Approximate 3D shape" note).
+   Nothing crashes, even though v1 can no longer rebuild a template or a mesh.
+3. If a legacy item's stored model can't be used, Place says "3D shape unavailable; showing the measured box" and places a plain box of its saved size (expected, not a crash).
+4. The paywall's "With Pro" list shows only **No ads anywhere** and **Unlimited gallery saves**. Nothing mentions 3D scans or furniture templates (EN and HI).
+
+**W7: testing Pro without paying**
+5. **Debug build:** Settings starts with a **"Developer (debug build only)"** card. Switch **Pro (test)** on: within a second or two the line under it says "App now: Pro", the SpaceView Pro section says "Pro is active", ads disappear, and a 21st gallery item saves. Switch it off: Free again (ads may come back; the 21st save asks for Pro).
+6. **Debug build, paywall:** open the paywall (Settings → SpaceView Pro, or a full gallery). Below the plans there is **"Test: unlock Pro (debug, no payment)"**. Tap it: the paywall turns into "You have Pro" without any Google Play sheet.
+7. The switch survives an app restart (the fake purchase is kept on the phone, debug only). "More billing tests" still has the pending / refund / offline buttons.
+8. **Release build:** Settings has **no** Developer card and the paywall has **no** test button (CI also checks the release code for them).
+9. **Play licence testers (release build on the internal track):** see "Licence testers" below. A licence tester buys Pro with a test card and is **not charged**; Pro turns on. Cancel in Play → Pro ends at the (shortened) test renewal.
+
+**Licence testers (Play Console, one-time set-up)**
+- Play Console → **Settings** (left menu, account level, not inside the app) → **License testing**. Add the Gmail addresses of the testers (a Google Group works too), set **License response** to `RESPOND_NORMALLY`, and save.
+- The tester's phone must be signed in to Google Play with that address, and the app must be installed **from Play** (internal or closed track; sideloaded release APKs can't buy). Test purchases show "Test card, always approves" (and slow / declining test cards for pending / declined); nothing is charged.
+- Test subscriptions renew fast (a monthly plan renews about every 5 minutes, at most 6 times), so expiry and grace can be watched within an hour.
+- §17 items 1–2 (licence key and restore) are run with a licence tester.
+
+**W2: background-free cutouts** (debug or release; internet once, so Google Play services can fetch the ML Kit model)
+10. **First run of the background removal:** the model comes with Google Play services (no APK download). Right after a fresh install it may not be ready yet: Review then says "Couldn't remove the background on this phone right now…" and keeps the rectangle. After a few minutes on Wi-Fi it must work. Note how long it took.
+11. **Photo frame (flat):** scan a frame on a wall. Review shows the photo cut **exactly to its corners** on a checkerboard, with "Cut exactly to the measured corners." No "Undo cutout" button. Saved size and ± are as before.
+12. **Chair (Other) or a carton (Box):** scan it in front of a wall. While "Removing the background…" shows, Save waits. Then the chair appears **without its background** on the checkerboard (the checkerboard shows through between the legs), at the measured W:H, with "Background removed: only the object is saved, at its measured size."
+13. **Undo cutout:** tap "Undo cutout": the full rectangle photo comes back and the note says the background is kept. "Remove background again" restores the cutout. Save stores the one shown.
+14. **Hard background:** scan a box against a busy background of the same colour. If the edges are not clear, Review says "Couldn't find the object's edges clearly…" and keeps the rectangle (no crash, Save works).
+15. Gallery: the grid thumbnail and the item photo are the cutout (checkerboard behind a removed background). The item's size, ±, depth and the "Edit dimensions" flow are unchanged; after an edit the model is rebuilt at the new size (still a cutout).
+16. Share from the item and from Saved: WhatsApp and Gmail receive the picture (a `.webp`). Note whether WhatsApp shows the transparent area as black or white (cosmetic; report it).
+17. Size: Settings → Delete my data still clears everything; each saved scan is ≤ 0.5 MB (About → storage, or `adb shell du`).
+18. Hindi: every new Review note and button is in Hindi; Help → "Scans and cutouts" and the privacy text mention on-device background removal.
+
+**W3: flat Place in room**
+19. **Chair (Floor):** Place opens on Floor. The chair stands **upright with its bottom edge on the floor** (no gap, not sunk), at true size (check with a tape against the real chair next to it). Move, rotate (it turns about the vertical) and nudge work as before.
+20. **Frame (Wall):** Place opens on Wall. The frame **hangs flat on the wall** (not standing out from it), centred on the reticle; the height slider and "Eye level" work; a quarter turn switches portrait ↔ landscape.
+21. **No halo:** look closely at the chair's edges against a light floor and against a dark one: no black (or white) outline around the object, and the background really is gone (you see the room through the gaps).
+22. Both sides: walk behind a placed cutout: its back shows the same picture (mirrored), never an invisible or black quad.
+23. **Check the fit:** measure a gap or a floor rectangle. The verdict uses the item's **measured** width × height on a wall and width × depth on the floor (a measured depth counts; a frame's preset depth says "Using your typed size"). It never compares against a zero depth.
+24. A legacy proxy box (M3/M4 scan) still places as a 3D box, and a legacy template / mesh as in item 2.
+
 ---
+
+## 23. PLAN v3 (2D v1), Builder A: height by vertical plane, surface finding, Distance up to 500 m (`docs/PLAN-v3-2D.md` W5, W6, W4)
+
+Phone: Google Pixel 10a. **"Use depth" is now ON by default**, so first check it is on in Settings (W6 finding: it used to be off, which slowed plain surfaces).
+
+1. **Surface, textured floor:** from a fresh Measure open, read the debug HUD line (`dbg track · hit · lock · now · depth · rep`). Targets: hit ≤ 2 s, lock ≤ 2.5 s. Do 5 runs with depth on and 5 with it off, and record the times, the first hit source and `rep`.
+2. **Surface, plain painted wall:** target hit ≤ 4 s. Expect a depth point first when depth is on; with it off, expect a slow hit or none.
+3. **Height, tilt:** a 2 m door from 3 m away, with the base at the door's foot.
+   - Tilting up to 60°, the point stays on the door's vertical line and the result is inside its ±.
+   - The ± grows as you tilt.
+   - Past about 75°, the "Too steep" hint shows.
+4. **Height, far base:** about 10 m away on level floor, the base lands on the floor. Record the distance (about 13–25 m) at which the far base is refused.
+5. **Scan box height:**
+   - On a low box, the top-face hit is used and H matches a tape measure.
+   - On a wardrobe taller than eye level, aim above its front corner: the point slides up and H is inside its ±.
+6. **Distance, Near:** a 5 m tape check is inside the ±, with the badge "AR point".
+7. **Distance, Ground:** at 8 m and 12 m on level paving, the reading is inside the ± and shows the badges "Ground" and "Assumes level ground". At 30 m it says "Too far for one sight. Use 2 sights."
+8. **Distance, 2-sight:** at 100 m and 300 m, check against a map, GPS or a known distance.
+   - The ± covers the truth.
+   - The app asks for a walk of about 12 m at 100 m and about 30 m at 300 m.
+   - The walked distance and the preview update while you walk.
+   - **Honest limit as built:** a 500 m target ends near ±160 m (aim error 0.24°). See HANDOFF for the improvement proposal.
+9. **Refusals:**
+   - Cover the camera between sights → "tracking lost", and no retake is offered.
+   - Aim sight 2 at a different object → "different things".
+   - Walk 1 m on a 200 m target → "near-parallel".
+10. **Out of range:** a point at 600 m shows "Out of range (over 500 m)", never a number.
+11. **TalkBack:** Hold and every 2-sight result are spoken once, in words. The live value is spoken once it settles.
+12. **Ads:** no ad appears on the Distance screen or when leaving it.
+13. **Hindi:** in the Hindi locale, every Distance string shows in Hindi.
+14. **Imperial units:** decimal feet, never with more digits than the ± supports.
 
 ## Values to tune from results
 Aim error 2 px, motion gates, RANSAC limits, Good/Fair/Rough thresholds, device-tier ± floors (1 cm / 5 mm), calibration acceptance.

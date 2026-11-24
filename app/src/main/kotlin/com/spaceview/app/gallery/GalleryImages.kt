@@ -9,6 +9,7 @@ import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,6 +23,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.FileProvider
 import com.spaceview.app.R
+import com.spaceview.app.common.Checkerboard
 import com.spaceview.app.ui.theme.SpaceViewTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -52,7 +54,8 @@ private fun decodeFile(file: File, maxPx: Int): ImageBitmap? = runCatching {
 
 /**
  * A gallery image loaded off the main thread; shows a hairline placeholder ("No photo" when [file] is null or
- * unreadable). [version] (the item's updatedAt) invalidates the cache after an edit.
+ * unreadable). [version] (the item's updatedAt) invalidates the cache after an edit. [checkerboard]: a cutout (PLAN v3
+ * W2) is drawn on the transparency checkerboard, exactly behind the picture, so a removed background shows as such.
  */
 @Composable
 fun GalleryImage(
@@ -62,6 +65,7 @@ fun GalleryImage(
     modifier: Modifier = Modifier,
     maxPx: Int = 1024,
     contentScale: ContentScale = ContentScale.Fit,
+    checkerboard: Boolean = false,
 ) {
     val key = file?.let { "${it.path}#$version#$maxPx" }
     val bitmap by produceState(initialValue = key?.let { GalleryBitmapCache.get(it) }, key) {
@@ -72,7 +76,13 @@ fun GalleryImage(
     }
     Box(modifier.background(MaterialTheme.colorScheme.surfaceContainer), contentAlignment = Alignment.Center) {
         val b = bitmap
-        if (b != null) {
+        if (b != null && checkerboard && contentScale == ContentScale.Fit && b.height > 0) {
+            Box(Modifier.aspectRatio(b.width.toFloat() / b.height, matchHeightConstraintsFirst = b.width < b.height)) {
+                Checkerboard(Modifier.matchParentSize())
+                Image(b, contentDescription = contentDescription, modifier = Modifier.matchParentSize(), contentScale = ContentScale.FillBounds)
+            }
+        } else if (b != null) {
+            if (checkerboard) Checkerboard(Modifier.matchParentSize())
             Image(b, contentDescription = contentDescription, modifier = Modifier.matchParentSize(), contentScale = contentScale)
         } else if (file == null) {
             Text(
@@ -99,7 +109,7 @@ object GalleryShare {
             putExtra(Intent.EXTRA_TEXT, text)
             if (photo != null) {
                 val uri = FileProvider.getUriForFile(context, authority(context), photo)
-                type = "image/jpeg"
+                type = if (photo.extension.equals("webp", ignoreCase = true)) "image/webp" else "image/jpeg"
                 putExtra(Intent.EXTRA_STREAM, uri)
                 clipData = ClipData.newRawUri(photo.name, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -119,10 +129,14 @@ object GalleryShare {
         false
     }
 
-    /** A safe file name for the shared photo: "SpaceView-Cafe-frame.jpg". */
-    fun fileName(title: String): String {
+    /**
+     * A safe file name for the shared photo: "SpaceView-Cafe-frame.jpg". [photo] gives the extension (a cutout's
+     * picture is a WebP with a transparent background, PLAN v3 W2).
+     */
+    fun fileName(title: String, photo: File? = null): String {
         val slug = title.map { if (it.isLetterOrDigit() && it.code < 128) it else '-' }.joinToString("")
             .replace(Regex("-+"), "-").trim('-').take(40)
-        return if (slug.isEmpty()) "SpaceView.jpg" else "SpaceView-$slug.jpg"
+        val ext = if (photo?.extension.equals("webp", ignoreCase = true)) "webp" else "jpg"
+        return if (slug.isEmpty()) "SpaceView.$ext" else "SpaceView-$slug.$ext"
     }
 }

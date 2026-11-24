@@ -149,13 +149,11 @@ fun SettingsRoute(
             onManage = { runCatching { uriHandler.openUri(ProLinks.manageSubscriptions(context.packageName)) } },
         ),
         debugPanel = {
-            // Debug builds with fake billing only (BuildConfig.FAKE_BILLING is a constant false in release).
+            // Debug builds with fake billing only (BuildConfig.FAKE_BILLING is a constant false in release, so R8
+            // drops this branch and FakeBillingControls with it; CI checks the release dex for it).
             if (BuildConfig.FAKE_BILLING) {
-                (container.billing as? FakeBillingGateway)?.let { fake -> FakeBillingControls(fake, onChanged = restore) }
+                (container.billing as? FakeBillingGateway)?.let { fake -> FakeBillingControls(fake, entitlement, onChanged = restore) }
             }
-            // The 3D Scan Lab lives in the debug source set only (ARCHITECTURE-v2 §7.1.10 spike); BuildConfig.DEBUG is
-            // a constant false in release, so R8 drops this branch and nothing here names a lab class.
-            if (BuildConfig.DEBUG) Scan3dLabLink()
         },
         banner = { BannerAd(adsManager = ads) },
         onOpenHelp = onOpenHelp,
@@ -284,6 +282,8 @@ private fun SettingsContent(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             TopBar(onBack)
+            // Debug builds only: the Developer section (Pro test switch) comes first, so testers find it at once.
+            debugPanel()
 
             Section(R.string.settings_section_units) {
                 Column(Modifier.selectableGroup()) {
@@ -364,8 +364,6 @@ private fun SettingsContent(
             Section(R.string.pro_settings_section) {
                 ProRows(pro)
             }
-            debugPanel()
-
             Section(R.string.settings_section_about) {
                 ActionRow(
                     title = R.string.settings_help,
@@ -635,17 +633,3 @@ private fun SettingsPreview() {
         )
     }
 }
-
-/** Debug builds only: opens the 3D Scan Lab activity (declared in `src/debug/AndroidManifest.xml`). */
-@Composable
-private fun Scan3dLabLink() {
-    val context = LocalContext.current
-    androidx.compose.material3.OutlinedButton(
-        onClick = {
-            runCatching { context.startActivity(android.content.Intent().setClassName(context, SCAN3D_LAB_ACTIVITY)) }
-        },
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-    ) { Text(stringResource(R.string.settings_scan3d_lab)) }
-}
-
-private const val SCAN3D_LAB_ACTIVITY = "com.spaceview.app.scan3d.Scan3dLabActivity"

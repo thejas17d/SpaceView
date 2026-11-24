@@ -15,16 +15,6 @@ enum class ProFeature {
     /** More than [ProCatalog.FREE_GALLERY_ITEMS] saved gallery items. Checked before a scan starts and at Save. */
     GALLERY_UNLIMITED,
 
-    /** More than [ProCatalog.FREE_DEVICE_SCANS] on-device 3D scans in total (saved ones also count toward the gallery). */
-    DEVICE_SCAN,
-
-    /**
-     * The full furniture template library. Free gets the 3 core templates ([ProCatalog.FREE_TEMPLATE_IDS], an
-     * [Allowance.Only] by template id); every other template needs Pro. Checked at the picker, before any AR, and
-     * again at Save.
-     */
-    FURNITURE_TEMPLATES,
-
     /** Comparing more than [ProCatalog.FREE_COMPARE_ITEMS] items against one space. */
     COMPARE,
 
@@ -45,16 +35,6 @@ sealed interface Allowance {
     data class Count(val max: Int) : Allowance {
         init {
             require(max > 0) { "Count must be positive; use None" }
-        }
-    }
-
-    /**
-     * Only these items (e.g. the 3 core furniture template ids), as many times as wanted; anything else needs Pro
-     * (gate T1). The caller supplies the item id.
-     */
-    data class Only(val itemIds: Set<String>) : Allowance {
-        init {
-            require(itemIds.isNotEmpty()) { "Only needs at least one item; use None" }
         }
     }
 }
@@ -100,12 +80,7 @@ object ProCatalog {
     val proProductIds: Set<String> = setOf(SUBSCRIPTION_ID)
 
     const val FREE_GALLERY_ITEMS = 20
-    /** Free on-device 3D scans **in total** on this install (user decision 2026-11-23): deleting one doesn't refund it. */
-    const val FREE_DEVICE_SCANS = 5
     const val FREE_COMPARE_ITEMS = 2
-
-    /** The 3 core templates that are free with full accuracy (research §1). Stored ids; never rename. */
-    val FREE_TEMPLATE_IDS: Set<String> = setOf("sofa_v1", "bed_v1", "wardrobe_v1")
 
     /** Pro stays on for this long after the last confirmed Play check while offline (§13 D3). */
     const val OFFLINE_GRACE_MS: Long = 7L * 24 * 60 * 60 * 1000
@@ -119,19 +94,14 @@ object ProCatalog {
     val rules: List<FeatureRule> = listOf(
         FeatureRule(ProFeature.NO_ADS, free = Allowance.None, pro = Allowance.Unlimited, shipped = true),
         FeatureRule(ProFeature.GALLERY_UNLIMITED, free = Allowance.Count(FREE_GALLERY_ITEMS), pro = Allowance.Unlimited, shipped = true),
-        // T (furniture templates): the 3 core templates are Free, the full library is Pro (gate T1).
-        FeatureRule(ProFeature.FURNITURE_TEMPLATES, free = Allowance.Only(FREE_TEMPLATE_IDS), pro = Allowance.Unlimited, shipped = true),
-        // The features below land later this sprint or in v1.x: flip `shipped` when they do.
-        FeatureRule(ProFeature.DEVICE_SCAN, free = Allowance.Count(FREE_DEVICE_SCANS), pro = Allowance.Unlimited, shipped = false),
+        // PLAN v3 (2D v1): the 3D scan quota and the furniture templates left v1 with their features (branch
+        // next/3d-engine). The features below land in v1.x: flip `shipped` when they do.
         FeatureRule(ProFeature.COMPARE, free = Allowance.Count(FREE_COMPARE_ITEMS), pro = Allowance.Unlimited, shipped = false),
         FeatureRule(ProFeature.EXPORT_GLB, free = Allowance.None, pro = Allowance.Unlimited, shipped = false),
         FeatureRule(ProFeature.EXPORT_PDF, free = Allowance.None, pro = Allowance.Unlimited, shipped = false),
     )
 
     fun rule(feature: ProFeature): FeatureRule = rules.first { it.feature == feature }
-
-    /** True for the furniture templates that are Free with full accuracy (the picker shows no Pro badge on them). */
-    fun isCoreTemplate(templateId: String): Boolean = templateId in FREE_TEMPLATE_IDS
 
     /** Pro benefits that exist in this build, in paywall order. */
     val advertised: List<ProFeature> get() = rules.filter { it.shipped && it.free != it.pro }.map { it.feature }

@@ -245,6 +245,7 @@ private fun SavedScreen(
                     version = item.updatedAt,
                     contentDescription = stringResource(R.string.gallery_photo_of, title),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 280.dp),
+                    checkerboard = item.modelKind == com.spaceview.engine.ModelKind.CUTOUT,
                 )
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 val dims = GalleryFormatter.shareDims(item, units)
@@ -267,7 +268,7 @@ private fun SavedScreen(
                     OutlinedButton(
                         onClick = {
                             scope.launch {
-                                val copy = if (item.photoFile != null) shareCopy(item.id, GalleryShare.fileName(title)) else null
+                                val copy = if (item.photoFile != null) shareCopy(item.id, GalleryShare.fileName(title, item.photoFile)) else null
                                 GalleryShare.share(context, copy, shareText, chooserTitle)
                             }
                         },

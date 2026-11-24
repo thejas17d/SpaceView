@@ -35,8 +35,6 @@ import com.spaceview.app.history.HistoryViewModel
 import com.spaceview.app.measure.MeasureRoute
 import com.spaceview.app.measure.MeasureViewModel
 import com.spaceview.app.onboarding.OnboardingScreen
-import com.spaceview.app.furniture.furnitureDestination
-import com.spaceview.app.furniture.openFurniture
 import com.spaceview.app.place.openPlace
 import com.spaceview.app.place.placeDestination
 import com.spaceview.app.pro.openPaywall
@@ -44,6 +42,9 @@ import com.spaceview.app.pro.paywallDestination
 import com.spaceview.app.scan.GalleryScanStore
 import com.spaceview.app.scan.ScanRoute
 import com.spaceview.app.scan.ScanViewModel
+import com.spaceview.app.range.RangefinderRoute
+import com.spaceview.app.range.RangefinderViewModel
+import com.spaceview.app.scan.imaging.mlKitSubjectSegmenter
 import com.spaceview.app.settings.SettingsRoute
 import com.spaceview.app.smart.mlKitObjectNamer
 import com.spaceview.app.ui.home.HomeScreen
@@ -66,6 +67,8 @@ object Routes {
     const val CALIBRATE = "calibrate"
     const val GALLERY = "gallery"
     const val SCAN = "scan"
+    /** PLAN v3 W4: Distance (rangefinder) mode. Saves nothing, so no ads and no visit tracker. */
+    const val DISTANCE = "distance"
     private const val GALLERY_ITEM = "gallery_item"
     const val ARG_ID = "id"
     const val GALLERY_ITEM_PATTERN = "$GALLERY_ITEM/{$ARG_ID}"
@@ -143,9 +146,12 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                 onScan = startScan,
                 scanChecking = scanChecking,
                 onGallery = { navController.navigate(Routes.GALLERY) },
-                // T (Builder B): the picker gates each template before any AR.
-                onFurniture = { navController.openFurniture() },
+                onDistance = { navController.navigate(Routes.DISTANCE) },
             )
+        }
+        composable(Routes.DISTANCE) {
+            val vm = viewModel { RangefinderViewModel(container.measureSettings, container.appSettings) }
+            RangefinderRoute(onBack = { navController.popBackStack() }, viewModel = vm)
         }
         composable(Routes.SCAN) { entry ->
             val vm = viewModel {
@@ -160,6 +166,8 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                     canSave = { container.gallerySaveGate.checkItem().allowed },
                     // SM1b (Builder A): a name chip at Review from on-device ML Kit labelling (K6).
                     namer = mlKitObjectNamer(context),
+                    // PLAN v3 W2 (Builder B): on-device background removal for Box / Other (ML Kit, Play services).
+                    segmenter = mlKitSubjectSegmenter(context),
                 )
             }
             // A scan visit is a Measure-style visit: an interstitial is only possible after a save, and only
@@ -245,7 +253,6 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                 onOpen = { navController.navigate(Routes.galleryItem(it)) },
                 onBack = { navController.popBackStack() },
                 onScan = startScan,
-                onAddFurniture = { navController.openFurniture() },
             )
         }
         composable(
@@ -274,17 +281,6 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
         // M5 remainder (Builder B): Help / FAQ and About, from Settings.
         helpAndAboutDestinations(navController)
         // M4 Place in room (Builder A): AR screen with its own ArScreenAdGuard; Free (K2/K5/D7).
-        // T furniture templates (Builder B): picker → guided measure → preview → review → saved; ads as the scan flow.
-        furnitureDestination(
-            navController = navController,
-            onDone = { navController.navigate(Routes.GALLERY) { popUpTo(Routes.HOME) } },
-            onPlace = { id ->
-                // Item screen underneath, so Back from Place returns to the saved item (as the scan flow).
-                navController.navigate(Routes.galleryItem(id)) { popUpTo(Routes.HOME) }
-                navController.openPlace(id)
-            },
-            onOpenPaywall = { navController.openPaywall(it) },
-        )
         placeDestination(
             onBack = { navController.popBackStack() },
             onOpenPaywall = { navController.openPaywall(it) },

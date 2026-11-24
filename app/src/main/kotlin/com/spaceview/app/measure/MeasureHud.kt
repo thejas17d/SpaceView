@@ -108,6 +108,8 @@ internal fun MeasureHud(
             }
             Spacer(Modifier.height(8.dp))
             HintArea(state, settings, calibration, sessionFailed, transient, onStartOver, onRetrySession, onDismissSafety)
+            // W6: debug builds show how long surface finding took (R8 removes this from release: DEBUG is a constant).
+            if (com.spaceview.app.BuildConfig.DEBUG) SurfaceDebugLine(state)
         }
 
         // ---- centre: reticle + live reading
@@ -194,6 +196,13 @@ private fun HintArea(
         calibration == CalibrationStep.Choosing -> Unit
         state.isComplete -> Unit
         state.pendingCommit -> CoachingCard(message = stringResource(R.string.measure_hold_steady))
+        // W5: the height top is on the vertical plane through the base; past 75° grazing it is refused.
+        state.aimTooSteep -> CoachingCard(message = stringResource(R.string.measure_height_too_steep))
+        // W6: until the first surface point of the session, coach the motion that finds one.
+        !state.hasSurface && !state.surfaceSeen -> CoachingCard(
+            title = stringResource(R.string.measure_coach_title),
+            message = stringResource(R.string.measure_coach_move),
+        )
         !state.hasSurface -> CoachingCard(message = stringResource(R.string.measure_no_surface))
         else -> {
             val instruction = instructionRes(state.mode, state.pointCount)
@@ -526,4 +535,27 @@ internal fun BoxScope.FreezeGlyph(color: Color) {
         }
         drawCircle(color, 2.dp.toPx(), center)
     }
+}
+
+/**
+ * W6 debug HUD line (debug builds only, never translated): time to tracking, to the first usable surface point and its
+ * source, to the first steady point, the current source, depth on/off and the repeated SceneView frames skipped.
+ */
+@Composable
+private fun SurfaceDebugLine(state: MeasureState) {
+    val d = state.diagnostics ?: return
+    Spacer(Modifier.height(4.dp))
+    ChromePill(surfaceDebugText(d, state.surfaceKind, state.capabilities?.depthActive), style = SpaceViewTheme.typography.caption)
+}
+
+/** The text of [SurfaceDebugLine] (JVM-tested). */
+internal fun surfaceDebugText(d: com.spaceview.ar.SurfaceDiagnostics, now: com.spaceview.ar.HitKind?, depthActive: Boolean?): String {
+    fun s(ms: Long?) = ms?.let { String.format(java.util.Locale.ROOT, "%.1fs", it / 1000.0) } ?: "-"
+    val depth = when (depthActive) {
+        true -> "on"
+        false -> "off"
+        null -> "?"
+    }
+    return "dbg track ${s(d.trackingMs)} · hit ${s(d.firstHitMs)} ${d.firstHitKind ?: ""} · lock ${s(d.firstLockMs)} · " +
+        "now ${now ?: "-"} · depth $depth · rep ${d.repeatedFrames}"
 }

@@ -1,17 +1,13 @@
 package com.spaceview.data.gallery
 
+import com.spaceview.engine.ArgbImage
 import com.spaceview.engine.BoxOrigin
 import com.spaceview.engine.DeviceTier
 import com.spaceview.engine.GLB_VERSION
 import com.spaceview.engine.GlbReader
 import com.spaceview.engine.GlbWriter
-import com.spaceview.engine.MeshExtras
 import com.spaceview.engine.ModelKind
-import com.spaceview.engine.Part
-import com.spaceview.engine.PartMaterial
 import com.spaceview.engine.Quality
-import com.spaceview.engine.Vec3
-import com.spaceview.engine.recon.TriMesh
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
@@ -28,7 +24,7 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.IOException
 
-/** M4: `modelForPlacement` (K4, K8), the v3 saves `saveTemplate` / `saveMesh` (K10) and kind-aware edit/repair. */
+/** M4: `modelForPlacement` (K4, K8) and kind-aware edit/repair; PLAN v3: cutouts and legacy template / mesh rows. */
 class GalleryPlacementTest {
     @get:Rule
     val tmp = TemporaryFolder()
@@ -38,10 +34,10 @@ class GalleryPlacementTest {
     private val cacheRoot get() = File(tmp.root, "cache")
     private val galleryDir get() = File(filesRoot, "gallery")
 
-    private fun repo(dao: FakeGalleryDao = FakeGalleryDao(), templates: TemplateModelSource = TemplateModelSource.NONE) =
+    private fun repo(dao: FakeGalleryDao = FakeGalleryDao()) =
         GalleryRepository(
             dao, filesRoot, JvmImageCodec, clock = { now }, io = Dispatchers.IO, transactions = FakeTransactions(dao),
-            cacheDir = cacheRoot, templates = templates,
+            cacheDir = cacheRoot,
         )
 
     private val jpeg: ByteArray by lazy { JvmImageIo.encodeJpeg(640, 480, TestPhotos.typicalFrame(640, 480), 0.9f) }
@@ -163,194 +159,232 @@ class GalleryPlacementTest {
         assertEquals(PlacementResult.Missing, repo.placementModel(id))
     }
 
-    // ---- templates (K10) ---------------------------------------------------------------------------------
+    // ---- legacy template / mesh rows (PLAN v3 W1: saved by earlier test builds, no writer in v1) ----------------
 
-    private fun sofaParts(w: Double = 2.0, h: Double = 0.85, d: Double = 0.9) = listOf(
-        Part("base", Vec3(0.0, h * 0.25, 0.0), Vec3(w, h * 0.5, d), material = PartMaterial.BODY),
-        Part("back", Vec3(0.0, h * 0.75, -d * 0.4), Vec3(w, h * 0.5, d * 0.2), material = PartMaterial.SOFT),
+    /** Inserts a row as an earlier build saved it, with [glb] as its stored model (and an optional thumbnail). */
+    private suspend fun legacyRow(
+        dao: FakeGalleryDao,
+        kind: ObjectKind,
+        modelKind: ModelKind,
+        glb: ByteArray?,
+        w: Double, h: Double, d: Double,
+        glbBox: Triple<Double, Double, Double>? = null,
+        thumbnail: Boolean = false,
+    ): Long {
+        val id = dao.insert(
+            GalleryItemEntity(
+                kind = kind.name,
+                widthMeters = w, widthBound95 = 0.01, widthSource = "MEASURED",
+                heightMeters = h, heightBound95 = 0.01, heightSource = "MEASURED",
+                depthMeters = d, depthBound95 = 0.01, depthSource = "MEASURED",
+                quality = "GOOD", calibrated = false, deviceTier = "DEPTH", createdAt = now, updatedAt = now, modelPath = "",
+                modelKind = modelKind.name,
+                templateId = if (modelKind == ModelKind.TEMPLATE) "sofa_v1" else null,
+                templateParams = if (modelKind == ModelKind.TEMPLATE) "{\"W\":$w}" else null,
+                meshGlbW = glbBox?.first, meshGlbH = glbBox?.second, meshGlbD = glbBox?.third,
+            ),
+        )
+        val dir = File(galleryDir, "$id").apply { mkdirs() }
+        glb?.let { File(dir, "model.glb").writeBytes(it) }
+        if (thumbnail) File(dir, "thumb.webp").writeBytes(jpeg)
+        dao.setFiles(id, "gallery/$id/model.glb", null, if (thumbnail) "gallery/$id/thumb.webp" else null, 1L)
+        return id
+    }
+
+    /** A legacy 3D-scan GLB: extras with the mesh writer's kind, origin and declared bounding-box centre. */
+    private fun legacyMeshGlb(w: Double, h: Double, d: Double, kind: String = "MESH_DEVICE"): ByteArray = rawGlb(
+        "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,\"scenes\":[{\"nodes\":[0]}],\"nodes\":[{\"mesh\":0,\"extras\":" +
+            "{\"widthM\":$w,\"heightM\":$h,\"depthM\":$d,\"origin\":\"BOTTOM_CENTER\",\"glbVersion\":2,\"modelKind\":\"$kind\"," +
+            "\"aabbCx\":0.01,\"aabbCy\":${h / 2 + 0.01},\"aabbCz\":0.0}}]}",
     )
 
-    private fun sofa(parts: List<Part> = sofaParts()) = TemplateDraft(
-        templateId = "sofa_v1",
-        params = mapOf("W" to 2.0, "H" to 0.85, "D" to 0.9, "seatHeight" to 0.45),
-        width = Dimension.measured(2.0, 0.02), height = Dimension.typed(0.85), depth = Dimension.measured(0.9, 0.012),
-        label = "Sofa", parts = parts, captureMethod = CaptureMethod.MANUAL,
-    )
-
-    @Test fun saveTemplateWritesPartsAndRow() = runTest {
+    @Test fun legacyTemplateIsPlacedFromItsStoredGlb() = runTest {
         val dao = FakeGalleryDao()
         val repo = repo(dao)
-        val id = repo.saveTemplate(sofa())
+        val glb = GlbWriter.writeBox(2.0, 0.85, 0.9, modelKind = ModelKind.TEMPLATE)
+        val id = legacyRow(dao, ObjectKind.FURNITURE, ModelKind.TEMPLATE, glb, 2.0, 0.85, 0.9)
         val item = repo.get(id)!!
         assertEquals(ObjectKind.FURNITURE, item.kind)
-        assertEquals(ModelKind.TEMPLATE, item.modelKind)
         assertEquals("sofa_v1", item.templateId)
-        assertEquals(0.45, item.templateParams!!["seatHeight"]!!, 0.0)
-        assertEquals(CaptureMethod.MANUAL, item.captureMethod)
-        assertNull(item.photoFile)
-        assertNull(item.thumbnailFile)
-        assertEquals(setOf("model.glb"), File(galleryDir, "$id").list()!!.toSet())
-        assertTrue(item.bytes < 20_000)
         val p = repo.modelForPlacement(id)!!
         assertEquals(item.modelFile, p.file)
+        assertFalse(p.meshFallback)
         assertEquals(BoxOrigin.BOTTOM_CENTER, p.origin)
         assertEquals(ModelKind.TEMPLATE, p.modelKind)
-        // A gallery size edit cannot change a template (its size is a parameter).
+        // v1 can't rebuild a template: a size edit is refused and the model is untouched.
         assertFalse(repo.updateDimensions(id, widthM = 1.8))
-        assertEquals(2.0, repo.get(id)!!.width.meters, 0.0)
+        assertArrayEquals(glb, repo.get(id)!!.modelFile.readBytes())
     }
 
-    @Test fun templateWhosePartsAreNotTheItemSizeIsRefused() = runTest {
-        val repo = repo()
-        try {
-            repo.saveTemplate(sofa(parts = sofaParts(w = 1.9)))
-            fail("accepted parts that are not W x H x D")
-        } catch (expected: IllegalArgumentException) {
-        }
-        try {
-            repo.saveTemplate(TemplateDraft("sofa_v1", mapOf("bad key" to 1.0), Dimension.typed(2.0), Dimension.typed(0.85), Dimension.typed(0.9), null, sofaParts()))
-            fail("accepted a bad parameter name")
-        } catch (expected: IllegalArgumentException) {
-        }
-        assertTrue(galleryDir.list().isNullOrEmpty())
-    }
-
-    @Test fun staleTemplateRegeneratesFromItsSourceOrFallsBackToTheBox() = runTest {
-        var asked: Map<String, Double>? = null
-        val source = TemplateModelSource { id, params -> asked = params; if (id == "sofa_v1") sofaParts() else null }
+    @Test fun legacyTemplateThatCannotBeUsedFallsBackToItsBoxWithoutCrashing() = runTest {
         val dao = FakeGalleryDao()
-        val withSource = repo(dao, source)
-        val id = withSource.saveTemplate(sofa())
-        val file = withSource.get(id)!!.modelFile
-        file.delete()
-        now = 9_000L
-        val p = withSource.modelForPlacement(id)!!
-        assertEquals("model-9000.glb", p.file.name)
-        assertEquals(ModelKind.TEMPLATE, GlbReader.readInfo(p.file.readBytes())!!.modelKind)
-        assertEquals(0.9, asked!!["D"]!!, 0.0)
-        // Without a source: the measured box from the cache, the row untouched.
-        p.file.delete()
-        val noSource = repo(dao)
-        val q = noSource.modelForPlacement(id)!!
+        val repo = repo(dao)
+        // Stored model of another size (a template whose parts changed later).
+        val id = legacyRow(dao, ObjectKind.FURNITURE, ModelKind.TEMPLATE, GlbWriter.writeBox(1.9, 0.85, 0.9, modelKind = ModelKind.TEMPLATE), 2.0, 0.85, 0.9)
+        val p = repo.modelForPlacement(id)!!
+        assertTrue(p.meshFallback)
+        assertTrue(p.file.path.startsWith(cacheRoot.path))
+        assertEquals(2.0, p.widthM, 1e-12)
+        assertEquals("gallery/$id/model.glb", dao.rows.value.single().modelPath)
+        // A missing model: cleanUp has nothing to rebuild (and does not count it), placement still works.
+        File(galleryDir, "$id/model.glb").delete()
+        assertEquals(0, repo.cleanUp())
+        assertTrue(repo.modelForPlacement(id)!!.meshFallback)
+        // Garbage instead of a GLB.
+        File(galleryDir, "$id/model.glb").writeBytes(ByteArray(100) { 9 })
+        assertTrue(repo.modelForPlacement(id)!!.meshFallback)
+    }
+
+    @Test fun legacyMeshIsPlacedFromItsStoredGlbOrFallsBackToTheMeasuredBox() = runTest {
+        val dao = FakeGalleryDao()
+        val repo = repo(dao)
+        val glb = legacyMeshGlb(0.6, 0.4, 0.4)
+        val id = legacyRow(dao, ObjectKind.BOX, ModelKind.MESH_DEVICE, glb, 0.61, 0.41, 0.405, glbBox = Triple(0.6, 0.4, 0.4), thumbnail = true)
+        val item = repo.get(id)!!
+        assertEquals(0.6, item.glbExtents!!.widthM, 0.0)
+        val p = repo.modelForPlacement(id)!!
+        assertEquals(item.modelFile, p.file)
+        assertFalse(p.meshFallback)
+        assertEquals(0.6, p.widthM, 1e-12) // rendered geometry: the mesh, never rescaled
+        assertEquals(0.61, p.width.meters, 0.0) // verdict: the measured box
+        assertTrue(p.centre!!.approxEquals(com.spaceview.engine.Vec3(0.01, 0.21, 0.0)))
+        // An edit changes only the row.
+        now = 4_000L
+        assertTrue(repo.updateDimensions(id, widthM = 0.65))
+        assertArrayEquals(glb, repo.get(id)!!.modelFile.readBytes())
+        // Extras that don't match the stored GLB box: the measured box instead, the file untouched.
+        File(galleryDir, "$id/model.glb").writeBytes(legacyMeshGlb(0.5, 0.4, 0.4))
+        val q = repo.modelForPlacement(id)!!
         assertTrue(q.meshFallback)
-        assertTrue(q.file.path.startsWith(cacheRoot.path))
-        assertEquals(2.0, q.widthM, 1e-12)
-        assertEquals("gallery/$id/model-9000.glb", dao.rows.value.single().modelPath)
+        assertEquals(ModelKind.MESH_DEVICE, q.modelKind)
+        // A missing mesh is never rebuilt; its thumbnail stays.
+        File(galleryDir, "$id/model.glb").delete()
+        assertEquals(0, repo.cleanUp())
+        assertTrue(repo.get(id)!!.thumbnailFile!!.isFile)
+        assertTrue(repo.modelForPlacement(id)!!.meshFallback)
     }
 
-    // ---- meshes (K8, K10, ADR-014) -----------------------------------------------------------------------
+    // ---- cutouts (PLAN v3 W2/W3) ------------------------------------------------------------------------
 
-    /** A closed 0.6 × 0.4 × 0.4 m box mesh (8 vertices, 12 triangles) with colours. */
-    private fun cartonMesh(w: Float = 0.6f, h: Float = 0.4f, d: Float = 0.4f): TriMesh {
-        val x = w / 2; val z = d / 2
-        val p = floatArrayOf(-x, 0f, -z, x, 0f, -z, x, 0f, z, -x, 0f, z, -x, h, -z, x, h, -z, x, h, z, -x, h, z)
-        val i = intArrayOf(0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 4, 5, 0, 5, 1, 1, 5, 6, 1, 6, 2, 2, 6, 7, 2, 7, 3, 3, 7, 4, 3, 4, 0)
-        return TriMesh(p, ByteArray(24) { (it * 10).toByte() }, i)
-    }
-
-    private fun meshDraft(
-        glb: ByteArray = GlbWriter.writeMesh(cartonMesh()),
-        glbBox: GlbExtents = GlbExtents(0.6, 0.4, 0.4),
-        extents: MeshExtents = MeshExtents(0.6, 0.41, 0.395, 0.03, 0.03, 0.03),
-    ) = MeshDraft(
-        kind = ObjectKind.BOX,
-        width = Dimension.measured(0.61, 0.01), height = Dimension.measured(0.41, 0.01), depth = Dimension.measured(0.405, 0.01),
-        quality = Quality.GOOD, calibrated = false, deviceTier = DeviceTier.DEPTH,
-        glb = glb, glbExtents = glbBox, meshExtents = extents, meshInfo = "{\"voxelM\":0.01}", thumbnailSource = jpeg, label = "Carton", arcoreVersion = "1.57.0",
+    private fun chair(image: ArgbImage?, label: String? = "Chair") = ScanDraft(
+        ObjectKind.OTHER, Dimension.measured(0.48, 0.01), Dimension.measured(0.86, 0.012), Dimension.measured(0.52, 0.012),
+        Quality.GOOD, false, DeviceTier.DEPTH, null, label, "1.57.0", cutout = CutoutDraft(image),
     )
 
-    @Test fun saveMeshKeepsTheMeasuredBoxAsTheSize() = runTest {
-        val repo = repo()
-        val id = repo.saveMesh(meshDraft())
+    /** A photo-like subject (noisy) on a transparent background: a "chair" filling ~55% of its bounding box. */
+    private fun transparentSubject(w: Int = 700, h: Int = 1000): ArgbImage {
+        val rnd = java.util.Random(4)
+        val px = IntArray(w * h) { i ->
+            val x = i % w; val y = i / w
+            val inSeat = y in (h * 45 / 100) until (h * 60 / 100)
+            val inBack = y < h * 45 / 100 && x in (w / 10) until (w * 9 / 10)
+            val inLegs = y >= h * 60 / 100 && (x < w / 8 || x >= w * 7 / 8)
+            val r = (120 + 40 * kotlin.math.sin(x * 0.05) + rnd.nextGaussian() * 12).toInt().coerceIn(0, 255)
+            val g = (80 + 30 * kotlin.math.cos(y * 0.03) + rnd.nextGaussian() * 12).toInt().coerceIn(0, 255)
+            val b = (60 + rnd.nextGaussian() * 12).toInt().coerceIn(0, 255)
+            val a = if (inSeat || inBack || inLegs) 255 else 0
+            (a shl 24) or (r shl 16) or (g shl 8) or b
+        }
+        return ArgbImage(w, h, px)
+    }
+
+    @Test fun opaqueCutoutIsAFlatTrueSizeModelWithItsPictureAndThumbnail() = runTest {
+        val dao = FakeGalleryDao()
+        val repo = repo(dao)
+        val photo = ArgbImage(640, 480, TestPhotos.typicalFrame(640, 480))
+        val draft = ScanDraft(
+            ObjectKind.FRAME, Dimension.measured(0.457, 0.009), Dimension.measured(0.61, 0.011), Dimension.preset(0.025),
+            Quality.FAIR, false, DeviceTier.NO_DEPTH, null, "Frame", "1.57.0", cutout = CutoutDraft(photo),
+        )
+        val id = repo.save(draft)
         val item = repo.get(id)!!
-        assertEquals(ModelKind.MESH_DEVICE, item.modelKind)
-        assertEquals(0.61, item.width.meters, 0.0) // the measured box
-        assertEquals(0.6, item.meshExtents!!.widthM, 1e-6) // the §7.1.5 extents, separately
-        assertEquals(0.41, item.meshExtents.heightM, 1e-6) // ≠ the GLB box: both are kept (M4 review MAJOR 2)
-        assertEquals(0.4, item.glbExtents!!.heightM, 1e-6)
-        assertEquals(0.03, item.meshExtents.widthBound95, 0.0)
-        assertEquals(CaptureMethod.DEPTH_SCAN, item.captureMethod)
-        assertNull(item.photoFile)
-        assertTrue(item.thumbnailFile!!.isFile)
-        assertEquals(setOf("model.glb", "thumb.webp"), File(galleryDir, "$id").list()!!.toSet())
+        assertEquals(ModelKind.CUTOUT, item.modelKind)
+        assertEquals(setOf("model.glb", "cutout.webp", "thumb.webp"), File(galleryDir, "$id").list()!!.toSet())
+        assertEquals("gallery/$id/cutout.webp", dao.rows.value.single().photoPath)
+        assertEquals(0.025, item.depth.meters, 0.0) // the depth stays a number on the row
+        assertTrue(item.bytes <= GalleryRepository.MAX_SCAN_BYTES)
+        val info = GlbReader.readInfo(item.modelFile.readBytes())!!
+        assertEquals(ModelKind.CUTOUT, info.modelKind)
+        assertEquals(BoxOrigin.CENTER, info.origin)
+        assertEquals(0.0, info.depthM, 0.0)
+        assertTrue("opaque: a JPEG texture, no blending", String(item.modelFile.readBytes(), Charsets.ISO_8859_1).let { "image/jpeg" in it && "BLEND" !in it })
 
         val p = repo.modelForPlacement(id)!!
         assertEquals(item.modelFile, p.file)
         assertFalse(p.meshFallback)
-        assertEquals(0.6, p.widthM, 1e-6) // rendered geometry: the mesh, never rescaled
-        assertEquals(0.61, p.width.meters, 0.0) // verdict: the measured box
-        assertEquals(BoxOrigin.BOTTOM_CENTER, p.origin)
+        assertEquals(BoxOrigin.CENTER, p.origin)
+        assertEquals(0.457, p.widthM, 1e-12); assertEquals(0.61, p.heightM, 1e-12); assertEquals(0.0, p.depthM, 0.0)
+        assertEquals("the fit check uses the row's depth", 0.025, p.depth.meters, 0.0)
+        assertEquals(ModelKind.CUTOUT, p.modelKind)
     }
 
-    @Test fun unusableMeshFallsBackToTheMeasuredBoxWithoutTouchingIt() = runTest {
+    @Test fun transparentCutoutBlendsAPngTextureWithinTheBudget() = runTest {
+        val repo = repo()
+        val id = repo.save(chair(transparentSubject()))
+        val item = repo.get(id)!!
+        assertEquals(ModelKind.CUTOUT, item.modelKind)
+        assertTrue("${item.bytes} B", item.bytes <= GalleryRepository.MAX_SCAN_BYTES)
+        val glb = item.modelFile.readBytes()
+        val text = String(glb, Charsets.ISO_8859_1)
+        assertTrue("alpha cutout: BLEND + PNG", "\"alphaMode\":\"BLEND\"" in text && "image/png" in text)
+        assertEquals(0.48, GlbReader.readInfo(glb)!!.widthM, 0.0)
+        println("CUTOUT SIZE: model.glb=${item.modelFile.length()} B, cutout.webp=${item.photoFile?.length()} B, thumb=${item.thumbnailFile?.length()} B")
+    }
+
+    @Test fun cutoutWithoutAPhotoIsAPlainPanel() = runTest {
+        val repo = repo()
+        val id = repo.save(chair(null))
+        val item = repo.get(id)!!
+        assertEquals(ModelKind.CUTOUT, item.modelKind)
+        assertNull(item.photoFile)
+        assertNull(item.thumbnailFile)
+        assertEquals(setOf("model.glb"), File(galleryDir, "$id").list()!!.toSet())
+        assertEquals(BoxOrigin.CENTER, repo.modelForPlacement(id)!!.origin)
+    }
+
+    @Test fun cutoutEditAndRepairRegenerateTheFlatModel() = runTest {
         val dao = FakeGalleryDao()
         val repo = repo(dao)
-        val id = repo.saveMesh(meshDraft())
+        val id = repo.save(chair(ArgbImage(400, 700, TestPhotos.typicalFrame(400, 700))))
+        now = 5_000L
+        assertTrue(repo.updateDimensions(id, widthM = 0.5, depthM = 0.6))
         val item = repo.get(id)!!
-        val garbage = ByteArray(300) { 3 }
-        item.modelFile.writeBytes(garbage)
-        val p = repo.modelForPlacement(id)!!
-        assertTrue(p.meshFallback)
-        assertEquals(ModelKind.MESH_DEVICE, p.modelKind)
-        assertEquals(0.61, p.widthM, 1e-12)
-        assertEquals(0.41, p.heightM, 1e-12)
-        assertTrue(p.file.path.startsWith(cacheRoot.path))
-        assertArrayEquals("the mesh file is never regenerated", garbage, item.modelFile.readBytes())
-        assertEquals(item.modelFile.name, repo.get(id)!!.modelFile.name)
-        // Mismatched extras (another mesh's size) also fall back.
-        item.modelFile.writeBytes(GlbWriter.writeMesh(cartonMesh(w = 0.5f)))
-        assertTrue(repo.modelForPlacement(id)!!.meshFallback)
-        // A missing mesh: cleanUp does not regenerate it, and does not count it as repaired.
+        assertEquals("model-5000.glb", item.modelFile.name)
+        val info = GlbReader.readInfo(item.modelFile.readBytes())!!
+        assertEquals(ModelKind.CUTOUT, info.modelKind)
+        assertEquals(0.5, info.widthM, 0.0)
+        assertEquals(0.86, info.heightM, 0.0)
+        assertEquals("depth is a number, never rendered", 0.0, info.depthM, 0.0)
+        assertEquals(0.6, item.depth.meters, 0.0)
+        assertTrue(item.bytes <= GalleryRepository.MAX_SCAN_BYTES)
+        // A depth-only edit leaves the quad's size: the model still matches.
+        assertEquals(item.modelFile, repo.modelForPlacement(id)!!.file)
+        // A missing model is rebuilt from the stored picture.
         item.modelFile.delete()
-        assertEquals(0, repo.cleanUp())
-        assertFalse(item.modelFile.exists())
-        assertTrue(item.thumbnailFile!!.isFile)
-        assertTrue(repo.modelForPlacement(id)!!.meshFallback)
+        now = 6_000L
+        assertEquals(1, repo.cleanUp())
+        val repaired = repo.get(id)!!
+        assertTrue(repaired.modelFile.isFile)
+        assertEquals(ModelKind.CUTOUT, GlbReader.readInfo(repaired.modelFile.readBytes())!!.modelKind)
+        // A stale model (garbage) is regenerated for placement, not replaced by a box.
+        repaired.modelFile.writeBytes(ByteArray(64) { 1 })
+        now = 7_000L
+        val p = repo.modelForPlacement(id)!!
+        assertFalse(p.meshFallback)
+        assertEquals("model-7000.glb", p.file.name)
+        assertEquals(BoxOrigin.CENTER, p.origin)
     }
 
-    @Test fun meshEditChangesOnlyTheRow() = runTest {
-        val repo = repo()
-        val id = repo.saveMesh(meshDraft())
-        val before = repo.get(id)!!.modelFile.readBytes()
-        now = 4_000L
-        assertTrue(repo.updateDimensions(id, widthM = 0.65))
-        val item = repo.get(id)!!
-        assertEquals(0.65, item.width.meters, 0.0)
-        assertEquals(DimensionSource.TYPED, item.width.source)
-        assertArrayEquals(before, item.modelFile.readBytes())
-        assertEquals("model.glb", item.modelFile.name)
-    }
-
-    @Test fun saveMeshValidatesTheGlb() = runTest {
-        val repo = repo()
-        fun rejects(d: MeshDraft): Boolean = try {
-            kotlinx.coroutines.runBlocking { repo.saveMesh(d) }
-            false
-        } catch (e: IllegalArgumentException) {
-            true
-        }
-        assertTrue("a box is not a mesh", rejects(meshDraft(glb = GlbWriter.writeBox(0.6, 0.4, 0.4))))
-        assertTrue("the GLB box must match the GLB", rejects(meshDraft(glbBox = GlbExtents(0.7, 0.4, 0.4))))
-        assertTrue("measured extents must be valid", rejects(meshDraft(extents = MeshExtents(0.0, 0.4, 0.4, 0.03, 0.03, 0.03))))
-        assertTrue("origin must be bottom centre", rejects(meshDraft(glb = GlbWriter.writeMesh(cartonMesh(), BoxOrigin.CENTER))))
-        assertTrue("kind must match", rejects(meshDraft(glb = GlbWriter.writeMesh(cartonMesh(), extras = MeshExtras(ModelKind.MESH_CLOUD)))))
-        assertTrue(galleryDir.list().isNullOrEmpty())
-        assertNotNull(repo.saveMesh(meshDraft().let { d ->
-            MeshDraft(d.kind, d.width, d.height, d.depth, d.quality, d.calibrated, d.deviceTier, d.glb, d.glbExtents, d.meshExtents, null, null, null, null)
-        }))
-    }
-
-    // ---- codec -------------------------------------------------------------------------------------------
-
-    @Test fun templateParamsRoundTrip() {
-        val p = mapOf("W" to 2.0, "seat_h" to 0.45, "n" to 3.0)
-        assertEquals(p, TemplateParamsCodec.decode(TemplateParamsCodec.encode(p)))
-        assertEquals(emptyMap<String, Double>(), TemplateParamsCodec.decode("{}"))
-        assertNull(TemplateParamsCodec.decode(null))
-        assertNull(TemplateParamsCodec.decode("[1]"))
-        assertNull(TemplateParamsCodec.decode("{\"a\":\"x\"}"))
-        assertNull(TemplateParamsCodec.decode("{\"a\":1,}"))
-        assertEquals(1e-3, TemplateParamsCodec.decode("{\"a\":1.0E-3}")!!["a"]!!, 0.0)
+    /** A GLB with only a JSON chunk (padded with spaces) and an empty BIN chunk. */
+    private fun rawGlb(json: String): ByteArray {
+        val j = json.toByteArray(Charsets.UTF_8)
+        val jl = (j.size + 3) and 3.inv()
+        val out = java.io.ByteArrayOutputStream()
+        fun u32(v: Int) { out.write(v); out.write(v shr 8); out.write(v shr 16); out.write(v shr 24) }
+        u32(0x46546C67); u32(2); u32(12 + 8 + jl + 8); u32(jl); u32(0x4E4F534A)
+        out.write(j); repeat(jl - j.size) { out.write(0x20) }
+        u32(0); u32(0x004E4942)
+        return out.toByteArray()
     }
 
     /** An M3-era GLB: extras without glbVersion / modelKind (only the JSON chunk matters to the reader). */

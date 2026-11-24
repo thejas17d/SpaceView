@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hindi: Distance (rangefinder, PLAN v3 W4) and the W5/W6 measuring hints. Numbers, units (m, ft) and ± stay as in English. -->
+<resources>
+    <string name="home_rangefinder">कितनी दूर?</string>
+    <string name="home_rangefinder_detail">निशाने वाली किसी भी जगह की दूरी, 500 m तक, हमेशा ± के साथ।</string>
+
+    <string name="range_title">कितनी दूर?</string>
+    <string name="range_close">कितनी दूर बंद करें</string>
+    <string name="range_crosshair">निशाना</string>
+    <string name="range_line_of_sight">आपके फ़ोन से सीधी दूरी</string>
+    <string name="range_coach">शुरू करने के लिए फ़ोन को धीरे-धीरे दाएँ-बाएँ घुमाएँ।</string>
+    <string name="range_aim">निशाने को किसी जगह पर रखें।</string>
+    <string name="range_method_near">AR पॉइंट</string>
+    <string name="range_method_ground">ज़मीन</string>
+    <string name="range_method_two_sight">2 निशाने</string>
+    <string name="range_assumes_level">ज़मीन समतल मानी गई है</string>
+    <string name="range_out_of_range">रेंज से बाहर (500 m से ज़्यादा)</string>
+    <string name="range_hold">रोकें</string>
+    <string name="range_live">लाइव</string>
+    <string name="range_two_sight">दूर की जगह: 2 निशाने</string>
+    <string name="range_take_sight_1">निशाना 1 लें</string>
+    <string name="range_take_sight_2">निशाना 2 लें</string>
+    <string name="range_aim_sight_1">निशाने को दूर की जगह पर रखें, फ़ोन स्थिर रखें और \"निशाना 1 लें\" दबाएँ।</string>
+    <string name="range_taking">फ़ोन स्थिर रखें…</string>
+    <string name="range_walk">लगभग %1$s बगल में चलें। उसी जगह को निशाने में रखें, फिर \"निशाना 2 लें\" दबाएँ।</string>
+    <string name="range_walked">अब तक बगल में: %1$s</string>
+    <string name="range_preview">अभी लगभग %1$s</string>
+    <string name="range_retake">निशाना 2 फिर से लें</string>
+    <string name="range_start_over">फिर से शुरू करें</string>
+    <string name="range_done">हो गया</string>
+    <string name="range_cancel">रद्द करें</string>
+    <string name="range_result_a11y">दूरी %1$s। तरीका: %2$s।</string>
+    <string name="range_out_of_range_a11y">रेंज से बाहर। 500 मीटर से ज़्यादा।</string>
+
+    <string name="range_issue_hold_steady">फ़ोन स्थिर रखें।</string>
+    <string name="range_issue_need_floor">एक बार अपने पास के फ़र्श पर निशाना रखें, ताकि SpaceView जान सके कि फ़ोन कितनी ऊँचाई पर है। या 2 निशाने इस्तेमाल करें।</string>
+    <string name="range_issue_above_horizon">यहाँ नापने को कुछ नहीं है। ज़मीन पर निशाना रखें, या दूर की जगह के लिए 2 निशाने इस्तेमाल करें।</string>
+    <string name="range_issue_ground_too_far">एक निशाने के लिए बहुत दूर है। 2 निशाने इस्तेमाल करें।</string>
+
+    <string name="range_reject_tracking_lost">दोनों निशानों के बीच ट्रैकिंग छूट गई। फिर से शुरू करें।</string>
+    <string name="range_reject_near_parallel">दोनों निशाने लगभग समानांतर हैं। और बगल में चलें और निशाना 2 फिर से लें।</string>
+    <string name="range_reject_behind">निशाने आपके सामने नहीं मिलते। उसी जगह पर निशाना रखें और निशाना 2 फिर से लें।</string>
+    <string name="range_reject_inconsistent">दोनों निशाने अलग-अलग चीज़ों पर हैं। उसी जगह पर निशाना 2 फिर से लें।</string>
+    <string name="range_reject_too_uncertain">अभी काफ़ी सटीक नहीं है। और बगल में चलें और निशाना 2 फिर से लें।</string>
+    <string name="range_reject_invalid">कुछ गड़बड़ हो गई। फिर से शुरू करें।</string>
+    <string name="range_sight_not_steady">निशाना स्थिर नहीं रहा। फिर से कोशिश करें।</string>
+    <string name="range_sight_not_tracking">ट्रैकिंग छूट गई। धीरे चलें और फिर से कोशिश करें।</string>
+
+    <string name="measure_height_too_steep">बहुत खड़ा कोण है। पीछे हटें, ताकि ऊपर का सिरा 75° से कम ऊपर हो।</string>
+</resources>

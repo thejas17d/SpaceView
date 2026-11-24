@@ -33,26 +33,20 @@ sealed interface GateState {
 interface FeatureGate {
     /**
      * Live gate state, e.g. for a "18 / 20" counter. [usage] is the current count for [Allowance.Count]
-     * features (saved gallery items, saved 3D scans, compared items); ignored otherwise.
+     * features (saved gallery items, compared items); ignored otherwise.
      */
     fun observe(feature: ProFeature, usage: Flow<Int> = flowOf(0)): Flow<GateState>
 
     /**
      * One-shot check before starting a new action. Waits at most ~1 s for a cold-start entitlement,
      * so a Pro user is not shown the paywall in the first second after launch.
-     *
-     * @param itemId the item for an [Allowance.Only] feature (the template id for [ProFeature.FURNITURE_TEMPLATES]).
      */
-    suspend fun check(feature: ProFeature, currentUsage: Int = 0, itemId: String? = null): GateState
+    suspend fun check(feature: ProFeature, currentUsage: Int = 0): GateState
 }
 
 /** The pure gate table. */
 object FeatureRules {
-    /**
-     * @param itemId for an [Allowance.Only] feature: the item asked for. Without one (a picker deciding which badges to
-     *   show) the answer is [GateState.Limited] with the number of free items, i.e. "some are free".
-     */
-    fun evaluate(feature: ProFeature, entitlement: Entitlement, usage: Int, itemId: String? = null): GateState {
+    fun evaluate(feature: ProFeature, entitlement: Entitlement, usage: Int): GateState {
         val rule = ProCatalog.rule(feature)
         val allowance = if (entitlement is Entitlement.Pro) rule.pro else rule.free
         return when (allowance) {
@@ -61,11 +55,6 @@ object FeatureRules {
             is Allowance.Count -> {
                 val remaining = allowance.max - usage.coerceAtLeast(0)
                 if (remaining > 0) GateState.Limited(remaining, allowance.max) else GateState.NeedsPro(allowance.max)
-            }
-            is Allowance.Only -> when {
-                itemId == null -> GateState.Limited(allowance.itemIds.size, allowance.itemIds.size)
-                itemId in allowance.itemIds -> GateState.Allowed
-                else -> GateState.NeedsPro(allowance.itemIds.size)
             }
         }
     }
@@ -90,18 +79,18 @@ class EntitlementFeatureGate(
     override fun observe(feature: ProFeature, usage: Flow<Int>): Flow<GateState> =
         combine(entitlement, usage) { e, n -> FeatureRules.evaluate(feature, e, n) }.distinctUntilChanged()
 
-    override suspend fun check(feature: ProFeature, currentUsage: Int, itemId: String?): GateState {
+    override suspend fun check(feature: ProFeature, currentUsage: Int): GateState {
         val e = entitlement.value.takeIf { it !is Entitlement.Unknown }
             ?: withTimeoutOrNull(unknownWaitMillis) { entitlement.first { it !is Entitlement.Unknown } }
             ?: Entitlement.Free
-        val first = FeatureRules.evaluate(feature, e, currentUsage, itemId)
+        val first = FeatureRules.evaluate(feature, e, currentUsage)
         if (first !is GateState.NeedsPro || settled.value) return first
         // N2: possibly a stale cache. Wait until Play has settled the entitlement or Pro arrives, then decide again.
         withTimeoutOrNull(settleWaitMillis) {
             combine(settled, entitlement) { s, now -> s || now is Entitlement.Pro }.first { it }
         }
         val latest = entitlement.value.takeIf { it !is Entitlement.Unknown } ?: Entitlement.Free
-        return FeatureRules.evaluate(feature, latest, currentUsage, itemId)
+        return FeatureRules.evaluate(feature, latest, currentUsage)
     }
 
     companion object {

@@ -14,13 +14,11 @@ import com.spaceview.app.billing.FakeBillingGateway
 import com.spaceview.app.billing.FakeBillingStore
 import com.spaceview.app.billing.PlayBillingGateway
 import com.spaceview.app.billing.PurchaseVerifier
-import com.spaceview.app.furniture.FurnitureTemplateRegistry
 import com.spaceview.app.pro.DataStoreEntitlementStore
 import com.spaceview.app.pro.EntitlementFeatureGate
 import com.spaceview.app.pro.EntitlementRepository
 import com.spaceview.app.pro.FeatureGate
 import com.spaceview.app.pro.GallerySaveGate
-import com.spaceview.app.pro.GatedGalleryStore
 import com.spaceview.app.pro.RefreshReason
 import com.spaceview.app.review.DataStoreReviewRecordStore
 import com.spaceview.app.review.PlayReviewLauncher
@@ -53,10 +51,10 @@ class AppContainer(context: Context) {
     val history: MeasurementRepository by lazy { MeasurementRepository.create(appContext) }
 
     /**
-     * AR Gallery (Room + app-private files), sharing the History database. Stale or missing furniture models are
-     * rebuilt from their template id and parameters by [FurnitureTemplateRegistry] (M4 MINOR 11, gate T3).
+     * AR Gallery (Room + app-private files), sharing the History database. Legacy furniture-template and 3D-mesh items
+     * from earlier test builds keep their stored model (PLAN v3 W1).
      */
-    val galleryRepository: GalleryRepository by lazy { GalleryRepository.create(appContext, templates = FurnitureTemplateRegistry) }
+    val galleryRepository: GalleryRepository by lazy { GalleryRepository.create(appContext) }
 
     /** Calibration, depth and safety-notice settings (`spaceview_measure` DataStore). */
     val measureSettings: MeasureSettingsRepository by lazy { MeasureSettingsRepository.create(appContext) }
@@ -131,26 +129,9 @@ class AppContainer(context: Context) {
         EntitlementFeatureGate(entitlements.entitlement, settled = entitlements.settled)
     }
 
-    /**
-     * The Free gallery cap (20) and 3D-scan quota (5 in total), checked before a scan starts and again at Save (P1
-     * review MAJOR 3). Every new gallery item goes through it: scans, templates (`saveTemplate`) and
-     * on-device meshes (`saveMesh`). The 3D count is the lifetime counter, never below the saved MESH_DEVICE rows;
-     * the D save path must call `SettingsRepository.recordDeviceScanSaved()` after each successful `saveMesh`.
-     */
+    /** The Free gallery cap (20), checked before a scan starts and again at Save (P1 review MAJOR 3). */
     val gallerySaveGate: GallerySaveGate by lazy {
-        GallerySaveGate(
-            gate = featureGate,
-            galleryCount = { galleryRepository.count() },
-            deviceScanCount = { maxOf(appSettings.deviceScansUsed(), galleryRepository.countDeviceScans()) },
-        )
-    }
-
-    /**
-     * The single gated insert path for templates (gate §8 T2): the template gate (core templates Free, the rest Pro),
-     * then the Free gallery cap, before `GalleryRepository.saveTemplate`.
-     */
-    val gatedGalleryStore: GatedGalleryStore by lazy {
-        GatedGalleryStore(featureGate = featureGate, saveGate = gallerySaveGate, saveTemplateTo = { galleryRepository.saveTemplate(it) })
+        GallerySaveGate(gate = featureGate, galleryCount = { galleryRepository.count() })
     }
 
     /** Ads, gated by the entitlement (ADR-011). Touches no ads SDK until started. */

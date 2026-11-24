@@ -166,8 +166,8 @@ class ScanDraftBuilderTest {
     @Test
     fun draftCarriesExactlyTheReviewedValues() {
         val v = ScanDraftBuilder.values(ObjectKind.BOX, box(), mapOf(ScanDim.HEIGHT to 0.9))
-        val jpeg = byteArrayOf(1, 2, 3)
-        val d = ScanDraftBuilder.draft(ObjectKind.BOX, v, jpeg, "Carton", DeviceTier.DEPTH, "1.57.0")
+        val picture = com.spaceview.engine.ArgbImage(1, 1, intArrayOf(-1))
+        val d = ScanDraftBuilder.draft(ObjectKind.BOX, v, com.spaceview.data.gallery.CutoutDraft(picture), "Carton", DeviceTier.DEPTH, "1.57.0")
         assertEquals(ObjectKind.BOX, d.kind)
         assertEquals(v.width, d.width)
         assertEquals(v.height, d.height)
@@ -176,7 +176,9 @@ class ScanDraftBuilderTest {
         assertEquals(v.quality, d.quality)
         assertEquals(v.calibrated, d.calibrated)
         assertEquals(DeviceTier.DEPTH, d.deviceTier)
-        assertArrayEquals(jpeg, d.frontJpeg)
+        assertTrue(picture === d.cutout!!.image)
+        assertNull("v1 never sends the proxy-box photo", d.frontJpeg)
+        assertNull("no photo: still a cutout (plain panel)", ScanDraftBuilder.draft(ObjectKind.BOX, v, null, "Carton", DeviceTier.DEPTH, null).cutout!!.image)
         assertEquals("Carton", d.label)
         assertEquals(1.0, d.calibrationFactor!!, 0.0)
         assertNotNull(d.arcoreVersion)

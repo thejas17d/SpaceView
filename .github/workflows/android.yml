@@ -147,14 +147,17 @@ jobs:
             exit 1
           fi
 
-      - name: Debug-only code absent from release (3D Scan Lab, fake billing UI)
+      - name: Debug-only code absent from release (Pro test switch, fake billing UI)
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
-          # The lab lives only in src/debug; R8 must also strip the fake billing panel. Any hit means it shipped.
-          HITS=$(unzip -p "$APK" 'classes*.dex' | grep -a -c -E 'Scan3dLab|scan3d_lab|FakeBillingControls' || true)
+          # PLAN v3 W7: the Settings "Developer" section with the "Pro (test)" switch and the paywall's
+          # "Test: unlock Pro" button exist only behind BuildConfig.FAKE_BILLING (a constant false in release), so R8
+          # must strip them with the fake billing gateway. Their class names and their (deliberately unlocalised)
+          # texts are searched for; any hit means test-only code shipped. (The 3D Scan Lab left v1 with PLAN v3.)
+          HITS=$(unzip -p "$APK" 'classes*.dex' | grep -a -c -E 'FakeBillingControls|FakeBillingGateway|FakeUnlockProButton|fake_billing|fake_pro_switch|fake_unlock_pro|Pro \(test\)|Test: unlock Pro|Developer \(debug build only\)' || true)
           echo "Debug-only references in release dex: $HITS"
           if [ "$HITS" != "0" ]; then
-            echo "::error::Debug-only code (3D Scan Lab / fake billing UI) found in the release APK."
+            echo "::error::Debug-only code (Pro test switch / fake billing UI) found in the release APK."
             exit 1
           fi
 

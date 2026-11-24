@@ -3,6 +3,7 @@ package com.spaceview.data.gallery
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
+import com.spaceview.engine.ArgbImage
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -13,8 +14,14 @@ import kotlin.math.roundToInt
  * checked with a real JPEG encoder.
  */
 interface GalleryImageCodec {
-    /** Decodes [encoded] (JPEG) with its long side at most [maxLongSide] px (never upscaled); null if undecodable. */
+    /**
+     * Decodes [encoded] (JPEG, or WebP / PNG with alpha for cutouts) with its long side at most [maxLongSide] px
+     * (never upscaled); null if undecodable.
+     */
     fun decode(encoded: ByteArray, maxLongSide: Int): GalleryImage?
+
+    /** An image of straight-alpha pixels (a cutout, PLAN v3 W2), for WebP / JPEG encoding. */
+    fun fromPixels(image: ArgbImage): GalleryImage
 }
 
 /** A decoded image. Call [release] when done (Android recycles the bitmap). */
@@ -28,8 +35,11 @@ interface GalleryImage {
     /** JPEG bytes at [quality] (0–100). */
     fun jpeg(quality: Int): ByteArray
 
-    /** Lossy WebP bytes at [quality] (0–100). */
+    /** Lossy WebP bytes at [quality] (0–100); keeps the alpha channel of a cutout. */
     fun webp(quality: Int): ByteArray
+
+    /** The pixels, straight alpha (fully transparent pixels may have lost their colour: bleed before use). */
+    fun pixels(): ArgbImage
 
     fun release()
 }
@@ -54,6 +64,9 @@ object AndroidGalleryImageCodec : GalleryImageCodec {
         if (out !== img) img.release()
         return out
     }
+
+    override fun fromPixels(image: ArgbImage): GalleryImage =
+        BitmapImage(Bitmap.createBitmap(image.argb, image.width, image.height, Bitmap.Config.ARGB_8888))
 
     private class BitmapImage(val bitmap: Bitmap) : GalleryImage {
         override val width: Int get() = bitmap.width
@@ -91,6 +104,12 @@ object AndroidGalleryImageCodec : GalleryImageCodec {
                 Bitmap.CompressFormat.WEBP
             }
             return encode(format, quality)
+        }
+
+        override fun pixels(): ArgbImage {
+            val px = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(px, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            return ArgbImage(bitmap.width, bitmap.height, px)
         }
 
         private fun encode(format: Bitmap.CompressFormat, quality: Int): ByteArray {

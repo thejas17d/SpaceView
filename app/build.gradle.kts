@@ -230,6 +230,10 @@ dependencies {
     // downloads the model (manifest meta-data "ica"), so the APK carries only the thin client.
     implementation(libs.play.services.mlkit.image.labeling)
 
+    // PLAN v3 W2 (Builder B): background-free cutouts. ML Kit Subject Segmentation through Google Play services (beta;
+    // the model is downloaded by Play services, manifest meta-data "subject_segment"), so the APK carries only the client.
+    implementation(libs.play.services.mlkit.subject.segmentation)
+
     // M2 (Builder A): navigation host, ViewModels for the measure / history features.
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

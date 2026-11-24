@@ -292,8 +292,11 @@ class GalleryRepositoryTest {
                 override fun scaled(maxLongSide: Int) = this
                 override fun jpeg(quality: Int): ByteArray = throw IOException("encoder")
                 override fun webp(quality: Int): ByteArray = byteArrayOf(1)
+                override fun pixels() = com.spaceview.engine.ArgbImage(10, 10, IntArray(100))
                 override fun release() = Unit
             }
+
+            override fun fromPixels(image: com.spaceview.engine.ArgbImage): GalleryImage = JvmImageCodec.fromPixels(image)
         }
         val repo = repo(codec = broken)
         try {
@@ -599,6 +602,8 @@ class GalleryRepositoryTest {
                 release.await()
                 return JvmImageCodec.decode(encoded, maxLongSide)
             }
+
+            override fun fromPixels(image: com.spaceview.engine.ArgbImage): GalleryImage = JvmImageCodec.fromPixels(image)
         }
         val dao = FakeGalleryDao()
         val repo = repo(dao, codec = slow)

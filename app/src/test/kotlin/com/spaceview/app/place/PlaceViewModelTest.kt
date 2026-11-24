@@ -175,4 +175,43 @@ class PlaceViewModelTest {
         b.setSpace(SpaceReading(SpaceKind.GAP, 1.1, 0.01), pausesNow = 0)
         assertFalse(b.spaceMeasuredBeforePause(0))
     }
+
+    /** PLAN v3 W3: a cutout stands on the floor on its bottom edge or hangs flat on a wall; never rescaled. */
+    @Test fun cutoutIsPlacedAsAFlatTrueSizeQuad() {
+        val f = File(tmp.root, "c.glb").apply { writeBytes(byteArrayOf(1)) }
+        fun cutout(kind: ObjectKind, fallback: Boolean = false) = PlacementModel(
+            9, f, 0.48, 0.86, 0.0, BoxOrigin.CENTER, kind,
+            Dimension.measured(0.48, 0.01), Dimension.measured(0.86, 0.01), Dimension.measured(0.52, 0.01),
+            ModelKind.CUTOUT, fallback, "Chair",
+        )
+        assertEquals(SurfaceTarget.FLOOR, PlaceViewModel.defaultTarget(cutout(ObjectKind.OTHER)))
+        assertEquals(SurfaceTarget.FLOOR, PlaceViewModel.defaultTarget(cutout(ObjectKind.BOX)))
+        assertEquals(SurfaceTarget.WALL, PlaceViewModel.defaultTarget(cutout(ObjectKind.FRAME)))
+        assertEquals(SurfaceTarget.WALL, PlaceViewModel.defaultTarget(cutout(ObjectKind.TV)))
+        assertEquals(SurfaceTarget.WALL, PlaceViewModel.defaultTarget(model()))
+
+        val item = PlaceViewModel.placedItem(cutout(ObjectKind.OTHER))
+        assertEquals(0.48, item.widthM, 0.0)
+        assertEquals(0.86, item.heightM, 0.0)
+        assertEquals(BoxOrigin.CENTER, item.origin)
+        // Floor: the quad's bottom edge touches the floor (origin = centre, half the height up).
+        val floor = com.spaceview.ar.PlacementMath.attachOffset(item, SurfaceTarget.FLOOR)
+        assertEquals(0.43, floor.y, 1e-12)
+        assertEquals(0.0, floor.z, 1e-12)
+        // Wall: flat against it, a hair (half the placement thickness) in front, centred on the reticle.
+        val wall = com.spaceview.ar.PlacementMath.attachOffset(item, SurfaceTarget.WALL)
+        assertEquals(PlaceViewModel.CUTOUT_THICKNESS_M / 2, wall.z, 1e-12)
+        assertEquals(0.0, wall.y, 1e-12)
+        // The fit check still uses the row's measured sizes (depth included), never the quad's zero depth.
+        // 0.48 wide fits 0.6, but the measured 0.52 depth is too big for 0.45 either way round.
+        val fit = vm(FakeSource(cutout(ObjectKind.OTHER))).verdict(cutout(ObjectKind.OTHER), SurfaceTarget.FLOOR, SpaceReading(SpaceKind.AREA, 0.6, 0.002, 0.45, 0.002))
+        assertEquals(com.spaceview.engine.Fit.TOO_BIG, fit!!.fit)
+        // A cutout that fell back to the row's box is placed as that box.
+        val box = PlaceViewModel.placedItem(cutout(ObjectKind.OTHER, fallback = true).let {
+            PlacementModel(it.id, it.file, 0.48, 0.86, 0.52, BoxOrigin.BOTTOM_CENTER, it.kind, it.width, it.height, it.depth, ModelKind.CUTOUT, true, null)
+        })
+        assertEquals(0.52, box.depthM, 0.0)
+        assertEquals(BoxOrigin.BOTTOM_CENTER, box.origin)
+    }
+
 }

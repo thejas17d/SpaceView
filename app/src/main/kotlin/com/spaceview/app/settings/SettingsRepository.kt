@@ -6,14 +6,12 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
-import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.spaceview.engine.UnitPreference
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
@@ -52,29 +50,15 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     /**
-     * On-device 3D scans ever saved on this install (the Free rule is "5 in total", user decision 2026-11-23):
-     * deleting a scan does not give one back. Read failures surface as 0 via [prefs]; the gate also takes the
-     * saved-row count, so the quota is never below what the gallery holds.
-     */
-    suspend fun deviceScansUsed(): Int = prefs.first()[DEVICE_SCANS_USED] ?: 0
-
-    /** Call once after every successful `GalleryRepository.saveMesh`. Throws [IOException] on a write failure. */
-    suspend fun recordDeviceScanSaved() {
-        dataStore.edit { it[DEVICE_SCANS_USED] = (it[DEVICE_SCANS_USED] ?: 0) + 1 }
-    }
-
-    /**
-     * Settings → Delete my data: units and sounds go back to their defaults. "Onboarding finished" and the 3D-scan
-     * quota count are kept: neither is personal data, the user should not be sent through the intro again, and
-     * deleting data must not hand back free scans. Throws [IOException] on a write failure.
+     * Settings → Delete my data: units and sounds go back to their defaults. "Onboarding finished" is kept: it is
+     * not personal data, and the user should not be sent through the intro again. Throws [IOException] on a write
+     * failure.
      */
     suspend fun resetPreferences() {
         dataStore.edit { p ->
             val onboarded = p[ONBOARDING_DONE]
-            val scansUsed = p[DEVICE_SCANS_USED]
             p.clear()
             if (onboarded != null) p[ONBOARDING_DONE] = onboarded
-            if (scansUsed != null) p[DEVICE_SCANS_USED] = scansUsed
         }
     }
 
@@ -82,7 +66,6 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val UNITS = stringPreferencesKey("unit_preference")
         private val SOUNDS = booleanPreferencesKey("sounds_enabled")
         private val ONBOARDING_DONE = booleanPreferencesKey("onboarding_completed")
-        private val DEVICE_SCANS_USED = intPreferencesKey("device_scans_used")
 
         @Volatile private var instance: SettingsRepository? = null
 

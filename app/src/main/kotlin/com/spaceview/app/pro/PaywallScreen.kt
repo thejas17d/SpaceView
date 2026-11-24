@@ -53,7 +53,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.spaceview.app.BuildConfig
 import com.spaceview.app.R
+import com.spaceview.app.appContainer
+import com.spaceview.app.billing.FakeUnlockProButton
 import com.spaceview.app.billing.BillingPeriod
 import com.spaceview.app.billing.FakeBillingGateway
 import com.spaceview.app.billing.PeriodUnit
@@ -73,7 +76,8 @@ fun PaywallRoute(viewModel: PaywallViewModel, onClose: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val activity = LocalActivity.current
     val uriHandler = LocalUriHandler.current
-    val packageName = LocalContext.current.packageName
+    val context = LocalContext.current
+    val packageName = context.packageName
     PaywallScreen(
         state = state,
         onClose = onClose,
@@ -82,6 +86,13 @@ fun PaywallRoute(viewModel: PaywallViewModel, onClose: () -> Unit) {
         onRestore = viewModel::restore,
         onManage = { runCatching { uriHandler.openUri(ProLinks.manageSubscriptions(packageName)) } },
         onRetry = viewModel::load,
+        debugActions = {
+            // PLAN v3 W7: debug builds with fake billing only (BuildConfig.FAKE_BILLING is a constant false in release,
+            // so R8 drops this branch; CI checks the release dex for the button's text).
+            if (BuildConfig.FAKE_BILLING) {
+                (context.appContainer.billing as? FakeBillingGateway)?.let { fake -> FakeUnlockProButton(fake, onChanged = viewModel::restore) }
+            }
+        },
     )
 }
 
@@ -102,6 +113,8 @@ fun PaywallScreen(
     onManage: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Debug-only test actions (the "Test: unlock Pro" button); empty by default and in release builds. */
+    debugActions: @Composable () -> Unit = {},
 ) {
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -130,6 +143,7 @@ fun PaywallScreen(
                 }
                 Benefits()
                 Offers(state, onSelect, onBuy, onRetry)
+                debugActions()
             }
             Message(state.message)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -171,8 +185,6 @@ private fun CloseBar(onClose: () -> Unit) {
 private fun reasonText(feature: ProFeature): String = when (feature) {
     ProFeature.NO_ADS -> stringResource(R.string.pro_reason_no_ads)
     ProFeature.GALLERY_UNLIMITED -> stringResource(R.string.pro_reason_gallery, ProCatalog.FREE_GALLERY_ITEMS)
-    ProFeature.DEVICE_SCAN -> stringResource(R.string.pro_reason_device_scan, ProCatalog.FREE_DEVICE_SCANS)
-    ProFeature.FURNITURE_TEMPLATES -> stringResource(R.string.pro_reason_templates)
     ProFeature.COMPARE -> stringResource(R.string.pro_reason_compare, ProCatalog.FREE_COMPARE_ITEMS)
     ProFeature.EXPORT_GLB -> stringResource(R.string.pro_reason_export_glb)
     ProFeature.EXPORT_PDF -> stringResource(R.string.pro_reason_export_pdf)
@@ -182,8 +194,6 @@ private fun reasonText(feature: ProFeature): String = when (feature) {
 internal fun benefitRes(feature: ProFeature): Int = when (feature) {
     ProFeature.NO_ADS -> R.string.pro_benefit_no_ads
     ProFeature.GALLERY_UNLIMITED -> R.string.pro_benefit_gallery
-    ProFeature.DEVICE_SCAN -> R.string.pro_benefit_device_scan
-    ProFeature.FURNITURE_TEMPLATES -> R.string.pro_benefit_templates
     ProFeature.COMPARE -> R.string.pro_benefit_compare
     ProFeature.EXPORT_GLB -> R.string.pro_benefit_export_glb
     ProFeature.EXPORT_PDF -> R.string.pro_benefit_export_pdf

@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 3D scan (D milestone). The 3D Scan Lab's own strings live in the debug source set (src/debug/res). -->
-<resources>
-    <!-- Settings → debug panel, debug builds only (BuildConfig.DEBUG). -->
-    <string name="settings_scan3d_lab">3D Scan Lab (debug)</string>
-</resources>

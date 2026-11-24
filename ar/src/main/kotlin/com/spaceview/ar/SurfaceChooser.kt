@@ -8,14 +8,35 @@ import kotlin.math.max
 /** One frame's raw hit under the reticle, copied out of ARCore (no trackable). */
 internal class HitSample(val position: Vec3, val normal: Vec3?, val kind: HitKind, val distance: Double)
 
-/** The surface point chosen for the reticle in one frame. */
+/**
+ * The surface point chosen for the reticle in one frame.
+ *
+ * @property aimInflation multiplies the aim pixel error of this point (≥ 1): the vertical measuring plane's grazing
+ *   stretch 1 / cos g (W5).
+ * @property extraSigmaM an extra isotropic localisation σ (m) added in quadrature to the aim term (W5: the base's own
+ *   depth error leaking into the height).
+ * @property extraCovariance [HitKind.GROUND] only: the point's full covariance from the Ground range (anisotropic:
+ *   long along the ray, the floor's σ vertically). The aim term is then already included and no localisation is added.
+ */
 internal class ChosenPoint(
     val position: Vec3,
     val normal: Vec3?,
     val kind: HitKind,
     val range: Double,
     val planeBiasRel: Double,
-)
+    val aimInflation: Double = 1.0,
+    val extraSigmaM: Double = 0.0,
+    val extraCovariance: com.spaceview.engine.Cov3? = null,
+) {
+    /** [base] (the plain aim localisation at this point's range) with [aimInflation] and [extraSigmaM] applied. */
+    fun localisation(base: com.spaceview.engine.LocalisationInput?): com.spaceview.engine.LocalisationInput? {
+        if (base == null || extraCovariance != null) return null
+        if (aimInflation == 1.0 && extraSigmaM == 0.0) return base
+        val px = base.pixelErrorPx * aimInflation
+        val extraPx = extraSigmaM * base.focalLengthPx / base.rangeMeters
+        return base.copy(pixelErrorPx = kotlin.math.sqrt(px * px + extraPx * extraPx))
+    }
+}
 
 /**
  * Picks the reticle point from the raw hit and the locally fitted surface (worker thread).

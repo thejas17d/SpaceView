@@ -83,6 +83,22 @@ internal object FrameReaders {
     }
 
     /**
+     * Offers the centre of every tracked, upward-facing ARCore plane to [floor] as an on-plane vote (W4 / W5: the
+     * camera's height above the floor). Call about once a second: `getAllTrackables` allocates.
+     */
+    fun feedFloorPlanes(session: com.google.ar.core.Session, floor: FloorEstimator, timestampNs: Long) {
+        try {
+            for (p in session.getAllTrackables(Plane::class.java)) {
+                if (p.trackingState != TrackingState.TRACKING || p.subsumedBy != null || p.type != Plane.Type.HORIZONTAL_UPWARD_FACING) continue
+                val c = p.centerPose
+                floor.add(c.tx().toDouble(), c.ty().toDouble(), c.tz().toDouble(), true, timestampNs)
+            }
+        } catch (e: Exception) {
+            // Session paused / closed between frames: no vote this time.
+        }
+    }
+
+    /**
      * Copies the point cloud (x, y, z per point, confidence >= [minConfidence]) into [out] when its
      * timestamp differs from [lastTimestamp]. Returns the number of points copied and stores the cloud's
      * timestamp in `timestampOut[0]`, or returns -1 when the cloud is unchanged or unreadable. Allocation-free

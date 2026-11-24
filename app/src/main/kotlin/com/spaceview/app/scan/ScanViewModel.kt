@@ -1,5 +1,6 @@
 package com.spaceview.app.scan
 
+import android.graphics.Bitmap
 import android.graphics.PointF
 import android.util.Log
 import androidx.annotation.VisibleForTesting
@@ -8,8 +9,12 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.spaceview.app.scan.imaging.CutoutChoice
+import com.spaceview.app.scan.imaging.CutoutMaker
+import com.spaceview.app.scan.imaging.CutoutStatus
 import com.spaceview.app.scan.imaging.FrontPhotoRectifier
 import com.spaceview.app.scan.imaging.JpegEncoder
+import com.spaceview.app.scan.imaging.SubjectSegmenter
 import com.spaceview.app.settings.SettingsRepository
 import com.spaceview.app.smart.NameSuggestion
 import com.spaceview.app.smart.ObjectNamer
@@ -17,11 +22,13 @@ import com.spaceview.ar.FrontPhoto
 import com.spaceview.ar.ImprovementTip
 import com.spaceview.ar.ScanOutline
 import com.spaceview.ar.ScanShape
+import com.spaceview.data.gallery.CutoutDraft
 import com.spaceview.data.gallery.GalleryItem
 import com.spaceview.data.gallery.GalleryRepository
 import com.spaceview.data.gallery.ObjectKind
 import com.spaceview.data.gallery.ScanDraft
 import com.spaceview.data.settings.MeasureSettingsRepository
+import com.spaceview.engine.ArgbImage
 import com.spaceview.engine.DeviceTier
 import com.spaceview.engine.UnitPreference
 import kotlinx.coroutines.CancellationException
@@ -37,6 +44,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 /** Steps of the scan flow; the step indicator shows [number] of [COUNT] (Saved has none). */
@@ -52,7 +60,7 @@ enum class ScanStep(val number: Int) {
 data class ScanSettings(
     val units: UnitPreference = UnitPreference.AUTO,
     val soundsEnabled: Boolean = true,
-    val depthEnabled: Boolean = false,
+    val depthEnabled: Boolean = true,
     /** Smart Measure hands-free point drop (SM1a), from the `spaceview_measure` store. */
     val handsFreeEnabled: Boolean = true,
     val loaded: Boolean = false,
@@ -77,8 +85,12 @@ class GalleryScanStore(private val gallery: GalleryRepository) : ScanStore {
  * State of the scan flow. Holds no ARCore objects (the AR steps own their `MeasureSession`).
  *
  * @property outline the measured outline (from the reading the user confirmed in AR).
- * @property photo the rectified front photo as shown on the review (also the stored JPEG).
- * @property photoBusy the photo is still being straightened / encoded (Save waits for it).
+ * @property photo the picture the Review shows and Save stores: the background-free cutout, or the rectified front
+ *   photo (a flat object, "Undo cutout", or a cutout that could not be made).
+ * @property photoBusy the photo is still being straightened or its background removed (Save waits for it).
+ * @property removingBackground the subject segmentation is running (PLAN v3 W2).
+ * @property cutoutStatus what happened to the background (null before a photo).
+ * @property cutoutUndone the user chose "Undo cutout": the rectangle is saved although a cutout exists.
  */
 data class ScanUiState(
     val step: ScanStep = ScanStep.TYPE,
@@ -101,7 +113,13 @@ data class ScanUiState(
     val nameSuggestion: NameSuggestion? = null,
     /** Some outline points were dropped hands-free: saved as `CaptureMethod.HANDS_FREE`. */
     val handsFree: Boolean = false,
+    val removingBackground: Boolean = false,
+    val cutoutStatus: CutoutStatus? = null,
+    val cutoutUndone: Boolean = false,
 ) {
+    /** A background-free cutout exists (Undo / Redo cutout is offered). */
+    val hasCutout: Boolean get() = cutoutStatus == CutoutStatus.REMOVED
+
     val shape: ScanShape? get() = kind?.let { ScanDraftBuilder.shapeFor(it) }
 
     /** Review values (null until the outline exists). */
@@ -137,6 +155,8 @@ class ScanViewModel(
     private val canSave: suspend () -> Boolean = { true },
     /** SM1b (contract K6): names the straightened photo once, off the main thread; null = no naming. */
     private val namer: ObjectNamer? = null,
+    /** PLAN v3 W2: removes the background of a Box / Other photo; null = never (the rectangle is kept). */
+    private val segmenter: SubjectSegmenter? = null,
 ) : ViewModel() {
 
     val settings: StateFlow<ScanSettings> = settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, ScanSettings())
@@ -144,7 +164,10 @@ class ScanViewModel(
     private val _state = MutableStateFlow(restore())
     val state: StateFlow<ScanUiState> = _state.asStateFlow()
 
-    private var frontJpeg: ByteArray? = null
+    /** The rectified front photo (opaque) and, for Box / Other, the background-free cutout ([CutoutChoice]). */
+    private var pictures: CutoutChoice? = null
+    private var rectangleBitmap: ImageBitmap? = null
+    private var cutoutBitmap: ImageBitmap? = null
     private var photoJob: Job? = null
     private var nameJob: Job? = null
 
@@ -179,16 +202,22 @@ class ScanViewModel(
         setState { it.copy(outline = outline, tip = tip, tier = tier, handsFree = handsFree, edits = emptyMap(), step = ScanStep.PHOTO) }
     }
 
-    /** The front photo was taken: straighten it to the measured W:H off the main thread, then review. */
+    /**
+     * The front photo was taken: straighten it to the measured W:H off the main thread, then review. For Box / Other
+     * the background is then removed (PLAN v3 W2): the straightened photo shows at once, the cutout replaces it when
+     * ready, and Save waits for it. A flat object (frame, TV) is already exactly its corners: no segmentation.
+     */
     fun onFrontPhoto(photo: FrontPhoto) {
         val outline = _state.value.outline
-        if (outline == null || _state.value.step != ScanStep.PHOTO) {
+        val kind = _state.value.kind
+        if (outline == null || kind == null || _state.value.step != ScanStep.PHOTO) {
             photo.bitmap.recycle()
             return
         }
         dropPhoto()
         setState { it.copy(step = ScanStep.REVIEW, photoBusy = true, photoFailed = false) }
         val aspect = outline.width.value / outline.height.value
+        val flat = ScanDraftBuilder.shapeFor(kind) == com.spaceview.ar.ScanShape.FLAT
         val job = viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
                 try {
@@ -208,13 +237,66 @@ class ScanViewModel(
                     photo.bitmap.recycle()
                 }
             }
-            frontJpeg = result?.second
-            setState { it.copy(photo = result?.first?.asImageBitmap(), photoBusy = false, photoFailed = result == null) }
-            result?.second?.let { suggestName(it) }
+            if (result == null) {
+                setState { it.copy(photoBusy = false, photoFailed = true) }
+                return@launch
+            }
+            val (rectified, jpeg) = result
+            val shown = rectified.asImageBitmap()
+            rectangleBitmap = shown
+            setState { it.copy(photo = shown, removingBackground = !flat && segmenter != null) }
+            suggestName(jpeg)
+            val choice = withContext(Dispatchers.Default) {
+                val pixels = IntArray(rectified.width * rectified.height)
+                rectified.getPixels(pixels, 0, rectified.width, 0, 0, rectified.width, rectified.height)
+                val rect = ArgbImage(rectified.width, rectified.height, pixels)
+                val mask = if (flat || segmenter == null) null else withTimeoutOrNull(SEGMENT_TIMEOUT_MS) { segmenter.mask(rectified) }
+                val choice = CutoutMaker.choose(rect, flat, mask)
+                val cut = choice.cutout?.let { img ->
+                    runCatching { Bitmap.createBitmap(img.argb, img.width, img.height, Bitmap.Config.ARGB_8888).asImageBitmap() }.getOrNull()
+                }
+                // A cutout that can't be shown is not saved either (what the Review shows is what is stored).
+                if (choice.cutout != null && cut == null) CutoutChoice(rect, null, CutoutStatus.NOT_AVAILABLE) to null else choice to cut
+            }
+            onPictures(choice.first, shown, choice.second)
         }
         // Cancelled before the block ran (Back, Measure again): the camera image is still ours to free (m6).
         job.invokeOnCompletion { cause -> if (cause != null) photo.bitmap.recycle() }
         photoJob = job
+    }
+
+    /**
+     * The Review's pictures are ready ([choice] from [CutoutMaker]): shows the cutout when there is one (on a
+     * checkerboard), else the rectangle, and says what happened to the background.
+     */
+    @VisibleForTesting
+    internal fun onPictures(choice: CutoutChoice, rectangle: ImageBitmap?, cutout: ImageBitmap?) {
+        pictures = choice
+        rectangleBitmap = rectangle
+        cutoutBitmap = cutout
+        val removed = choice.status == CutoutStatus.REMOVED && choice.cutout != null
+        setState {
+            it.copy(
+                photo = if (removed && cutout != null) cutout else rectangle,
+                photoBusy = false,
+                removingBackground = false,
+                cutoutStatus = if (removed || choice.status != CutoutStatus.REMOVED) choice.status else CutoutStatus.NOT_SURE,
+                cutoutUndone = false,
+            )
+        }
+    }
+
+    /** "Undo cutout" ([undo] = true) keeps the rectangle photo; false brings the background-free cutout back. */
+    fun setCutoutUndone(undo: Boolean) {
+        val s = _state.value
+        if (!s.hasCutout || s.saving || s.savedId != null) return
+        setState { it.copy(cutoutUndone = undo, photo = if (undo) rectangleBitmap else cutoutBitmap ?: rectangleBitmap) }
+    }
+
+    /** The picture Save stores: the cutout unless undone, else the rectangle; null without a photo. */
+    private fun chosenPicture(s: ScanUiState): ArgbImage? {
+        val p = pictures ?: return null
+        return if (s.hasCutout && !s.cutoutUndone) p.cutout ?: p.rectangle else p.rectangle
     }
 
     /** Continue without a photo (the gallery item gets a plain-colour front). */
@@ -257,7 +339,9 @@ class ScanViewModel(
         val values = s.values ?: return
         if (s.saving || s.savedId != null || s.photoBusy || !values.isSavable) return
         setState { it.copy(saving = true, saveFailed = false, galleryFull = false) }
-        val draft = ScanDraftBuilder.draft(kind, values, frontJpeg, ScanDraftBuilder.label(s.label, suggestedLabel), s.tier, arcoreVersion(), s.handsFree)
+        val draft = ScanDraftBuilder.draft(
+            kind, values, CutoutDraft(chosenPicture(s)), ScanDraftBuilder.label(s.label, suggestedLabel), s.tier, arcoreVersion(), s.handsFree,
+        )
         viewModelScope.launch {
             if (!canSave()) {
                 // Gallery full on Free: keep everything (values, edits, name, photo) for Upgrade then Save.
@@ -315,8 +399,15 @@ class ScanViewModel(
         photoJob = null
         nameJob?.cancel()
         nameJob = null
-        frontJpeg = null
-        _state.update { it.copy(photo = null, photoBusy = false, photoFailed = false, nameSuggestion = null) }
+        pictures = null
+        rectangleBitmap = null
+        cutoutBitmap = null
+        _state.update {
+            it.copy(
+                photo = null, photoBusy = false, photoFailed = false, nameSuggestion = null,
+                removingBackground = false, cutoutStatus = null, cutoutUndone = false,
+            )
+        }
     }
 
     private fun warn(message: String) {
@@ -330,6 +421,9 @@ class ScanViewModel(
 
         /** Long side of the straightened photo (the gallery re-encodes it within its size budget). */
         const val PHOTO_LONG_SIDE = 1024
+
+        /** Longest wait for the subject segmentation; then the rectangle is kept ("couldn't remove the background"). */
+        const val SEGMENT_TIMEOUT_MS = 10_000L
 
         /** The settings the scan screens use, from the app's two settings stores. */
         fun settingsFlow(measureSettings: MeasureSettingsRepository, appSettings: SettingsRepository): Flow<ScanSettings> = combine(

@@ -3,6 +3,7 @@ package com.spaceview.app.scan
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,6 +50,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.spaceview.app.R
 import com.spaceview.app.common.AccuracyBadge
+import com.spaceview.app.common.Checkerboard
 import com.spaceview.app.common.InstrumentCard
 import com.spaceview.app.common.hintRes
 import com.spaceview.app.common.spokenLength
@@ -58,6 +60,7 @@ import com.spaceview.app.gallery.GalleryFormatter
 import com.spaceview.app.pro.GalleryFullCard
 import com.spaceview.app.gallery.labelRes
 import com.spaceview.app.measure.messageRes
+import com.spaceview.app.scan.imaging.CutoutStatus
 import com.spaceview.app.ui.theme.SpaceViewTheme
 import com.spaceview.data.gallery.Dimension
 import com.spaceview.data.gallery.DimensionSource
@@ -105,7 +108,7 @@ internal fun ScanReviewScreen(
             }
             Text(stringResource(R.string.scan_review_title), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
 
-            PhotoBlock(state, suggested)
+            PhotoBlock(state, suggested, onUndoCutout = vm::setCutoutUndone)
 
             if (outline == null || values == null) return@Column
             InstrumentCard {
@@ -199,19 +202,62 @@ internal fun ScanReviewScreen(
     }
 }
 
+/**
+ * The picture that will be saved and placed (PLAN v3 W2): on a checkerboard, so a removed background shows as
+ * transparent, at the measured W:H (the model is exactly that size). Below it, what happened to the background and,
+ * when a cutout exists, "Undo cutout" / "Remove background again".
+ */
 @Composable
-private fun PhotoBlock(state: ScanUiState, title: String) {
+private fun PhotoBlock(state: ScanUiState, title: String, onUndoCutout: (Boolean) -> Unit) {
     val photo = state.photo
     when {
-        photo != null -> Image(
-            bitmap = photo,
-            contentDescription = stringResource(R.string.gallery_photo_of, state.label ?: title),
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 280.dp),
-        )
+        photo != null -> {
+            val aspect = state.values?.let { v -> (v.width.meters / v.height.meters).toFloat() }
+                ?.takeIf { it.isFinite() && it > 0f }?.coerceIn(0.2f, 5f)
+                ?: (photo.width.toFloat() / photo.height)
+            Box(Modifier.fillMaxWidth().heightIn(max = 280.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.aspectRatio(aspect, matchHeightConstraintsFirst = aspect < 1f)) {
+                    Checkerboard(Modifier.matchParentSize())
+                    Image(
+                        bitmap = photo,
+                        contentDescription = stringResource(R.string.gallery_photo_of, state.label ?: title),
+                        contentScale = ContentScale.FillBounds,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                }
+            }
+            CutoutNote(state, onUndoCutout)
+        }
         state.photoBusy -> Text(stringResource(R.string.scan_photo_preparing), style = MaterialTheme.typography.bodyMedium)
         state.photoFailed -> Text(stringResource(R.string.scan_photo_failed), style = MaterialTheme.typography.bodyMedium)
         else -> Text(stringResource(R.string.gallery_no_photo), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** What happened to the background, read out when it changes; the Undo / Redo cutout button. */
+@Composable
+private fun CutoutNote(state: ScanUiState, onUndoCutout: (Boolean) -> Unit) {
+    val note = when {
+        state.removingBackground -> R.string.scan_cutout_removing
+        state.cutoutStatus == CutoutStatus.REMOVED -> if (state.cutoutUndone) R.string.scan_cutout_undone else R.string.scan_cutout_removed
+        state.cutoutStatus == CutoutStatus.FLAT -> R.string.scan_cutout_flat
+        state.cutoutStatus == CutoutStatus.NOT_AVAILABLE -> R.string.scan_cutout_not_available
+        state.cutoutStatus == CutoutStatus.NOT_SURE -> R.string.scan_cutout_not_sure
+        else -> null
+    } ?: return
+    val warn = state.cutoutStatus == CutoutStatus.NOT_AVAILABLE || state.cutoutStatus == CutoutStatus.NOT_SURE
+    Text(
+        stringResource(note),
+        style = MaterialTheme.typography.bodySmall,
+        color = if (warn) SpaceViewTheme.colors.accuracyFair else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
+    if (state.hasCutout && !state.removingBackground) {
+        TextButton(
+            onClick = { onUndoCutout(!state.cutoutUndone) },
+            enabled = !state.saving,
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) { Text(stringResource(if (state.cutoutUndone) R.string.scan_cutout_redo else R.string.scan_cutout_undo)) }
     }
 }
 

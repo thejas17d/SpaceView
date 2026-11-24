@@ -181,7 +181,8 @@ class PaywallViewModelTest {
 
     @Test
     fun `route argument parsing`() {
-        assertEquals(ProFeature.DEVICE_SCAN, PaywallDestination.parse("DEVICE_SCAN"))
+        assertEquals(ProFeature.GALLERY_UNLIMITED, PaywallDestination.parse("GALLERY_UNLIMITED"))
+        assertEquals("a feature removed in v1 falls back", ProFeature.NO_ADS, PaywallDestination.parse("DEVICE_SCAN"))
         assertEquals(ProFeature.NO_ADS, PaywallDestination.parse("bogus"))
         assertEquals(ProFeature.NO_ADS, PaywallDestination.parse(null))
         assertEquals("paywall/GALLERY_UNLIMITED", PaywallDestination.route(ProFeature.GALLERY_UNLIMITED))

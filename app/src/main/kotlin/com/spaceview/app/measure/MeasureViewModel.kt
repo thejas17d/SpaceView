@@ -31,7 +31,7 @@ import kotlin.math.sqrt
 data class MeasureUiSettings(
     val units: UnitPreference = UnitPreference.AUTO,
     val soundsEnabled: Boolean = true,
-    val depthEnabled: Boolean = false,
+    val depthEnabled: Boolean = true,
     val calibration: CalibrationRecord? = null,
     val safetyNoticeShown: Boolean = true,
     /** Smart Measure hands-free point drop (SM1a), from the `spaceview_measure` store. */

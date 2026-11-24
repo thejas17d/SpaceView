@@ -283,7 +283,11 @@ private fun ScanHud(
                 state.tracking != TrackingStatus.GOOD -> CoachingCard(message = stringResource(state.tracking.messageRes()))
                 state.isComplete -> Unit
                 state.pendingCommit -> CoachingCard(message = stringResource(R.string.measure_hold_steady))
+                // W5: the box top is on the vertical plane; past 75° it is refused, and the user should step back.
+                state.aimTooSteep -> CoachingCard(message = stringResource(R.string.measure_height_too_steep))
                 wallHint -> CoachingCard(message = stringResource(R.string.scan_wall_hint))
+                // W6: until the first surface point of the session, coach the motion that finds one.
+                !state.hasSurface && !state.surfaceSeen -> CoachingCard(message = stringResource(R.string.measure_coach_move))
                 !state.hasSurface -> CoachingCard(message = stringResource(R.string.measure_no_surface))
                 else -> CoachingCard(message = stringResource(instructionRes(shape.mode, state.pointCount)))
             }

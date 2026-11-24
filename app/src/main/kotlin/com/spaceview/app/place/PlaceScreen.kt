@@ -63,7 +63,6 @@ import com.spaceview.app.ui.theme.SpaceViewTheme
 import com.spaceview.ar.MeasureMode
 import com.spaceview.ar.MeasureSession
 import com.spaceview.ar.MeasureState
-import com.spaceview.ar.PlacedItem
 import com.spaceview.ar.PlacementController
 import com.spaceview.ar.PlacementState
 import com.spaceview.ar.PlacementStatus
@@ -118,8 +117,8 @@ private fun PlaceArScreen(loaded: LoadedModel, vm: PlaceViewModel, onBack: () ->
         val session = remember { MeasureSession(MeasureMode.DISTANCE, depthWanted = false) }
         val controller = remember {
             PlacementController(
-                PlacedItem(model.widthM, model.heightM, model.depthM, model.origin, model.centre),
-                savedTarget ?: PlaceViewModel.defaultTarget(model.origin),
+                PlaceViewModel.placedItem(model),
+                savedTarget ?: PlaceViewModel.defaultTarget(model),
                 session,
             )
         }
@@ -337,8 +336,11 @@ private fun PlaceHud(
                 Text(stringResource(R.string.place_true_size), color = onChrome, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
             }
         }
-        if (model.modelKind == ModelKind.MESH_DEVICE || model.modelKind == ModelKind.MESH_CLOUD) {
-            ChromeNote(stringResource(if (model.meshFallback) R.string.place_mesh_fallback else R.string.place_mesh_label))
+        // Legacy 3D scans say what they are; any model that had to fall back to the row's box says so (PLAN v3 W1).
+        if (model.meshFallback) {
+            ChromeNote(stringResource(R.string.place_mesh_fallback))
+        } else if (model.modelKind == ModelKind.MESH_DEVICE || model.modelKind == ModelKind.MESH_CLOUD) {
+            ChromeNote(stringResource(R.string.place_mesh_label))
         }
         if (fitMode == FitMode.OFF && status.state !is PlacementState.FallbackLine) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {

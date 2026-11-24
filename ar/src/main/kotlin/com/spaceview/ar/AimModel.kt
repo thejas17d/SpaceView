@@ -74,6 +74,18 @@ object AimModel {
         return LocalisationInput(rangeM, focalRef, max(AIM_PIXELS_VGA, fromView))
     }
 
+    /**
+     * 1σ angular aim error of the crosshair (rad, per axis): the live aim pixel error over the focal length, both in
+     * reference pixels ([aim] at unit range). [DEFAULT_AIM_SIGMA_RAD] before the intrinsics are known.
+     */
+    fun angularSigma(intr: ImageIntrinsics?, viewPxPerImagePx: Double = Double.POSITIVE_INFINITY): Double {
+        val loc = intr?.let { aim(1.0, it, viewPxPerImagePx) } ?: return DEFAULT_AIM_SIGMA_RAD
+        return loc.pixelErrorPx / loc.focalLengthPx
+    }
+
+    /** Aim σ used until the camera intrinsics are known: 2 VGA pixels at a typical VGA focal length (~500 px). */
+    const val DEFAULT_AIM_SIGMA_RAD = 2.0 / 480.0
+
     /** Placement localisation of a freeze-frame adjustment at [rangeM] on a still with [still] intrinsics. */
     fun adjust(rangeM: Double, still: ImageIntrinsics, viewPxPerImagePx: Double): LocalisationInput? {
         if (!(rangeM > 0) || !rangeM.isFinite()) return null

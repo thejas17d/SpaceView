@@ -8,6 +8,9 @@ import com.spaceview.ar.ScanShape
 import com.spaceview.data.gallery.GalleryItem
 import com.spaceview.data.gallery.ObjectKind
 import com.spaceview.data.gallery.ScanDraft
+import com.spaceview.app.scan.imaging.CutoutChoice
+import com.spaceview.app.scan.imaging.CutoutStatus
+import com.spaceview.engine.ArgbImage
 import com.spaceview.engine.DeviceTier
 import com.spaceview.engine.Measurement
 import com.spaceview.engine.Quality
@@ -24,6 +27,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -92,6 +96,52 @@ class ScanViewModelTest {
         return v
     }
 
+    private val rect = ArgbImage(4, 3, IntArray(12) { 0xFF336699.toInt() })
+    private val cut = ArgbImage(2, 3, IntArray(6) { if (it % 2 == 0) 0xFF336699.toInt() else 0x00336699 })
+
+    /** PLAN v3 W2: the Review saves the cutout; "Undo cutout" saves the rectangle; Redo brings the cutout back. */
+    @Test
+    fun cutoutIsSavedUnlessUndone() {
+        val v = atReview()
+        v.onPictures(CutoutChoice(rect, cut, CutoutStatus.REMOVED), null, null)
+        assertTrue(v.state.value.hasCutout)
+        assertFalse(v.state.value.photoBusy)
+        v.setCutoutUndone(true)
+        assertTrue(v.state.value.cutoutUndone)
+        v.setCutoutUndone(false)
+        v.save("Chair")
+        assertSame(cut, store.saved.single().cutout!!.image)
+
+        val w = atReview(vm())
+        w.onPictures(CutoutChoice(rect, cut, CutoutStatus.REMOVED), null, null)
+        w.setCutoutUndone(true)
+        w.save("Chair")
+        assertSame("undone: the rectangle", rect, store.saved[1].cutout!!.image)
+        // After saving, the choice can no longer change.
+        w.setCutoutUndone(false)
+        assertTrue(w.state.value.cutoutUndone)
+    }
+
+    /** A segmentation that could not run or be trusted keeps the rectangle, says why, and offers no undo. */
+    @Test
+    fun untrustedCutoutKeepsTheRectangle() {
+        for (status in listOf(CutoutStatus.NOT_AVAILABLE, CutoutStatus.NOT_SURE, CutoutStatus.FLAT)) {
+            val v = atReview(vm())
+            v.onPictures(CutoutChoice(rect, null, status), null, null)
+            assertEquals(status, v.state.value.cutoutStatus)
+            assertFalse(v.state.value.hasCutout)
+            v.setCutoutUndone(true)
+            assertFalse("nothing to undo", v.state.value.cutoutUndone)
+            v.save("Box")
+            assertSame(rect, store.saved.last().cutout!!.image)
+        }
+        // A REMOVED status without a picture is not a cutout.
+        val w = atReview(vm())
+        w.onPictures(CutoutChoice(rect, null, CutoutStatus.REMOVED), null, null)
+        assertFalse(w.state.value.hasCutout)
+        assertEquals(CutoutStatus.NOT_SURE, w.state.value.cutoutStatus)
+    }
+
     @Test
     fun doubleSaveStoresOnceAndCountsOnce() {
         val v = atReview()
@@ -116,6 +166,8 @@ class ScanViewModelTest {
         v.save("Frame")
         val d = store.saved.single()
         assertNull(d.frontJpeg)
+        // PLAN v3 W2: still a cutout item, a plain true-size panel without a picture.
+        assertNull(d.cutout!!.image)
         assertEquals("Café frame", d.label)
         assertEquals(ObjectKind.FRAME, d.kind)
         assertEquals(v.state.value.values!!.width, d.width)

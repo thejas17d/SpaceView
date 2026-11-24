@@ -2,7 +2,7 @@
 
 Living context file so any new session/LLM can continue. Updated after every step of work.
 
-_Last updated: 2026-11-23 — SM1-M5 gate R1/R2 closed (found done 11-19); user decisions: spike phone = Pixel 10a, Free 3D scans = 5 in total; R3 build → commit → CI in progress._
+_Last updated: 2026-11-24 — PLAN v3 (2D focus) after Pixel 10a feedback: 3D removed from v1 (parked on branch next/3d-engine), rangefinder ≤500 m, height vertical plane, surface tuning, background-free cutouts, flat Place, Pro test switch. Builders A+B running. Read docs/PLAN-v3-2D.md._
 
 ## What SpaceView is
 Android-first (Google Play) AR app: measure anything precisely; scan an object (e.g. photo frame in a café) → save to "AR Gallery" with exact dimensions → place it in your room at true size. Later: B2B for Indian retailers (Croma, Reliance Digital, furniture), iOS (ARKit/LiDAR).
@@ -363,6 +363,26 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
   - **R1 and R2 were already done** (files dated 11-19): `TapGuard` in `HandsFreeDropper.kt` reset on undo/clear with test `aTapAfterUndoingAHandsFreeDropIsAccepted`; `AdsSdk.requestConsent(canShowForm)` + `ConsentResult.DEFERRED`. G3/G4/G5 doc fixes also present. A stale `.build.lock` from 11-19 was removed.
   - **User decisions:** (1) spike phone = **Google Pixel 10a** (on Google's ARCore list with Depth API; no ToF → the non-ToF case); (2) Free 3D scans = **5 in total** (lifetime). Built: `ProCatalog.FREE_DEVICE_SCANS = 5`; `SettingsRepository.deviceScansUsed()/recordDeviceScanSaved()` (key `device_scans_used`, kept by Delete my data); `AppContainer` gate count = max(lifetime counter, saved MESH_DEVICE rows); paywall EN/HI says deleting doesn't give one back; tests updated/added. **D step 2 must call `recordDeviceScanSaved()` after each successful `saveMesh`.** Docs: ARCH §7.1.7 + D17, TESTING §18 item 19 + §19 phone note, pro-monetization §1.
   - Orchestrator full build running → then commit, push, CI (R3), record arm64 size.
+- **2026-11-23 → 24:** full local build GREEN (engine 282 / ar 149 / data 71 / app 374 incl. 1 Windows-skipped). **Commit 756b2bd** pushed; **CI run 45145605745 GREEN** (closes SM1-M5 R3; arm64 size not read — log needs auth).
+- **2026-11-24: USER DEVICE FEEDBACK (Pixel 10a) → PLAN v3 `docs/PLAN-v3-2D.md`.** Decisions U1–U4:
+  - U1: remove the 3D scan + Lab and the furniture templates from v1; keep Place in room as a flat, background-free, true-size cutout. **All 3D work is parked on branch `next/3d-engine` (= 756b2bd, pushed)** for the next update. The "5 free 3D scans" rule is moot for v1 (lives on that branch).
+  - U2: Distance mode ≤ 500 m: AR hit → Ground geometry → 2-sight triangulation, always with ±.
+  - U3: Pro test switch on debug + Play licence testers.
+  - U4: height uses a vertical plane through the base point.
+  - Builders: **A** = W5 height, W6 surface tuning, W4 rangefinder (`engine/range`, `app/range`); **B** = W1 removals, W7 Pro testing, W2 cutouts (ML Kit subject segmentation), W3 flat Place. Orchestrator wires the Distance route + Home.
+- **Builder A DONE (W5/W6/W4, uncommitted):** tests engine 233 (35 new) / ar 152 (18 new) / app range+measure+scan 70 green; no new deps.
+  - W5 `engine/VerticalPlaneAim` + `ar/HeightAim` (75° grazing refusal; scan box top uses real top-face hit if inside footprint, else vertical plane; far height base = Ground only, ≤ ~13 m).
+  - W6 findings: **depth is OFF by default** (Settings toggle) → likely cause of slow surfaces on Pixel 10a → orchestrator to flip default ON in `MeasureSettingsRepository` (+ test, KDoc, MeasureUiSettings/ScanSettings) after B finishes. Repeated SceneView frames were being averaged as new samples (fixed: skip same timestamp; honest ±, lock ≈0.5 s). Coaching line + debug HUD line `dbg track/hit/lock/source/depth/rep`.
+  - W4 `engine/range` (Ground, RayTriangulation, RangeErrorModel, RangeFormat) + `ar/RangefinderCore`/`RangefinderSession` + `app/range` (`RangefinderRoute`, `RangefinderViewModel`), strings_range EN/HI.
+  - **Honest limits (deviation; tell the user):** with AimModel's 0.24° aim error, Ground works only to ~13 m; 2-sight needs a walk ≈ d/8.5 (cap 30 m) and a 500 m target ends near **±160 m**. Earlier "±3–10% at 500 m" estimate assumed ~0.1° aim. Improvement path (proposal): zoomed/magnified aim on the full-res CPU image + longer allowed walk (50–60 m) → est. ±5–10% at 500 m.
+  - **Wiring TODO (orchestrator, after B):** `Routes.DISTANCE = "distance"`; `composable(Routes.DISTANCE){ val vm = viewModel { RangefinderViewModel(container.measureSettings, container.appSettings) }; RangefinderRoute(onBack = { navController.popBackStack() }, viewModel = vm) }` (no ads/visit tracker); Home `ModeRow(R.string.home_rangefinder, R.string.home_rangefinder_detail) { onDistance() }`. Device checklist (14 items) → TESTING section.
+- **Builder B DONE (W1/W7/W2/W3, uncommitted):** engine 233 / data 69 (1 skip) / app 340 (1 skip) green; assembleRelease OK; release universal 20,240,478 B (−49.5 KB).
+  - W1: furniture, 3D Scan Lab, shape-scan `:ar` files, `engine/recon` + `engine/furniture`, GatedGalleryStore, GlbWriter writeParts/writeMesh, data saveTemplate/saveMesh/drafts all deleted; ProCatalog lost DEVICE_SCAN/FURNITURE_TEMPLATES (and the 11-23 lifetime-counter wiring); paywall = No ads + Unlimited saves. Room stays v3; `ModelKind.CUTOUT` added (stored by name); legacy template/mesh rows place from stored GLB, with a fallback box.
+  - W7: Settings "Developer (debug build only)" card with a **Pro (test)** switch; paywall "Test: unlock Pro" button; both behind `BuildConfig.FAKE_BILLING`, and the CI grep is extended.
+  - W2: `GlbWriter.writeCutout`, `PngEncoder`, `CutoutPixels` (edge bleeding), `scan/imaging/Cutouts.kt` + `SubjectSegmenter.kt` (ML Kit **subject-segmentation 16.0.0-beta1**, unbundled, 10 s timeout, falls back to the rectangle); Review checkerboard + Undo cutout; `cutout.webp` + thumbnail; dependency baseline regenerated (mlkit common 18.10.0 etc.).
+  - W3: Place quad, bottom edge on the floor, frames/TVs default to the wall; fit check uses W/H/D.
+  - Open: re-check TESTING §21 naming chip (ML Kit common bump); cutout texture ≤ 512 px may look soft (budget/WebP option); the Help heading key is still `help_templates_title`.
+- **Orchestrator wiring (2026-11-24):** `Routes.DISTANCE` + composable; Home row `home_rangefinder` after Rectangle (`HomeScreen(onDistance)`); **depth ON by default** (MeasureSettingsRepository + MeasureUiSettings/ScanSettings/RangeUiSettings defaults, test flipped, Help wall tip EN/HI updated); TESTING §23 = Builder A's checklist. Full build running.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
 ## Log

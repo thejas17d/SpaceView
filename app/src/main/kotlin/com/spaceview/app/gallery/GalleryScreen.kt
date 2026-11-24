@@ -73,7 +73,6 @@ fun GalleryItem.title(): String = label ?: stringResource(kind.labelRes())
  * thumbnails by a divider and 24 dp.
  *
  * @param onScan optional "Scan an object" action for the empty state (null hides the button).
- * @param onAddFurniture optional "Add furniture" action for the empty state (null hides it).
  */
 @Composable
 fun GalleryScreen(
@@ -81,7 +80,6 @@ fun GalleryScreen(
     onOpen: (Long) -> Unit,
     onBack: () -> Unit,
     onScan: (() -> Unit)? = null,
-    onAddFurniture: (() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -105,7 +103,7 @@ fun GalleryScreen(
                     )
                 }
             } else if (state.loaded && state.cards.isEmpty()) {
-                EmptyGallery(onScan, onAddFurniture, Modifier.fillMaxSize())
+                EmptyGallery(onScan, Modifier.fillMaxSize())
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 156.dp),
@@ -130,7 +128,7 @@ fun GalleryScreen(
 }
 
 @Composable
-private fun EmptyGallery(onScan: (() -> Unit)?, onAddFurniture: (() -> Unit)?, modifier: Modifier = Modifier) {
+private fun EmptyGallery(onScan: (() -> Unit)?, modifier: Modifier = Modifier) {
     Box(modifier.padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
@@ -155,13 +153,6 @@ private fun EmptyGallery(onScan: (() -> Unit)?, onAddFurniture: (() -> Unit)?, m
                     ),
                 ) { Text(stringResource(R.string.gallery_scan_object)) }
             }
-            if (onAddFurniture != null) {
-                OutlinedButton(
-                    onClick = onAddFurniture,
-                    modifier = Modifier.heightIn(min = 48.dp),
-                    shape = MaterialTheme.shapes.medium,
-                ) { Text(stringResource(R.string.gallery_add_furniture)) }
-            }
         }
     }
 }
@@ -177,6 +168,7 @@ private fun GalleryCardView(card: GalleryCard, onClick: () -> Unit) {
             contentDescription = null,
             maxPx = 256,
             modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3f),
+            checkerboard = item.modelKind == com.spaceview.engine.ModelKind.CUTOUT,
         )
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

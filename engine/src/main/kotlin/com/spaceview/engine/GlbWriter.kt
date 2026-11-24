@@ -1,6 +1,5 @@
 package com.spaceview.engine
 
-import com.spaceview.engine.recon.TriMesh
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.pow
@@ -33,10 +32,12 @@ enum class BoxOrigin {
 
 /**
  * Writes SpaceView's true-size models as glTF 2.0 binaries (.glb), 1 unit = 1 metre, +Y up, front = +Z.
- * The API is frozen by contract K9 (docs/contracts/phase0.md):
- * - [writeBox]: the M3 measured proxy box; the photo face is unlit (ADR-003).
- * - [writeParts]: a parametric multi-part model (furniture templates, ADR-010).
- * - [writeMesh]: an indexed triangle mesh with optional vertex colours (on-device 3D scan, ADR-013/014).
+ * The API (contract K9, docs/contracts/phase0.md; PLAN v3 for v1):
+ * - [writeCutout]: the v1 scan model, a flat background-free picture of the object at its true W × H (PLAN v3 W2).
+ * - [writeBox]: the M3 measured proxy box; the photo face is unlit (ADR-003). Still used for legacy rows and as the
+ *   placement fallback.
+ * The template (`writeParts`) and mesh (`writeMesh`) writers left v1 with the 3D features (branch next/3d-engine);
+ * GLBs they wrote earlier are still read and placed.
  *
  * Every model carries node-0 `extras` (K8): `widthM`, `heightM`, `depthM` = the GLB's **own** bounding box,
  * `origin` ([BoxOrigin] name), `glbVersion` ([GLB_VERSION]) and `modelKind` ([ModelKind] name). The geometry is
@@ -48,29 +49,18 @@ object GlbWriter {
     private const val CHUNK_JSON = 0x4E4F534A // "JSON"
     private const val CHUNK_BIN = 0x004E4942 // "BIN\0"
     private const val FLOAT = 5126
-    private const val UNSIGNED_BYTE = 5121
     private const val UNSIGNED_SHORT = 5123
-    private const val UNSIGNED_INT = 5125
     private const val ARRAY_BUFFER = 34962
     private const val ELEMENT_ARRAY_BUFFER = 34963
     private const val UNLIT = "KHR_materials_unlit"
 
-    /** Largest accepted side (m); anything bigger is a bug upstream, not furniture. */
+    /** Largest accepted side (m); anything bigger is a bug upstream, not an object. */
     const val MAX_SIDE_M = 50.0
 
-    /** Most parts [writeParts] accepts (u16 indices: 24 vertices per part). */
-    const val MAX_PARTS = 512
-
-    /** Most vertices [writeMesh] accepts (far above the 0.5 MB item budget; guards int overflow). */
-    const val MAX_MESH_VERTICES = 4_000_000
-
-    private val EXTRA_KEY = Regex("[A-Za-z][A-Za-z0-9_]*")
-    private val RESERVED_KEYS = setOf("widthM", "heightM", "depthM", "origin", "glbVersion", "modelKind", AABB_CX, AABB_CY, AABB_CZ)
-
     /**
-     * Extras keys of a [writeMesh] `keepInputOrigin` mesh's bounding-box centre in the GLB frame (M4-P1 gate N3). Such
-     * a mesh's box is not centred on its declared origin (the floor cut, a partial scan), so a reader must not derive
-     * the centre from the origin. Absent on every other model, whose centre is [BoxOrigin.centreOffset].
+     * Extras keys of a legacy 3D-scan mesh's bounding-box centre in the GLB frame (M4-P1 gate N3), written by the
+     * mesh writer of earlier test builds. Such a mesh's box is not centred on its declared origin, so a reader must not
+     * derive the centre from the origin. Absent on every other model, whose centre is [BoxOrigin.centreOffset].
      */
     const val AABB_CX = "aabbCx"
 
@@ -169,199 +159,100 @@ object GlbWriter {
         return container(j, bin)
     }
 
-    // ---- parts (furniture templates) --------------------------------------------------------------------
+    // ---- cutout (v1 scan model, PLAN v3 W2) ------------------------------------------------------------
+
+    /** How a cutout's picture covers its quad. */
+    enum class CutoutAlpha {
+        /** The picture fills the whole rectangle (a flat object cropped to its corners, or "Undo cutout"). */
+        OPAQUE,
+
+        /**
+         * The picture has a background-free alpha channel (PNG, straight alpha). glTF `alphaMode: BLEND`; the
+         * renderer premultiplies, and the picture's transparent pixels must carry the colour of their nearest
+         * opaque neighbour (edge bleeding), so filtering never pulls black into the edge (no dark halo).
+         */
+        BLEND,
+    }
 
     /**
-     * A multi-part model: every [Part] is a box (24 vertices, POSITION + NORMAL), all in one mesh with **one
-     * primitive per material used** (in [PartMaterial] order), lit PBR materials coloured by [palette].
-     * The union bounding box of all parts is translated so its [origin] point is the model origin, and
-     * `extras.{widthM,heightM,depthM}` are that union box (templates guarantee it equals W×H×D).
+     * The v1 scan model: one flat, true-size, double-sided, unlit, textured quad. It is [widthM] × [heightM] in the
+     * XY plane (z = 0), facing +Z, centred on the origin ([BoxOrigin.CENTER]), so placement can stand it on a floor
+     * (its bottom edge at −H/2) or hang it on a wall (flat against it). UV (0,0) is the picture's top-left corner.
+     * Extras: `widthM`, `heightM`, `depthM` = 0 (the quad's own bounding box; the item's measured depth is kept by the
+     * gallery row, never rendered), `origin` CENTER, `glbVersion`, `modelKind` [modelKind].
      *
-     * @throws IllegalArgumentException for no parts, more than [MAX_PARTS], a non-finite centre or yaw, a part side
-     *   ≤ 0, or a union side over [MAX_SIDE_M].
+     * @param image JPEG (FF D8) or PNG (89 50 4E 47) bytes, or null for a plain [colorSrgb] quad (a scan without a photo).
+     * @param alpha [CutoutAlpha.BLEND] needs a PNG; [CutoutAlpha.OPAQUE] accepts either (alpha is ignored).
+     * @throws IllegalArgumentException for a side outside (0, [MAX_SIDE_M]], an unknown image format, or BLEND
+     *   without a PNG.
      */
-    fun writeParts(
-        parts: List<Part>,
-        palette: Palette = Palette.DEFAULT,
-        origin: BoxOrigin = BoxOrigin.BOTTOM_CENTER,
-        name: String = "SpaceView furniture",
-        modelKind: ModelKind = ModelKind.TEMPLATE,
+    fun writeCutout(
+        widthM: Double,
+        heightM: Double,
+        image: ByteArray?,
+        alpha: CutoutAlpha = CutoutAlpha.OPAQUE,
+        colorSrgb: Int = 0xD8D5CC,
+        name: String = "SpaceView item",
+        modelKind: ModelKind = ModelKind.CUTOUT,
     ): ByteArray {
-        require(parts.isNotEmpty() && parts.size <= MAX_PARTS) { "A model needs 1..$MAX_PARTS parts, got ${parts.size}" }
-        for (p in parts) {
-            require(p.center.isFinite && p.yawRad.isFinite()) { "Part '${p.name}' has a non-finite centre or yaw" }
-            require(p.size.isFinite && p.size.x > 0 && p.size.y > 0 && p.size.z > 0) { "Part '${p.name}' sides must be > 0" }
+        for (side in doubleArrayOf(widthM, heightM)) {
+            require(side.isFinite() && side > 0 && side <= MAX_SIDE_M) { "Cutout sides must be in (0, $MAX_SIDE_M] m, got $side" }
         }
-        // Parts grouped by material so each primitive's indices are one contiguous range.
-        val ordered = parts.withIndex().sortedWith(compareBy({ it.value.material.ordinal }, { it.index })).map { it.value }
-        val n = ordered.size
-        val pos = DoubleArray(n * 24 * 3)
-        val nrm = FloatArray(n * 24 * 3)
-        val idx = IntArray(n * 36)
-        for ((k, p) in ordered.withIndex()) {
-            emitBox(p.center, p.size * 0.5, p.yawRad, pos, nrm, null, k * 24, idx, k * 36)
-        }
-        val (w, h, d) = recentre(pos, origin)
-        for (s in doubleArrayOf(w, h, d)) require(s <= MAX_SIDE_M) { "Model side $s m exceeds $MAX_SIDE_M m" }
+        val mime = image?.let { imageMime(it) ?: throw IllegalArgumentException("Cutout image is neither JPEG nor PNG") }
+        require(alpha == CutoutAlpha.OPAQUE || mime == "image/png") { "An alpha cutout needs a PNG image" }
 
-        val materials = ordered.map { it.material }.distinct()
+        val hw = widthM / 2; val hh = heightM / 2
+        // TL, TR, BR, BL (counter-clockwise from +Z: TL, BL, BR and TL, BR, TR).
+        val pos = doubleArrayOf(-hw, hh, 0.0, hw, hh, 0.0, hw, -hh, 0.0, -hw, -hh, 0.0)
+        val uv = floatArrayOf(0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f)
+        val idx = intArrayOf(0, 3, 2, 0, 2, 1)
+
         val bin = Bin()
         val posView = bin.view(ARRAY_BUFFER) { for (v in pos) f32(v.toFloat()) }
-        val nrmView = bin.view(ARRAY_BUFFER) { for (v in nrm) f32(v) }
+        val nrmView = bin.view(ARRAY_BUFFER) { repeat(4) { f32(0f); f32(0f); f32(1f) } }
+        val uvView = bin.view(ARRAY_BUFFER) { for (v in uv) f32(v) }
         val idxView = bin.view(ELEMENT_ARRAY_BUFFER) { for (i in idx) u16(i) }
+        val imgView = if (image != null) bin.view(null) { bytes(image) } else -1
 
-        val j = StringBuilder(4096)
+        val j = StringBuilder(1536)
         j.append("{\"asset\":{\"version\":\"2.0\",\"generator\":\"SpaceView engine\"},")
+        j.append("\"extensionsUsed\":[\"").append(UNLIT).append("\"],")
         j.append("\"scene\":0,\"scenes\":[{\"nodes\":[0]}],")
         j.append("\"nodes\":[{\"mesh\":0,\"name\":").append(jsonString(name)).append(",\"extras\":")
-        writeExtras(j, w, h, d, origin, modelKind, emptyMap())
+        writeExtras(j, widthM, heightM, 0.0, BoxOrigin.CENTER, modelKind, emptyMap())
         j.append("}],")
         j.append("\"meshes\":[{\"name\":").append(jsonString(name)).append(",\"primitives\":[")
-        materials.forEachIndexed { m, _ ->
-            if (m > 0) j.append(',')
-            j.append("{\"attributes\":{\"POSITION\":0,\"NORMAL\":1},\"indices\":").append(2 + m)
-                .append(",\"material\":").append(m).append(",\"mode\":4}")
+        j.append("{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2},\"indices\":3,\"material\":0,\"mode\":4}]}],")
+        j.append("\"materials\":[{\"name\":\"cutout\",\"doubleSided\":true,")
+        if (alpha == CutoutAlpha.BLEND) j.append("\"alphaMode\":\"BLEND\",")
+        j.append("\"pbrMetallicRoughness\":{")
+        if (image != null) {
+            j.append("\"baseColorTexture\":{\"index\":0},")
+        } else {
+            j.append("\"baseColorFactor\":").append(linearRgba(colorSrgb)).append(',')
         }
-        j.append("]}],\"materials\":[")
-        materials.forEachIndexed { m, mat ->
-            if (m > 0) j.append(',')
-            j.append("{\"name\":").append(jsonString(mat.name.lowercase())).append(",\"pbrMetallicRoughness\":{\"baseColorFactor\":")
-                .append(linearRgba(palette.colorOf(mat))).append(",\"metallicFactor\":0.0,\"roughnessFactor\":0.85}}")
+        j.append("\"metallicFactor\":0.0,\"roughnessFactor\":1.0},\"extensions\":{\"").append(UNLIT).append("\":{}}}],")
+        if (image != null) {
+            j.append("\"samplers\":[{\"magFilter\":9729,\"minFilter\":9987,\"wrapS\":33071,\"wrapT\":33071}],")
+            j.append("\"images\":[{\"bufferView\":").append(imgView).append(",\"mimeType\":\"").append(mime).append("\"}],")
+            j.append("\"textures\":[{\"sampler\":0,\"source\":0}],")
         }
-        j.append("],")
         bin.appendBuffersAndViews(j)
         j.append(",\"accessors\":[")
-        j.append(vec3Accessor(posView, n * 24, pos)).append(',')
-        j.append("{\"bufferView\":$nrmView,\"componentType\":$FLOAT,\"count\":${n * 24},\"type\":\"VEC3\"}")
-        var start = 0
-        for (mat in materials) {
-            val count = ordered.count { it.material == mat }
-            val first = start * 24
-            val last = (start + count) * 24 - 1
-            j.append(",{\"bufferView\":").append(idxView).append(",\"byteOffset\":").append(start * 36 * 2)
-                .append(",\"componentType\":$UNSIGNED_SHORT,\"count\":").append(count * 36)
-                .append(",\"type\":\"SCALAR\",\"min\":[").append(first).append("],\"max\":[").append(last).append("]}")
-            start += count
-        }
+        j.append(vec3Accessor(posView, 4, pos)).append(',')
+        j.append("{\"bufferView\":$nrmView,\"componentType\":$FLOAT,\"count\":4,\"type\":\"VEC3\"},")
+        j.append("{\"bufferView\":$uvView,\"componentType\":$FLOAT,\"count\":4,\"type\":\"VEC2\"},")
+        j.append("{\"bufferView\":$idxView,\"componentType\":$UNSIGNED_SHORT,\"count\":6,\"type\":\"SCALAR\",\"min\":[0],\"max\":[3]}")
         j.append("]}")
         return container(j, bin)
     }
 
-    // ---- mesh (on-device / cloud scan) -----------------------------------------------------------------
-
-    /**
-     * An indexed triangle mesh: POSITION, NORMAL (area-weighted vertex normals computed here) and, when the mesh
-     * has colours, COLOR_0 (RGBA8, normalised). Indices are u16 when the mesh has at most 65,535 vertices, else
-     * u32. One `doubleSided` material (the scan's open bottom never shows a hole), white × vertex colour, or a
-     * neutral grey without colours; [unlit] adds `KHR_materials_unlit` (the captured colour already contains the
-     * room's light). The input's axes must be the item frame (+Y up, +Z front); it is never scaled or rotated, and
-     * the extras' W/H/D always describe the mesh's own bounding box (ADR-014, K8).
-     *
-     * Origin: by default the mesh is translated so its own bounding box's [origin] point is the model origin. With
-     * [keepInputOrigin] the positions are written **unchanged**: the input frame's origin already is the [origin]
-     * point of the *measured* box (a 3D scan is fused in the box frame with the origin at the centre of the box base
-     * on the support plane, §7.1.8). Placement then stands the scan on the floor at its measured footprint instead
-     * of dropping it by the floor cut (~1 cm) or re-centring a partial scan on its own bounding box (M4 review
-     * MAJOR 2).
-     *
-     * @throws IllegalArgumentException for an empty or malformed mesh (array sizes, an index out of range, a
-     *   non-finite position, a flat bounding box, a side over [MAX_SIDE_M]) or an invalid [MeshExtras] key.
-     */
-    fun writeMesh(
-        mesh: TriMesh,
-        origin: BoxOrigin = BoxOrigin.BOTTOM_CENTER,
-        unlit: Boolean = true,
-        extras: MeshExtras = MeshExtras(),
-        keepInputOrigin: Boolean = false,
-    ): ByteArray {
-        val vCount = mesh.positions.size / 3
-        require(mesh.positions.size % 3 == 0 && vCount >= 3) { "positions must hold >= 3 vertices (x, y, z each)" }
-        require(vCount <= MAX_MESH_VERTICES) { "Mesh has $vCount vertices, over $MAX_MESH_VERTICES" }
-        require(mesh.indices.size % 3 == 0 && mesh.indices.isNotEmpty()) { "indices must hold >= 1 triangle" }
-        for (i in mesh.indices) require(i in 0 until vCount) { "Index $i out of range 0..${vCount - 1}" }
-        val colourStride = when (mesh.colours.size) {
-            0 -> 0
-            3 * vCount -> 3
-            4 * vCount -> 4
-            else -> throw IllegalArgumentException("colours must be empty, RGB or RGBA per vertex, got ${mesh.colours.size} bytes")
-        }
-        for (k in extras.values.keys) {
-            require(EXTRA_KEY.matches(k) && k !in RESERVED_KEYS) { "Invalid or reserved extras key '$k'" }
-        }
-        for (v in extras.values.values) require(v.isFinite()) { "Extras values must be finite" }
-
-        val pos = DoubleArray(vCount * 3)
-        for (i in pos.indices) {
-            val v = mesh.positions[i]
-            require(v.isFinite()) { "Non-finite position at component $i" }
-            pos[i] = v.toDouble()
-        }
-        val (w, h, d) = if (keepInputOrigin) extents(pos) else recentre(pos, origin)
-        for (s in doubleArrayOf(w, h, d)) require(s > 0 && s <= MAX_SIDE_M) { "Mesh sides must be in (0, $MAX_SIDE_M] m, got $s" }
-        // N3: a mesh kept in its input frame declares its own bounding-box centre (placement must not assume the
-        // centre sits on the declared origin).
-        val values = if (keepInputOrigin) extras.values + aabbCentre(pos) else extras.values
-        if (keepInputOrigin) {
-            // The origin must lie near the mesh: a stray frame would place the scan metres away.
-            for (a in 0 until 3) {
-                var lo = Double.POSITIVE_INFINITY; var hi = Double.NEGATIVE_INFINITY
-                for (i in a until pos.size step 3) { if (pos[i] < lo) lo = pos[i]; if (pos[i] > hi) hi = pos[i] }
-                require(lo - ORIGIN_SLACK_M <= 0.0 && hi + ORIGIN_SLACK_M >= 0.0) {
-                    "keepInputOrigin: the mesh is not near its frame origin"
-                }
-            }
-        }
-        val nrm = vertexNormals(pos, mesh.indices)
-        val wide = vCount > 65_535
-
-        val bin = Bin()
-        val posView = bin.view(ARRAY_BUFFER) { for (v in pos) f32(v.toFloat()) }
-        val nrmView = bin.view(ARRAY_BUFFER) { for (v in nrm) f32(v) }
-        val colView = if (colourStride == 0) -1 else bin.view(ARRAY_BUFFER) {
-            for (v in 0 until vCount) {
-                val o = v * colourStride
-                byte(mesh.colours[o]); byte(mesh.colours[o + 1]); byte(mesh.colours[o + 2])
-                byte(if (colourStride == 4) mesh.colours[o + 3] else 0xFF.toByte())
-            }
-        }
-        val idxView = bin.view(ELEMENT_ARRAY_BUFFER) { if (wide) for (i in mesh.indices) u32(i) else for (i in mesh.indices) u16(i) }
-
-        val j = StringBuilder(2048)
-        j.append("{\"asset\":{\"version\":\"2.0\",\"generator\":\"SpaceView engine\"},")
-        if (unlit) j.append("\"extensionsUsed\":[\"").append(UNLIT).append("\"],")
-        j.append("\"scene\":0,\"scenes\":[{\"nodes\":[0]}],")
-        j.append("\"nodes\":[{\"mesh\":0,\"name\":").append(jsonString(extras.name)).append(",\"extras\":")
-        writeExtras(j, w, h, d, origin, extras.modelKind, values)
-        j.append("}],")
-        j.append("\"meshes\":[{\"name\":").append(jsonString(extras.name)).append(",\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1")
-        if (colourStride != 0) j.append(",\"COLOR_0\":2")
-        j.append("},\"indices\":").append(if (colourStride != 0) 3 else 2).append(",\"material\":0,\"mode\":4}]}],")
-        j.append("\"materials\":[{\"name\":\"scan\",\"doubleSided\":true,\"pbrMetallicRoughness\":{\"baseColorFactor\":")
-            .append(if (colourStride != 0) "[1.0,1.0,1.0,1.0]" else linearRgba(MESH_GREY))
-            .append(",\"metallicFactor\":0.0,\"roughnessFactor\":0.9}")
-        if (unlit) j.append(",\"extensions\":{\"").append(UNLIT).append("\":{}}")
-        j.append("}],")
-        bin.appendBuffersAndViews(j)
-        j.append(",\"accessors\":[")
-        j.append(vec3Accessor(posView, vCount, pos)).append(',')
-        j.append("{\"bufferView\":$nrmView,\"componentType\":$FLOAT,\"count\":$vCount,\"type\":\"VEC3\"}")
-        if (colourStride != 0) {
-            j.append(",{\"bufferView\":$colView,\"componentType\":$UNSIGNED_BYTE,\"normalized\":true,\"count\":$vCount,\"type\":\"VEC4\"}")
-        }
-        var lo = Int.MAX_VALUE; var hi = Int.MIN_VALUE
-        for (i in mesh.indices) { if (i < lo) lo = i; if (i > hi) hi = i }
-        j.append(",{\"bufferView\":$idxView,\"componentType\":").append(if (wide) UNSIGNED_INT else UNSIGNED_SHORT)
-            .append(",\"count\":").append(mesh.indices.size).append(",\"type\":\"SCALAR\",\"min\":[").append(lo)
-            .append("],\"max\":[").append(hi).append("]}")
-        j.append("]}")
-        return container(j, bin)
+    /** `image/jpeg` or `image/png` from the magic bytes, else null. */
+    internal fun imageMime(b: ByteArray): String? = when {
+        b.size >= 4 && b[0] == 0xFF.toByte() && b[1] == 0xD8.toByte() -> "image/jpeg"
+        b.size >= 8 && b[0] == 0x89.toByte() && b[1] == 0x50.toByte() && b[2] == 0x4E.toByte() && b[3] == 0x47.toByte() -> "image/png"
+        else -> null
     }
-
-    /** Neutral grey of an uncoloured mesh. */
-    private const val MESH_GREY = 0xA8A49C
-
-    /** keepInputOrigin: the frame origin may sit at most this far outside the mesh's bounding box on any axis. */
-    const val ORIGIN_SLACK_M = 0.5
 
     // ---- geometry helpers ----------------------------------------------------------------------------
 
@@ -411,78 +302,6 @@ object GlbWriter {
         doubleArrayOf(1.0, -1.0, 1.0, 1.0),
         doubleArrayOf(-1.0, -1.0, 0.0, 1.0),
     )
-
-    /**
-     * Translates [pos] (x, y, z triples) so the [origin] point of its bounding box is 0; returns the box's
-     * extents (W, H, D). Values are snapped with "+ 0.0" so −0.0 never appears.
-     */
-    private fun recentre(pos: DoubleArray, origin: BoxOrigin): Triple<Double, Double, Double> {
-        val min = DoubleArray(3) { Double.POSITIVE_INFINITY }
-        val max = DoubleArray(3) { Double.NEGATIVE_INFINITY }
-        for (i in pos.indices) {
-            val a = i % 3
-            if (pos[i] < min[a]) min[a] = pos[i]
-            if (pos[i] > max[a]) max[a] = pos[i]
-        }
-        val anchor = doubleArrayOf(
-            (min[0] + max[0]) / 2,
-            if (origin == BoxOrigin.BOTTOM_CENTER) min[1] else (min[1] + max[1]) / 2,
-            if (origin == BoxOrigin.BACK_CENTER) min[2] else (min[2] + max[2]) / 2,
-        )
-        if (anchor.any { it != 0.0 }) for (i in pos.indices) pos[i] = pos[i] - anchor[i % 3] + 0.0
-        return Triple(max[0] - min[0], max[1] - min[1], max[2] - min[2])
-    }
-
-    /** The bounding-box centre of [pos] (x, y, z triples) as the [AABB_CX] / [AABB_CY] / [AABB_CZ] extras. */
-    private fun aabbCentre(pos: DoubleArray): Map<String, Double> {
-        val min = DoubleArray(3) { Double.POSITIVE_INFINITY }
-        val max = DoubleArray(3) { Double.NEGATIVE_INFINITY }
-        for (i in pos.indices) {
-            val a = i % 3
-            // The float that is written, so the centre matches the GLB's own POSITION min/max exactly.
-            val v = pos[i].toFloat().toDouble()
-            if (v < min[a]) min[a] = v
-            if (v > max[a]) max[a] = v
-        }
-        return mapOf(AABB_CX to (min[0] + max[0]) / 2, AABB_CY to (min[1] + max[1]) / 2, AABB_CZ to (min[2] + max[2]) / 2)
-    }
-
-    /** Extents (W, H, D) of [pos] without moving it. */
-    private fun extents(pos: DoubleArray): Triple<Double, Double, Double> {
-        val min = DoubleArray(3) { Double.POSITIVE_INFINITY }
-        val max = DoubleArray(3) { Double.NEGATIVE_INFINITY }
-        for (i in pos.indices) {
-            val a = i % 3
-            if (pos[i] < min[a]) min[a] = pos[i]
-            if (pos[i] > max[a]) max[a] = pos[i]
-        }
-        return Triple(max[0] - min[0], max[1] - min[1], max[2] - min[2])
-    }
-
-    /** Area-weighted vertex normals; a vertex of only degenerate triangles gets +Y. */
-    private fun vertexNormals(pos: DoubleArray, indices: IntArray): FloatArray {
-        val acc = DoubleArray(pos.size)
-        var t = 0
-        while (t < indices.size) {
-            val a = 3 * indices[t]; val b = 3 * indices[t + 1]; val c = 3 * indices[t + 2]
-            val ux = pos[b] - pos[a]; val uy = pos[b + 1] - pos[a + 1]; val uz = pos[b + 2] - pos[a + 2]
-            val vx = pos[c] - pos[a]; val vy = pos[c + 1] - pos[a + 1]; val vz = pos[c + 2] - pos[a + 2]
-            val nx = uy * vz - uz * vy; val ny = uz * vx - ux * vz; val nz = ux * vy - uy * vx
-            for (o in intArrayOf(a, b, c)) { acc[o] += nx; acc[o + 1] += ny; acc[o + 2] += nz }
-            t += 3
-        }
-        val out = FloatArray(pos.size)
-        for (v in 0 until pos.size / 3) {
-            val x = acc[3 * v]; val y = acc[3 * v + 1]; val z = acc[3 * v + 2]
-            val len = kotlin.math.sqrt(x * x + y * y + z * z)
-            if (len > 1e-20) {
-                out[3 * v] = (x / len).toFloat(); out[3 * v + 1] = (y / len).toFloat(); out[3 * v + 2] = (z / len).toFloat()
-            } else {
-                out[3 * v + 1] = 1f
-            }
-        }
-        return out
-    }
 
     // ---- JSON helpers --------------------------------------------------------------------------------
 

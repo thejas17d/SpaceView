@@ -8,7 +8,7 @@
     <string name="place_mesh_fallback">3D आकार उपलब्ध नहीं है; मापा गया बॉक्स दिखाया जा रहा है</string>
     <string name="place_loading">मॉडल खुल रहा है…</string>
     <string name="place_deleted">यह आइटम हटा दिया गया है।</string>
-    <string name="place_failed">इस आइटम का 3D मॉडल नहीं खुल सका। आपका आइटम नहीं बदला है।</string>
+    <string name="place_failed">इस आइटम का मॉडल नहीं खुल सका। आपका आइटम नहीं बदला है।</string>
     <string name="place_back">वापस</string>
     <string name="place_retry">फिर से कोशिश करें</string>
     <string name="place_session_failed">कैमरा शुरू नहीं हो सका।</string>

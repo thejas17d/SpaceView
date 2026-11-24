@@ -84,12 +84,13 @@
             android:name="com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING"
             android:value="true" />
 
-        <!-- SM1b object naming: the unbundled ML Kit image-labelling model ("ica") is downloaded by
-             Google Play services at install, not shipped in the APK. Until it is there, naming simply
-             offers no suggestion. ML Kit adds no permission. -->
+        <!-- SM1b object naming and PLAN v3 W2 cutouts: the unbundled ML Kit image-labelling ("ica") and
+             subject-segmentation ("subject_segment") models are downloaded by Google Play services at
+             install, not shipped in the APK. Until they are there, naming offers no suggestion and a scan
+             keeps its rectangle photo (Review says so). ML Kit adds no permission; both run on the phone. -->
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="ica" />
+            android:value="ica,subject_segment" />
         <!-- ML Kit's init provider would run at every cold start (component discovery, a binder call);
              MlKitObjectNamer initialises ML Kit on first use instead, off the main thread. -->
         <provider

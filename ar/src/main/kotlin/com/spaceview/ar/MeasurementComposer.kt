@@ -50,6 +50,15 @@ enum class HitKind {
 
     /** Moved by the user on a frozen frame (ray–plane intersection on the point's surface). */
     ADJUSTED,
+
+    /**
+     * Height / box top (W5): the crosshair ray on the vertical measuring plane through the base point, which faces the
+     * camera. Not a surface: the point the user aims at above (or below) the base.
+     */
+    VERTICAL_PLANE,
+
+    /** Far height base (W5): the crosshair ray on the tracked floor beyond the hit range (Ground range, level floor). */
+    GROUND,
 }
 
 /**

@@ -111,20 +111,4 @@ class DataStoreAdCounterStoreTest {
         closeAll()
         assertTrue(SettingsRepository(dataStore("onboarding")).onboardingCompleted.first())
     }
-
-    /** User decision 2026-11-23: 5 free 3D scans in total; the count persists and survives Delete my data. */
-    @Test
-    fun deviceScanCountIsLifetimeAndSurvivesReset() = runBlocking {
-        assumeFalse("DataStore JVM rewrite is unsupported on Windows; runs on CI", windows)
-        val repo = SettingsRepository(dataStore("scans"))
-        assertEquals(0, repo.deviceScansUsed())
-        repo.recordDeviceScanSaved()
-        repo.recordDeviceScanSaved()
-        repo.setSoundsEnabled(false)
-        repo.resetPreferences()
-        closeAll()
-        val reopened = SettingsRepository(dataStore("scans"))
-        assertEquals(2, reopened.deviceScansUsed())
-        assertTrue("other settings are reset", reopened.soundsEnabled.first())
-    }
 }

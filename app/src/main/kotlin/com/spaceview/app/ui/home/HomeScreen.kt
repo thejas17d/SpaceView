@@ -59,7 +59,8 @@ fun HomeScreen(
     onScan: () -> Unit,
     onGallery: () -> Unit,
     modifier: Modifier = Modifier,
-    onFurniture: () -> Unit = {},
+    /** PLAN v3 W4: the Distance (rangefinder) mode, up to 500 m. */
+    onDistance: () -> Unit = {},
     /** N2: the gallery-cap check behind "Scan an object" is running (it can wait for the entitlement at cold start). */
     scanChecking: Boolean = false,
 ) {
@@ -87,13 +88,13 @@ fun HomeScreen(
             ModeRow(R.string.home_distance, R.string.home_distance_detail) { onMeasure(MeasureMode.DISTANCE) }
             ModeRow(R.string.home_height, R.string.home_height_detail) { onMeasure(MeasureMode.HEIGHT) }
             ModeRow(R.string.home_rectangle, R.string.home_rectangle_detail) { onMeasure(MeasureMode.RECTANGLE) }
+            ModeRow(R.string.home_rangefinder, R.string.home_rangefinder_detail) { onDistance() }
             RowCard(
                 stringResource(R.string.home_scan_object),
-                stringResource(if (scanChecking) R.string.furniture_checking else R.string.home_scan_object_detail),
+                stringResource(if (scanChecking) R.string.home_checking else R.string.home_scan_object_detail),
                 onClick = onScan,
                 busy = scanChecking,
             )
-            ModeRow(R.string.home_furniture, R.string.home_furniture_detail, onClick = onFurniture)
             ModeRow(R.string.home_gallery, R.string.home_gallery_detail, onClick = onGallery)
             Spacer(Modifier.height(4.dp))
             CalibrationRow(onCalibrate)

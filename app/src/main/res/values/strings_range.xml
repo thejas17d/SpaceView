@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Distance (rangefinder, PLAN v3 W4) and the W5/W6 measuring hints. Every string here has a Hindi twin in values-hi. -->
+<resources>
+    <!-- Home row (wired by the orchestrator) -->
+    <string name="home_rangefinder">How far?</string>
+    <string name="home_rangefinder_detail">Distance to any point you aim at, up to 500 m, always with ±.</string>
+
+    <!-- Distance screen -->
+    <string name="range_title">How far?</string>
+    <string name="range_close">Close how far</string>
+    <string name="range_crosshair">Crosshair</string>
+    <string name="range_line_of_sight">Line of sight from your phone</string>
+    <string name="range_coach">Move your phone slowly side to side to start.</string>
+    <string name="range_aim">Aim the crosshair at a point.</string>
+    <string name="range_method_near">AR point</string>
+    <string name="range_method_ground">Ground</string>
+    <string name="range_method_two_sight">2 sights</string>
+    <string name="range_assumes_level">Assumes level ground</string>
+    <string name="range_out_of_range">Out of range (over 500 m)</string>
+    <string name="range_hold">Hold</string>
+    <string name="range_live">Live</string>
+    <string name="range_two_sight">Far point: 2 sights</string>
+    <string name="range_take_sight_1">Take sight 1</string>
+    <string name="range_take_sight_2">Take sight 2</string>
+    <string name="range_aim_sight_1">Aim the crosshair at the far point, hold steady and tap Take sight 1.</string>
+    <string name="range_taking">Hold steady…</string>
+    <string name="range_walk">Walk about %1$s sideways. Keep the same point in the crosshair, then tap Take sight 2.</string>
+    <string name="range_walked">Sideways so far: %1$s</string>
+    <string name="range_preview">Now about %1$s</string>
+    <string name="range_retake">Retake sight 2</string>
+    <string name="range_start_over">Start over</string>
+    <string name="range_done">Done</string>
+    <string name="range_cancel">Cancel</string>
+    <string name="range_result_a11y">Distance %1$s. Method: %2$s.</string>
+    <string name="range_out_of_range_a11y">Out of range. More than 500 metres.</string>
+
+    <!-- Why there is no live number -->
+    <string name="range_issue_hold_steady">Hold the phone steady.</string>
+    <string name="range_issue_need_floor">Point at the floor near you once, so SpaceView knows how high the phone is. Or use 2 sights.</string>
+    <string name="range_issue_above_horizon">Nothing to measure here. Aim at the ground, or use 2 sights for a far point.</string>
+    <string name="range_issue_ground_too_far">Too far for one sight. Use 2 sights.</string>
+
+    <!-- 2-sight refusals -->
+    <string name="range_reject_tracking_lost">Tracking was lost between the sights. Start over.</string>
+    <string name="range_reject_near_parallel">The two sights are almost parallel. Walk further sideways and retake sight 2.</string>
+    <string name="range_reject_behind">The sights don\'t meet in front of you. Aim at the same point and retake sight 2.</string>
+    <string name="range_reject_inconsistent">The two sights point at different things. Retake sight 2 on the same point.</string>
+    <string name="range_reject_too_uncertain">Not accurate enough yet. Walk further sideways and retake sight 2.</string>
+    <string name="range_reject_invalid">Something went wrong. Start over.</string>
+    <string name="range_sight_not_steady">Couldn\'t hold the aim steady. Try again.</string>
+    <string name="range_sight_not_tracking">Tracking lost. Move slowly and try again.</string>
+
+    <!-- Measure (W5 / W6) -->
+    <string name="measure_height_too_steep">Too steep. Step back until the top is less than 75° up.</string>
+</resources>

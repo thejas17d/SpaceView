@@ -48,7 +48,7 @@ class MeasureSettingsRepositoryTest {
     fun defaults() = runTest {
         val s = repo(backgroundScope).settings.first()
         assertNull(s.calibration)
-        assertFalse(s.depthEnabled)
+        assertTrue(s.depthEnabled)
         assertFalse(s.safetyNoticeShown)
     }
 

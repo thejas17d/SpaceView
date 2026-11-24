@@ -82,7 +82,7 @@ data class CalibrationRecord(
  * Measuring settings. (Unit system, sounds and onboarding live in the app's `SettingsRepository`
  * on its own file; this store holds only what the measuring engine needs.)
  *
- * @property depthEnabled use the ARCore Depth API where supported (off by default: costs power).
+ * @property depthEnabled use the ARCore Depth API where supported (on by default since PLAN v3 W6: it finds plain surfaces much faster; only used where the device supports it; costs some power).
  * @property safetyNoticeShown the one-time "watch your surroundings" notice was shown.
  * @property handsFreeEnabled Smart Measure hands-free point drop (SM1a): a point drops when the reticle is held
  *   steady and locked. On by default: it answers the users' main complaint (shaky hands, too much tapping), and a
@@ -90,7 +90,7 @@ data class CalibrationRecord(
  */
 data class MeasureSettings(
     val calibration: CalibrationRecord? = null,
-    val depthEnabled: Boolean = false,
+    val depthEnabled: Boolean = true,
     val safetyNoticeShown: Boolean = false,
     val handsFreeEnabled: Boolean = true,
 )
@@ -215,7 +215,7 @@ class MeasureSettingsRepository(private val store: DataStore<Preferences>) {
             }
             return MeasureSettings(
                 calibration = calibration,
-                depthEnabled = this[DEPTH] ?: false,
+                depthEnabled = this[DEPTH] ?: true,
                 safetyNoticeShown = this[SAFETY_SHOWN] ?: false,
                 handsFreeEnabled = this[HANDS_FREE] ?: true,
             )

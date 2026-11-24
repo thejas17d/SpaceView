@@ -5,6 +5,7 @@ import com.spaceview.ar.ImprovementTip
 import com.spaceview.ar.ScanOutline
 import com.spaceview.ar.ScanShape
 import com.spaceview.data.gallery.CaptureMethod
+import com.spaceview.data.gallery.CutoutDraft
 import com.spaceview.data.gallery.Dimension
 import com.spaceview.data.gallery.DimensionSource
 import com.spaceview.data.gallery.GalleryRepository
@@ -152,7 +153,7 @@ object ScanDraftBuilder {
     fun draft(
         kind: ObjectKind,
         values: ScanValues,
-        frontJpeg: ByteArray?,
+        cutout: CutoutDraft?,
         label: String,
         tier: DeviceTier,
         arcoreVersion: String?,
@@ -165,12 +166,14 @@ object ScanDraftBuilder {
         quality = values.quality,
         calibrated = values.calibrated,
         deviceTier = tier,
-        frontJpeg = frontJpeg,
+        frontJpeg = null,
         label = label,
         arcoreVersion = arcoreVersion,
         // A scan never applies a calibration (it only lives inside the AR session that made it).
         calibrationFactor = 1.0,
         // v3 column (no schema change): at least one outline point was dropped hands-free (SM1a).
         captureMethod = if (handsFree) CaptureMethod.HANDS_FREE else CaptureMethod.MANUAL,
+        // PLAN v3 W2: every v1 scan is a flat, true-size cutout (a plain panel without a photo).
+        cutout = cutout ?: CutoutDraft(null),
     )
 }

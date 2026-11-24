@@ -8,7 +8,7 @@
     <string name="place_mesh_fallback">3D shape unavailable; showing the measured box</string>
     <string name="place_loading">Opening the model…</string>
     <string name="place_deleted">This item was deleted.</string>
-    <string name="place_failed">Couldn\'t open this item\'s 3D model. Your item is unchanged.</string>
+    <string name="place_failed">Couldn\'t open this item\'s model. Your item is unchanged.</string>
     <string name="place_back">Back</string>
     <string name="place_retry">Try again</string>
     <string name="place_session_failed">The camera couldn\'t start.</string>

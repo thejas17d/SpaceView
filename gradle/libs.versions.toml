@@ -27,6 +27,11 @@ review = "2.0.2"
 # Pinned. A bump needs the TESTING §21 device check "chip appears with the model present": SpaceView initialises ML Kit
 # through its sdkinternal MlKitContext (the init provider is removed), and a change there fails silently.
 mlkitImageLabeling = "16.0.8"
+# PLAN v3 W2 (Builder B): ML Kit Subject Segmentation for background-free cutouts. Google Play services only (there is
+# no bundled variant: the model is downloaded by Play services, nothing in the APK). Beta; 16.0.0-beta1 is the only
+# release (checked on Google Maven 2026-11-24). It raises the shared ML Kit common / vision-common versions, so the
+# TESTING §21 naming check applies to it as well.
+mlkitSubjectSegmentation = "16.0.0-beta1"
 junit = "4.13.2"
 androidxTestRunner = "1.7.0"
 androidxTestExtJunit = "1.3.0"
@@ -69,6 +74,7 @@ billing-ktx = { module = "com.android.billingclient:billing-ktx", version.ref = 
 # M5: Play In-App Review (plain artifact, not -ktx: no extra coroutines-play-services dependency).
 play-review = { module = "com.google.android.play:review", version.ref = "review" }
 play-services-mlkit-image-labeling = { module = "com.google.android.gms:play-services-mlkit-image-labeling", version.ref = "mlkitImageLabeling" }
+play-services-mlkit-subject-segmentation = { module = "com.google.android.gms:play-services-mlkit-subject-segmentation", version.ref = "mlkitSubjectSegmentation" }
 junit = { module = "junit:junit", version.ref = "junit" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 

@@ -23,10 +23,10 @@
     <string name="help_wall_title">Why is a plain wall hard?</string>
     <string name="help_wall_body">Your phone finds surfaces by tracking texture and detail. A plain, evenly painted wall gives it almost nothing to follow, so it may not find the wall at all.</string>
     <string name="help_wall_fallback">Wall–floor line: when no wall is found, Place offers \"Use the wall–floor line\". Aim at one end of the line where the wall meets the floor and tap +, then the other end. The floor is easier to find, and the wall stands on that line.</string>
-    <string name="help_wall_tips">Tips: turn on more lights, include a skirting board, switch or picture in view, or turn on \"Use depth\" in Settings if your phone supports it.</string>
+    <string name="help_wall_tips">Tips: turn on more lights, include a skirting board, switch or picture in view, and keep \"Use depth\" on in Settings (it is on unless you turned it off).</string>
 
-    <string name="help_templates_title">Templates or scans?</string>
-    <string name="help_templates_body">Scan an object when you can see it: a frame, TV, appliance or box. SpaceView measures its front and depth and keeps a photo. Use a furniture template for sofas, beds and wardrobes: pick the shape, measure a few sizes, and SpaceView builds a true-size model. Both are saved to your Gallery and can be placed in your room.</string>
+    <string name="help_templates_title">Scans and cutouts</string>
+    <string name="help_templates_body">Scan an object you can see: a frame, TV, appliance, box or chair. SpaceView measures its width and height (and its depth when it can) and keeps a picture of its front. For a box or another object the background is removed on your phone, so only the object is kept, at its true size. Frames and TVs are cut exactly to their corners. In your room the picture stands on the floor or hangs flat on a wall at its measured size. The depth is kept as a number for the fit check.</string>
 
     <string name="help_pro_title">What Pro includes</string>
     <string name="help_pro_free">Measuring, scanning, placing and sharing stay free. Pro never changes accuracy.</string>
@@ -35,7 +35,7 @@
     <string name="help_restore_body">New phone, or reinstalled the app? Sign in to Google Play with the account you paid with, then open Settings and tap Restore purchases. Subscriptions are managed in Google Play: Settings → Manage subscription.</string>
 
     <string name="help_privacy_title">Privacy: your measurements and photos stay on your phone</string>
-    <string name="help_privacy_body">Your measurements, photos, 3D models and Gallery are stored only on this phone. SpaceView has no account and never uploads them. Object names are suggested on the phone itself; the photo never leaves it. The camera is used only while you measure, scan or place.\n\nGoogle services used by the app (AdMob ads for free users, Google Play purchases, and ML Kit object naming through Google Play services) may collect limited diagnostic and device data under Google\'s own policies. Where the law requires it, you choose your ad privacy settings first (Settings → Ad privacy options).\n\nSettings → Delete my data removes your History, Gallery (with photos and 3D models), calibration and settings. It keeps your purchase status, your ad privacy choices and the counters that limit how often ads and review requests appear.</string>
+    <string name="help_privacy_body">Your measurements, photos and Gallery are stored only on this phone. SpaceView has no account and never uploads them. Object names and the removal of a photo\'s background are worked out on the phone itself; the photo never leaves it. The camera is used only while you measure, scan or place.\n\nGoogle services used by the app (AdMob ads for free users, Google Play purchases, and ML Kit object naming and background removal through Google Play services) may collect limited diagnostic and device data under Google\'s own policies. Where the law requires it, you choose your ad privacy settings first (Settings → Ad privacy options).\n\nSettings → Delete my data removes your History, Gallery (with its pictures and models), calibration and settings. It keeps your purchase status, your ad privacy choices and the counters that limit how often ads and review requests appear.</string>
 
     <string name="help_contact_title">Contact</string>
     <string name="help_contact_email">Questions or problems? Write to %1$s.</string>
