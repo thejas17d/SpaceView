@@ -25,16 +25,18 @@ import com.spaceview.ar.RectFinderState
 import com.spaceview.ar.RectHint
 import com.spaceview.ar.RectangleFinder
 
-/**
- * W9: the screen-scoped [RectangleFinder] for [session]. [enabled] (hands-free on, rectangle mode, no calibration and no
- * freeze) switches the search on and off; it is closed with the composable.
- */
+/** W9: the screen-scoped [RectangleFinder] for [session], closed with the composable; [FinderEnabled] switches it. */
 @Composable
-internal fun rememberRectangleFinder(session: MeasureSession, enabled: Boolean): RectangleFinder {
+internal fun rememberRectangleFinder(session: MeasureSession): RectangleFinder {
     val finder = remember(session) { RectangleFinder(session, logTiming = com.spaceview.app.BuildConfig.DEBUG) }
     DisposableEffect(finder) { onDispose { finder.close() } }
-    LaunchedEffect(finder, enabled) { finder.enabled = enabled }
     return finder
+}
+
+/** Switches [finder]'s search on and off (after the hands-free switch exists: gate V2 needs the finder first). */
+@Composable
+internal fun FinderEnabled(finder: RectangleFinder, enabled: Boolean) {
+    LaunchedEffect(finder, enabled) { finder.enabled = enabled }
 }
 
 /** The found rectangle's outline over the camera: dashed-free signal line, thicker as it steadies; full when locked. */
@@ -64,4 +66,10 @@ internal fun RectFinderState.hintRes(): Int? = when (hint) {
     RectHint.HOLD_STEADY -> R.string.measure_hold_steady
     RectHint.TOO_STEEP -> R.string.rect_too_steep
     RectHint.HOLDING -> R.string.rect_holding
+}
+
+/** Shared by Measure and Scan: the finder's hint only while it is on and no point exists. */
+internal object RectangleFinderHints {
+    @StringRes
+    fun RectFinderState.hint(active: Boolean): Int? = if (active) hintRes() else null
 }

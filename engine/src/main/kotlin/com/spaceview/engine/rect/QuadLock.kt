@@ -69,6 +69,7 @@ class QuadLock(private val tier: DeviceTier = DeviceTier.NO_DEPTH) {
         locked = null
         lastReject = null
         lastCorners = null
+        misses = 0
     }
 
     /**
@@ -95,6 +96,7 @@ class QuadLock(private val tier: DeviceTier = DeviceTier.NO_DEPTH) {
             reset()
         }
         lastReject = null
+        misses = 0
         last = c
         lastCorners = c
         stable++
@@ -116,6 +118,19 @@ class QuadLock(private val tier: DeviceTier = DeviceTier.NO_DEPTH) {
         return locked
     }
 
+    /**
+     * A detection that found nothing (gate v6): before the lock the steady count restarts (the 8 frames must be
+     * consecutive), and after [MISSES_TO_CLEAR] misses in a row the outline is no longer drawn. No effect once locked.
+     */
+    fun miss() {
+        if (locked != null) return
+        stable = 0
+        last = null
+        if (++misses >= MISSES_TO_CLEAR) lastCorners = null
+    }
+
+    private var misses = 0
+
     private fun reject(r: Reject): Locked? {
         lastReject = r
         if (locked == null) {
@@ -129,6 +144,9 @@ class QuadLock(private val tier: DeviceTier = DeviceTier.NO_DEPTH) {
         if (count == 0) null else List(4) { k -> Vec3(sums[k][0] / count, sums[k][1] / count, sums[k][2] / count) }
 
     companion object {
+        /** Misses in a row after which the outline is cleared. */
+        const val MISSES_TO_CLEAR = 3
+
         /** Consecutive agreeing frames before the lock (research: N = 8). */
         const val STABLE_FRAMES = 8
 
@@ -162,9 +180,43 @@ class QuadLock(private val tier: DeviceTier = DeviceTier.NO_DEPTH) {
          * Detects and picks in one pass (W9 budget): candidates are pre-checked on their coarse corners (with twice the
          * tolerance, since coarse corners are ± a few px) before refinement, and the refined one is checked again.
          */
-        fun detectRectangle(detector: QuadDetector, image: GrayImage, camera: CaptureCamera, plane: Plane): DetectedQuad? =
-            detector.detect(image) { coarse -> isMetricRectangle(coarse, camera, plane, 2.0) }
-                .firstOrNull { isMetricRectangle(it.corners, camera, plane, 1.0) }
+        fun detectRectangle(
+            detector: QuadDetector,
+            image: GrayImage,
+            camera: CaptureCamera,
+            plane: Plane,
+            mustContain: Vec2? = null,
+        ): DetectedQuad? =
+            detector.detect(image) { coarse -> contains(coarse, mustContain) && isMetricRectangle(coarse, camera, plane, 2.0) }
+                .firstOrNull { contains(it.corners, mustContain) && isMetricRectangle(it.corners, camera, plane, 1.0) }
+
+        /**
+         * Gate V4: the quad must contain the image point [p] where the plane was measured (the crosshair hit), so a
+         * rectangle on another, parallel surface is never lifted onto this plane. Null [p] passes.
+         */
+        fun contains(cornersPx: List<Vec2>, p: Vec2?): Boolean {
+            if (p == null) return true
+            val c = orderCorners(cornersPx)
+            var sign = 0
+            for (i in 0 until 4) {
+                val a = c[i]
+                val b = c[(i + 1) % 4]
+                val cr = (b - a) cross (p - a)
+                val sg = if (cr > 0) 1 else if (cr < 0) -1 else 0
+                if (sg == 0) continue
+                if (sign == 0) sign = sg else if (sg != sign) return false
+            }
+            return true
+        }
+
+        /**
+         * Indices that put [pts] in [orderCorners] order (top-left first, clockwise on screen). Used to order a quad's
+         * 3-D corners by their **view** positions, so "width" is the side horizontal on the screen (gate v11).
+         */
+        fun orderIndices(pts: List<Vec2>): IntArray {
+            val ordered = orderCorners(pts)
+            return IntArray(4) { k -> pts.indexOfFirst { it === ordered[k] } }
+        }
 
         /** True when [cornersPx] lift onto [plane] as a rectangle within [slack] × the tolerances. */
         fun isMetricRectangle(cornersPx: List<Vec2>, camera: CaptureCamera, plane: Plane, slack: Double): Boolean {

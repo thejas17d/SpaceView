@@ -75,8 +75,21 @@ class ScanViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun vm(saved: SavedStateHandle = SavedStateHandle()) =
-        ScanViewModel(saved, flowOf(ScanSettings(loaded = true)), store, { "1.57.0" }, { reported++ })
+    private fun vm(saved: SavedStateHandle = SavedStateHandle(), photos: ReviewPhotoStore? = null) =
+        ScanViewModel(saved, flowOf(ScanSettings(loaded = true)), store, { "1.57.0" }, { reported++ }, photoStore = photos)
+
+    /** In-memory [ReviewPhotoStore] recording prunes. */
+    private class MemoryPhotos : ReviewPhotoStore {
+        val files = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+        val pruned = java.util.concurrent.LinkedBlockingQueue<String>()
+        override fun put(key: String, jpeg: ByteArray) { files[key] = jpeg }
+        override fun get(key: String) = files[key]
+        override fun remove(key: String) { files.remove(key) }
+        override fun prune(keep: String?) {
+            files.keys.filter { it != keep }.forEach { files.remove(it) }
+            pruned.put(keep ?: "<none>")
+        }
+    }
 
     private fun outline(): ScanOutline {
         val face = FrontFace(listOf(Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 0.0), Vec3(1.0, 0.0, 0.0), Vec3.ZERO), Vec3.UNIT_Z)
@@ -120,6 +133,9 @@ class ScanViewModelTest {
         assertEquals(ScanStep.REVIEW, v.state.value.step)
         assertFalse(v.state.value.cornersAdjusted)
         assertTrue(v.state.value.canAdjustCorners)
+        // Gate v15: the TalkBack preview measures without applying.
+        assertEquals(0.606, v.previewCorners(auto.copyOf().also { it[2] += 2f; it[4] += 2f })!!.first, 1e-5)
+        assertFalse(v.state.value.cornersAdjusted)
         // Drag the right side 2 px right: +6 mm at 1.5 m.
         val dragged = auto.copyOf().also { it[2] += 2f; it[4] += 2f }
         v.applyCorners(dragged)
@@ -155,6 +171,39 @@ class ScanViewModelTest {
         // Setting the automatic corners again is "Auto", not an adjustment.
         v2.applyCorners(auto.copyOf())
         assertFalse(v2.state.value.cornersAdjusted)
+    }
+
+    /** Gate v8: a new scan prunes stale kept photos; a restored Review keeps its own (onCleared no longer deletes it). */
+    @Test
+    fun keptPhotoSurvivesUntilTheNextScanAndARestoredReviewKeepsIt() {
+        val photos = MemoryPhotos().apply { files["old"] = byteArrayOf(1); files["k1"] = byteArrayOf(2) }
+        val h = SavedStateHandle()
+        atReview(vm(h))
+        h["scan_photo_key"] = "k1"
+        vm(h, photos)
+        assertEquals("restored Review keeps its photo", "k1", photos.pruned.poll(5, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals(setOf("k1"), photos.files.keys)
+        vm(SavedStateHandle(), photos)
+        assertEquals("a fresh scan prunes everything", "<none>", photos.pruned.poll(5, java.util.concurrent.TimeUnit.SECONDS))
+        assertTrue(photos.files.isEmpty())
+    }
+
+    /** Gate v9: a write that finishes after the Review moved on is removed again. */
+    @Test
+    fun aLateWriteNeverLeavesAPhoto() {
+        val photos = MemoryPhotos()
+        val v = vm(SavedStateHandle(), photos)
+        v.keepIfCurrent(photos, "stale", byteArrayOf(1)) // photoKey is null: the Review has moved on
+        assertTrue(photos.files.isEmpty())
+        val file = java.io.File.createTempFile("review", "dir").apply { delete(); mkdirs() }
+        val disk = FileReviewPhotoStore(file)
+        disk.put("a-1", byteArrayOf(1, 2)); disk.put("b-2", byteArrayOf(3))
+        assertNull("put keeps only the newest", disk.get("a-1"))
+        disk.prune("b-2")
+        assertEquals(1, disk.get("b-2")!!.size)
+        disk.prune(null)
+        assertNull(disk.get("b-2"))
+        file.deleteRecursively()
     }
 
     private val rect = ArgbImage(4, 3, IntArray(12) { 0xFF336699.toInt() })

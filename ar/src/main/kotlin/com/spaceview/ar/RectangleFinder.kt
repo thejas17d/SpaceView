@@ -52,10 +52,17 @@ enum class RectHint {
  * @property outline the found quad in view pixels (x, y × 4), null when none; drawn by the HUD.
  * @property progress 0..1 steady frames towards the lock.
  */
-class RectFinderState(val outline: FloatArray? = null, val progress: Float = 0f, val hint: RectHint = RectHint.SEARCHING) {
+class RectFinderState(
+    val outline: FloatArray? = null,
+    val progress: Float = 0f,
+    val hint: RectHint = RectHint.SEARCHING,
+    /** Gate V2: the hands-free dwell must wait while the finder has priority for the first corner. */
+    val dwellSuspended: Boolean = false,
+) {
     override fun equals(other: Any?): Boolean =
-        other is RectFinderState && progress == other.progress && hint == other.hint && outline.contentEquals(other.outline)
-    override fun hashCode(): Int = (outline?.contentHashCode() ?: 0) * 31 + progress.hashCode() * 7 + hint.hashCode()
+        other is RectFinderState && progress == other.progress && hint == other.hint && dwellSuspended == other.dwellSuspended &&
+            outline.contentEquals(other.outline)
+    override fun hashCode(): Int = (outline?.contentHashCode() ?: 0) * 31 + progress.hashCode() * 7 + hint.hashCode() + if (dwellSuspended) 1 else 0
 }
 
 /**
@@ -82,6 +89,7 @@ class RectangleFinder(private val session: MeasureSession, private val logTiming
     private var busy = false
     private var closed = false
     private var committed = false
+    private val priority = FinderPriority()
 
     private val _state = MutableStateFlow(RectFinderState())
     val state: StateFlow<RectFinderState> = _state.asStateFlow()
@@ -113,7 +121,14 @@ class RectangleFinder(private val session: MeasureSession, private val logTiming
         if (closed || !enabled || frame.timestamp == lastTs) return
         lastTs = frame.timestamp
         val st = this.session.state.value
-        if (st.mode != MeasureMode.RECTANGLE || st.pointCount > 0 || st.isFrozen) {
+        val active = st.mode == MeasureMode.RECTANGLE && !st.isFrozen
+        val canSearch = DetectedRectangleRules.maySearch(st.warmingUp, this.session.latestCentreHit?.distance ?: Double.NaN)
+        val suspend = priority.dwellSuspended(SystemClock.elapsedRealtime(), active, st.pointCount, canSearch)
+        if (_state.value.dwellSuspended != suspend) {
+            val c = _state.value
+            _state.value = RectFinderState(c.outline, c.progress, c.hint, suspend)
+        }
+        if (!active || st.pointCount > 0) {
             if (st.pointCount == 0 && committed) restart() // the result was cleared or saved: look again
             if (_state.value.outline != null && st.pointCount > 0) _state.value = RectFinderState()
             return
@@ -126,17 +141,22 @@ class RectangleFinder(private val session: MeasureSession, private val logTiming
         val g = gate.update(frame.timestamp, tracking, FrameReaders.reason(camera.trackingFailureReason), pose, Float.NaN, optics, hit?.distance ?: Double.NaN)
         drawOutline()
         if (tracking != CameraTracking.TRACKING) return
-        val normal = hit?.normal
+        // Gate V1: never search too close or before the scale warm-up (the HUD shows the guide meanwhile).
+        if (!DetectedRectangleRules.maySearch(st.warmingUp, hit?.distance ?: Double.NaN)) return
+        val normal = hit?.let { snapNormal(it.kind, it.normal) }
         if (hit == null || normal == null) return publishHint(RectHint.NO_PLANE)
         val blurOk = optics == null || (!optics.lensMoving && !(g.blurPx > BlurGate.MAX_BLUR_DETECT_PX))
         if (g.sampleQuality != TrackingQuality.TRACKING || !blurOk) return publishHint(RectHint.HOLD_STEADY)
         val now = SystemClock.elapsedRealtime()
         if (busy || now - lastDetectMs < DETECT_INTERVAL_MS) return
-        val image = FrameReaders.cpuImage(frame) ?: return
+        val image = FrameReaders.cpuLuma(frame) ?: return
         val cam = FrameReaders.cpuImageCamera(frame)?.scaledTo(image.width, image.height) ?: return
         val capture = CaptureCamera(pose, cam.intrinsics, image.width, image.height)
         val plane = Plane.fromPointNormal(hit.position, normal)
         val planeSigma = SupportPlane.planeSigma(hit.distance)
+        // Gate V4: the quad must contain the crosshair hit its plane was measured at.
+        val inside = com.spaceview.engine.FaceReprojection.project(hit.position, capture)
+            ?.let { com.spaceview.engine.Vec2(it[0], it[1]) } ?: return
         lastDetectMs = now
         busy = true
         val l = lock
@@ -145,7 +165,7 @@ class RectangleFinder(private val session: MeasureSession, private val logTiming
                 runCatching {
                     val t0 = System.nanoTime()
                     val gray = GrayImage.fromLuma(image.bytes, image.width, image.height)
-                    val q = QuadLock.detectRectangle(detector, gray, capture, plane)
+                    val q = QuadLock.detectRectangle(detector, gray, capture, plane, inside)
                     if (logTiming) {
                         android.util.Log.d(LOG_TAG, "detect ${image.width}x${image.height}: ${(System.nanoTime() - t0) / 1_000_000} ms, found=${q != null}")
                     }
@@ -154,7 +174,10 @@ class RectangleFinder(private val session: MeasureSession, private val logTiming
             }
             busy = false
             if (closed || l !== lock || !enabled) return@launch
-            if (found == null) return@launch publishHint(RectHint.SEARCHING)
+            if (found == null) {
+                l.miss() // gate v6: consecutive frames only, and no ghost outline
+                return@launch publishHint(RectHint.SEARCHING)
+            }
             val locked = l.offer(found.corners, found.sigmaPx.max(), capture, plane, planeSigma)
             publishHint(if (l.lastReject == QuadLock.Reject.TOO_STEEP) RectHint.TOO_STEEP else RectHint.HOLDING)
             if (locked != null && !committed) commit(locked, capture, plane, planeSigma, found.sigmaPx.max())
@@ -164,7 +187,17 @@ class RectangleFinder(private val session: MeasureSession, private val logTiming
     private fun commit(locked: QuadLock.Locked, camera: CaptureCamera, plane: Plane, planeSigma: Double, sigmaPx: Double) {
         val f = kotlin.math.sqrt(camera.intrinsics.fx * camera.intrinsics.fy)
         val origin = camera.pose.translation
-        val ends = locked.corners.map { c ->
+        // Gate v11: corners in screen order (top-left first, clockwise as the user sees them), so W is the side that is
+        // horizontal on the screen, not in the landscape sensor image.
+        val vp = session.overlay.projection
+        val view = vp?.let { p -> locked.corners.map { c -> p.project(c)?.let { com.spaceview.engine.Vec2(it.x.toDouble(), it.y.toDouble()) } } }
+        val corners = if (view != null && view.all { it != null }) {
+            val idx = QuadLock.orderIndices(view.map { it!! })
+            List(4) { locked.corners[idx[it]] }
+        } else {
+            locked.corners
+        }
+        val ends = corners.map { c ->
             val range = origin.distanceTo(c)
             val cos = max(0.2, abs(plane.normal dot (c - origin).normalized()))
             // Corner placement (sub-pixel line intersection, never below 0.3 px) at its range, widened by the obliquity.
@@ -196,13 +229,13 @@ class RectangleFinder(private val session: MeasureSession, private val logTiming
     private fun publishOutline(outline: FloatArray?) {
         val cur = _state.value
         val p = ((lock.progress * 10).toInt() / 10f)
-        val next = RectFinderState(outline, p, cur.hint)
+        val next = RectFinderState(outline, p, cur.hint, cur.dwellSuspended)
         if (next != cur) _state.value = next
     }
 
     private fun publishHint(h: RectHint) {
         val cur = _state.value
-        if (cur.hint != h) _state.value = RectFinderState(cur.outline, cur.progress, h)
+        if (cur.hint != h) _state.value = RectFinderState(cur.outline, cur.progress, h, cur.dwellSuspended)
     }
 
     /** Releases the worker. Idempotent. */
@@ -213,6 +246,25 @@ class RectangleFinder(private val session: MeasureSession, private val logTiming
     }
 
     companion object {
+        /**
+         * The plane normal to lift onto (gate V4): an ARCore plane's own normal; a depth / feature point's noisy normal
+         * only when it is within [SNAP_DEG] of horizontal or vertical, snapped exactly; otherwise none.
+         */
+        internal fun snapNormal(kind: HitKind, n: Vec3?): Vec3? {
+            if (n == null) return null
+            if (kind == HitKind.PLANE || kind == HitKind.FITTED_SURFACE) return n
+            val up = abs(n dot Vec3.UP)
+            val cosSnap = kotlin.math.cos(Math.toRadians(SNAP_DEG))
+            return when {
+                up >= cosSnap -> if (n.y >= 0) Vec3.UP else -Vec3.UP
+                up <= kotlin.math.sin(Math.toRadians(SNAP_DEG)) -> Vec3(n.x, 0.0, n.z).normalized()
+                else -> null
+            }
+        }
+
+        /** A point normal within this (deg) of horizontal / vertical is snapped; else no plane. */
+        const val SNAP_DEG = 10.0
+
         /** Logcat tag of the per-detection timing (debug builds). */
         const val LOG_TAG = "SpaceViewRect"
 

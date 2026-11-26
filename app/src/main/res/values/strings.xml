@@ -327,4 +327,16 @@
     <string name="scan_corners_snap">Snap to corners in the photo</string>
     <string name="scan_corners_refused">These corners can\'t be measured. Keep them on the object\'s face, in order (top left, top right, bottom right, bottom left).</string>
     <string name="scan_photo_lost">The photo was lost when the phone closed the app. Your sizes and corners are kept; measure again for a new photo.</string>
+    <!-- Corner editor, TalkBack (PLAN v3.1 gate v15). -->
+    <string name="scan_corner_tl">Top-left</string>
+    <string name="scan_corner_tr">Top-right</string>
+    <string name="scan_corner_br">Bottom-right</string>
+    <string name="scan_corner_bl">Bottom-left</string>
+    <string name="scan_corners_a11y_next">Select the next corner</string>
+    <string name="scan_corners_a11y_up">Move the corner up</string>
+    <string name="scan_corners_a11y_down">Move the corner down</string>
+    <string name="scan_corners_a11y_left">Move the corner left</string>
+    <string name="scan_corners_a11y_right">Move the corner right</string>
+    <string name="scan_corners_a11y_status">%1$s corner selected. Width %2$s centimetres, height %3$s centimetres.</string>
+    <string name="scan_corners_a11y_status_unmeasurable">%1$s corner selected. These corners can\'t be measured.</string>
 </resources>

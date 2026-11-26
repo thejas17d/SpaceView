@@ -41,8 +41,20 @@ object CornerAdjust {
      *
      * The plane is the one through the automatic outline's measured corners; its 1σ along the normal is taken as the
      * measured corners' own 1σ (each side's σ / √2), and never below how far those corners are from planar.
+     *
+     * Calibration (PLAN v3.1 gate V3): a calibrated Auto outline had its raw lengths multiplied by the session's scale
+     * factor. The adjusted lengths get the **same** factor, recovered exactly as Auto W×H ÷ the raw geometry of the
+     * automatic corners [autoCornersPx] (so unchanged corners give the Auto size). Without [autoCornersPx], or for an
+     * implausible factor, the adjusted outline is honestly marked **not calibrated**.
      */
-    fun outline(auto: ScanOutline, cornersPx: FloatArray, camera: CaptureCamera, tier: DeviceTier, snapSigmaPx: FloatArray? = null): ScanOutline? {
+    fun outline(
+        auto: ScanOutline,
+        cornersPx: FloatArray,
+        camera: CaptureCamera,
+        tier: DeviceTier,
+        snapSigmaPx: FloatArray? = null,
+        autoCornersPx: FloatArray? = null,
+    ): ScanOutline? {
         require(cornersPx.size == 8)
         if (!isConvexInOrder(cornersPx)) return null
         val plane = FaceReprojection.planeOf(auto.face.corners, auto.face.normal) ?: return null
@@ -57,8 +69,11 @@ object CornerAdjust {
             DoubleArray(4) { k -> s[k].toDouble().takeIf { it.isFinite() }?.coerceAtLeast(CornerSnap.MIN_SIGMA_PX) ?: Double.NaN }
         }
         val face = FaceReprojection.measure(px, camera, plane, pixelSigma(camera), planeSigma, tier, perCorner) ?: return null
-        val w = face.width
-        val h = face.height
+        val scale = if (auto.calibrated) calibrationScale(auto, autoCornersPx, camera, plane, tier) else null
+        val calibrated = auto.calibrated && scale != null
+        val k = scale ?: 1.0
+        val w = Measurement(face.width.value * k, face.width.sigma * k)
+        val h = Measurement(face.height.value * k, face.height.sigma * k)
         val diagonal = if (auto.shape == ScanShape.FLAT) {
             val d = sqrt(w.value * w.value + h.value * h.value)
             // Fully correlated errors (an upper bound), as the Review and the Gallery state a diagonal's ±.
@@ -74,11 +89,22 @@ object CornerAdjust {
             depth = auto.depth,
             diagonal = diagonal,
             quality = if (auto.geometryConsistent) quality else Quality.ROUGH,
-            calibrated = auto.calibrated,
+            calibrated = calibrated,
             geometryConsistent = auto.geometryConsistent,
             face = FrontFace(face.corners, auto.face.normal),
             choice = auto.choice,
         )
+    }
+
+    /**
+     * The scale factor the calibrated Auto outline carries: Auto W ÷ raw W and Auto H ÷ raw H of the automatic corners'
+     * geometry, averaged. Null when it cannot be recovered or is outside the calibration band (0.8–1.25).
+     */
+    internal fun calibrationScale(auto: ScanOutline, autoCornersPx: FloatArray?, camera: CaptureCamera, plane: com.spaceview.engine.Plane, tier: DeviceTier): Double? {
+        val c = autoCornersPx?.takeIf { it.size == 8 } ?: return null
+        val raw = FaceReprojection.measure(DoubleArray(8) { c[it].toDouble() }, camera, plane, 0.0, 0.0, tier) ?: return null
+        val k = (auto.width.value / raw.width.value + auto.height.value / raw.height.value) / 2
+        return k.takeIf { it.isFinite() && it in 0.8..1.25 }
     }
 
     /**

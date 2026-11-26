@@ -513,6 +513,28 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
   - **Detector speed:** about 9–12 ms per 1280×720 frame (JVM, isolated); the benchmark is CI-safe at ≤ 150 ms.
   - **Follow-ups:** depth-inside-quad → SupportPlane; ROI if the device misses 30 ms; tier floor (C13) after the bench.
   - **Pre-review commit** pushed; a combined review + gate is running → `docs/reviews/PLAN-v3.1-gate.md`.
+- **Commit c0b6ecd** (PLAN v3.1, pre-review) was pushed, rebased onto b1e258b (Thejas added 9 Play screenshot options in `spaceview screenshots/`, "reference only").
+- **PLAN v3.1 GATE: FAIL until R1–R4** (`docs/reviews/PLAN-v3.1-gate.md`; the engine maths is OK).
+  - **V1:** the finder bypasses the warm-up and the < 0.25 m refusal.
+  - **V2:** the hands-free dwell beats the finder.
+  - **V3:** adjusted corners drop the calibration but keep the badge.
+  - **V4:** quads are lifted onto the crosshair plane without a containment check.
+  - **MINORs:** v5–v15. **R6:** the user runs TESTING §24/§25.
+  - **Fix rounds:** Builder A on V1/V2/V4 + v5/v6/v7/v11/v12/v13; Builder B on V3 + v8/v9/v15 + the TESTING §24 item 11 wording.
+- **2026-11-26: PAUSED by the user.** Both fix agents were stopped mid-round by the usage limit (reset 15:10 IST) and have partial, uncommitted edits.
+  - **To resume:** SendMessage both builders to continue their gate rounds; then build → quick gate re-check → commit → CI → AAB versionCode 2 (0.9.1) signed with the upload key → the user uploads it to Closed testing.
+  - **Still to do (orchestrator):** the 2 DOC items from the gate.
+  - **User items:** App access → "All functionality available"; the licence key; the `pro` subscription; store screenshots; testers.
+- **PLAN v3.1 gate fix round DONE.**
+  - **Builder A:** V1/V2/V4 and v5/v6/v7/v11/v12/v13.
+  - **Builder B:** V3, v8/v9/v15 and TESTING §24.
+  - **Orchestrator:** D1, plus N1 from the re-check (the finder head-start runs only while it can search; test in CloseRangeTest).
+  - **Re-check:** PASS WITH CONDITIONS (appended to the gate file). Open for the RC: v14, v16, N2 (FinderPriority.timedOut hint is unused), and v10 stays a condition on C13.
+  - **Verification:** engine 269 / ar 179 / data 70 (1 skip) / app 354 (1 skip), 0 failures; Kover OK; lint 0 errors. Release dex has 0 debug strings, except the `SpaceViewCutout` tag constant, which is gated at runtime by FLAG_DEBUGGABLE.
+- **Build 2:** `builds/SpaceView-0.9.1-vc2.aab` (versionCode 2, versionName 0.9.1), signed with the upload key.
+  - Built with SUPPORT_EMAIL and the PRIVACY_POLICY_URL (`…/privacy/index.html`).
+  - Still test ads, and no licence key yet.
+  - **For the user:** upload it to Closed testing as an update.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
 ## Log

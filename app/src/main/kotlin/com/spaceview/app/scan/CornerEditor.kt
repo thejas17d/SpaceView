@@ -37,7 +37,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -70,6 +73,8 @@ internal fun CornerEditor(
     onDone: (FloatArray, FloatArray) -> Unit,
     onReset: () -> Unit,
     onCancel: () -> Unit,
+    /** Width and height (m) the corners would measure (sensor pixels in), for TalkBack; null = not measurable. */
+    onMeasure: (FloatArray) -> Pair<Double, Double>? = { null },
 ) {
     // Corners in display-image pixels (the upright photo); local until Done.
     var corners by remember(editor) { mutableStateOf(editor.corners.copyOf()) }
@@ -77,6 +82,8 @@ internal fun CornerEditor(
     var snapSigma by remember(editor) { mutableStateOf(FloatArray(4) { Float.NaN }) }
     var snapOn by rememberSaveable { mutableStateOf(true) }
     var active by remember { mutableIntStateOf(NONE) }
+    // Gate v15: TalkBack edits one selected corner with custom actions (select next, move by a small step).
+    var a11yCorner by remember(editor) { mutableIntStateOf(0) }
     var touch by remember { mutableStateOf<Offset?>(null) }
     val image = editor.image
     Dialog(onDismissRequest = onCancel, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -91,11 +98,37 @@ internal fun CornerEditor(
                 Text(stringResource(R.string.scan_corners_editor_hint), style = MaterialTheme.typography.bodyMedium, color = Color.White)
                 val colors = SpaceViewTheme.colors
                 val description = stringResource(R.string.scan_corners_editor_a11y)
+                val cornerNames = listOf(
+                    stringResource(R.string.scan_corner_tl), stringResource(R.string.scan_corner_tr),
+                    stringResource(R.string.scan_corner_br), stringResource(R.string.scan_corner_bl),
+                )
+                val measured = onMeasure(editor.turns.cornersToSensor(corners))
+                val status = if (measured != null) {
+                    stringResource(R.string.scan_corners_a11y_status, cornerNames[a11yCorner], cmText(measured.first), cmText(measured.second))
+                } else {
+                    stringResource(R.string.scan_corners_a11y_status_unmeasurable, cornerNames[a11yCorner])
+                }
+                fun nudge(dx: Float, dy: Float): Boolean {
+                    corners = moved(corners, a11yCorner, dx, dy, image.width.toFloat(), image.height.toFloat())
+                    snapSigma = snapSigma.copyOf().also { it[a11yCorner] = Float.NaN }
+                    return true
+                }
+                val actions = listOf(
+                    CustomAccessibilityAction(stringResource(R.string.scan_corners_a11y_next)) { a11yCorner = (a11yCorner + 1) % 4; true },
+                    CustomAccessibilityAction(stringResource(R.string.scan_corners_a11y_up)) { nudge(0f, -A11Y_STEP_PX) },
+                    CustomAccessibilityAction(stringResource(R.string.scan_corners_a11y_down)) { nudge(0f, A11Y_STEP_PX) },
+                    CustomAccessibilityAction(stringResource(R.string.scan_corners_a11y_left)) { nudge(-A11Y_STEP_PX, 0f) },
+                    CustomAccessibilityAction(stringResource(R.string.scan_corners_a11y_right)) { nudge(A11Y_STEP_PX, 0f) },
+                )
                 Canvas(
                     Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .semantics { contentDescription = description }
+                        .semantics {
+                            contentDescription = description
+                            stateDescription = status
+                            customActions = actions
+                        }
                         .pointerInput(editor) {
                             fun fit(): Triple<Float, Float, Float> {
                                 val s = min(size.width.toFloat() / image.width, size.height.toFloat() / image.height)
@@ -174,6 +207,13 @@ internal fun CornerEditor(
                         drawCircle(Color.White, radius = r, center = centre, style = Stroke(width = 2.dp.toPx()))
                     }
                 }
+                // Spoken after every TalkBack action: the selected corner and the size it now gives.
+                Text(
+                    status,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
                 if (refused) {
                     Text(
                         stringResource(R.string.scan_corners_refused),
@@ -206,6 +246,12 @@ internal fun CornerEditor(
 }
 
 private const val NONE = -1
+
+/** TalkBack nudge step, in pixels of the upright photo. */
+private const val A11Y_STEP_PX = 2f
+
+/** "60.6" (one decimal, centimetres) for the TalkBack status. */
+internal fun cmText(m: Double): String = String.format(java.util.Locale.ROOT, "%.1f", m * 100)
 private const val LOUPE_ZOOM = CornerAdjust.LOUPE_ZOOM.toFloat()
 
 /**

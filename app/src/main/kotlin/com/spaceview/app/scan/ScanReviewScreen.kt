@@ -118,6 +118,7 @@ internal fun ScanReviewScreen(
                     onDone = vm::applyCorners,
                     onReset = vm::resetCornersToAuto,
                     onCancel = vm::closeCornerEditor,
+                    onMeasure = vm::previewCorners,
                 )
             }
 

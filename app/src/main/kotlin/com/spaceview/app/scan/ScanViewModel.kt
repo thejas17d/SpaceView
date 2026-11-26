@@ -85,12 +85,19 @@ interface ReviewPhotoStore {
     fun put(key: String, jpeg: ByteArray)
     fun get(key: String): ByteArray?
     fun remove(key: String)
+
+    /** Deletes every kept photo except [keep] (stale ones from a Review that ended without save or discard). */
+    fun prune(keep: String?)
 }
 
-/** [ReviewPhotoStore] in a cache directory (one file per capture). Never throws. */
+/**
+ * [ReviewPhotoStore] in a cache directory (one file per capture). Never throws. Every operation holds one lock, so a
+ * slow write and a remove of the same key never interleave (PLAN v3.1 gate v9).
+ */
 class FileReviewPhotoStore(private val dir: File) : ReviewPhotoStore {
     private fun file(key: String) = File(dir, key.filter { it.isLetterOrDigit() || it == '-' } + ".jpg")
 
+    @Synchronized
     override fun put(key: String, jpeg: ByteArray) {
         runCatching {
             dir.mkdirs()
@@ -100,10 +107,18 @@ class FileReviewPhotoStore(private val dir: File) : ReviewPhotoStore {
         }
     }
 
+    @Synchronized
     override fun get(key: String): ByteArray? = runCatching { file(key).takeIf { it.isFile }?.readBytes() }.getOrNull()
 
+    @Synchronized
     override fun remove(key: String) {
         runCatching { file(key).delete() }
+    }
+
+    @Synchronized
+    override fun prune(keep: String?) {
+        val kept = keep?.let { file(it).name }
+        runCatching { dir.listFiles()?.forEach { if (it.name != kept) it.delete() } }
     }
 }
 
@@ -226,7 +241,7 @@ class ScanViewModel(
     /** PLAN v3.1 W8: the capture photo (sensor orientation) kept for re-rectifying with adjusted corners. */
     private var source: Bitmap? = null
     private var camera: CaptureCamera? = savedState.get<DoubleArray>(KEY_CAMERA)?.let { ReviewSnapshot.decodeCamera(it) }
-    private var photoKey: String? = savedState.get<String>(KEY_PHOTO)
+    @Volatile private var photoKey: String? = savedState.get<String>(KEY_PHOTO)
     @Volatile private var snapper: CornerSnap? = null
 
     private val _state = MutableStateFlow(restore())
@@ -242,6 +257,12 @@ class ScanViewModel(
     init {
         _state.value.savedId?.let { loadSavedItem(it) }
         if (_state.value.restored) restorePhoto()
+        // Gate v8: the kept photo is not deleted in onCleared (that also runs for "Don't keep activities", whose
+        // Review then comes back): stale photos of Reviews that ended without save or discard go here instead.
+        photoStore?.let { ps ->
+            val keep = photoKey.takeIf { _state.value.restored }
+            viewModelScope.launch(Dispatchers.IO) { runCatching { ps.prune(keep) } }
+        }
     }
 
     private fun restore(): ScanUiState {
@@ -268,7 +289,7 @@ class ScanViewModel(
         val adjusted = ReviewSnapshot.validCorners(savedState.get<FloatArray>(KEY_CORNERS_ADJ))
         val cam = camera
         val snapSigma = savedState.get<FloatArray>(KEY_CORNER_SIGMA)?.takeIf { it.size == 4 }
-        val adjustedOutline = if (adjusted != null && cam != null) CornerAdjust.outline(auto, adjusted, cam, tier, snapSigma) else null
+        val adjustedOutline = if (adjusted != null && cam != null) CornerAdjust.outline(auto, adjusted, cam, tier, snapSigma, autoCorners) else null
         val hasPhoto = photoKey != null && photoStore != null
         return ScanUiState(
             step = ScanStep.REVIEW,
@@ -363,8 +384,18 @@ class ScanViewModel(
         photoKey = key
         setState { it }
         viewModelScope.launch(Dispatchers.Default) {
-            runCatching { ps.put(key, JpegEncoder.encode(bitmap, JpegEncoder.SCAN_QUALITY)) }
+            runCatching { JpegEncoder.encode(bitmap, JpegEncoder.SCAN_QUALITY) }.getOrNull()?.let { keepIfCurrent(ps, key, it) }
         }
+    }
+
+    /**
+     * Writes the photo, then deletes it again if the Review moved on meanwhile (Save, Back, Measure again, a new
+     * photo): a slow write can never leave a photo behind (gate v9).
+     */
+    @VisibleForTesting
+    internal fun keepIfCurrent(ps: ReviewPhotoStore, key: String, jpeg: ByteArray) {
+        ps.put(key, jpeg)
+        if (photoKey != key) ps.remove(key)
     }
 
     /** After process death: the kept capture photo, decoded, then straightened with the current corners. */
@@ -505,13 +536,23 @@ class ScanViewModel(
             return
         }
         val sigma = snapSigmaPx?.takeIf { it.size == 4 }?.copyOf()
-        val adjusted = CornerAdjust.outline(auto, corners, cam, s.tier, sigma)
+        val adjusted = CornerAdjust.outline(auto, corners, cam, s.tier, sigma, autoCorners)
         if (adjusted == null) {
             _state.update { it.copy(cornersRefused = true) }
             return
         }
         setState { it.copy(outline = adjusted, adjustedCorners = corners.copyOf(), cornerSnapSigma = sigma, editor = null, cornersRefused = false) }
         processPicture(corners, nameIt = false)
+    }
+
+    /** The width and height (m) [corners] (sensor pixels) would measure, for the editor's TalkBack status; null if they can't. */
+    fun previewCorners(corners: FloatArray): Pair<Double, Double>? {
+        val s = _state.value
+        val auto = s.autoOutline ?: return null
+        val cam = camera ?: return null
+        if (corners.size != 8) return null
+        val o = CornerAdjust.outline(auto, corners, cam, s.tier, null, s.autoCorners) ?: return null
+        return o.width.value to o.height.value
     }
 
     /** "Reset to auto": the measured outline and the automatic corners again. */
@@ -655,10 +696,6 @@ class ScanViewModel(
         }
     }
 
-    /** The flow is gone for good: the kept capture photo is no longer needed. */
-    override fun onCleared() {
-        forgetPhoto()
-    }
 
     /** Deletes the process-death copy of the capture photo. */
     private fun forgetPhoto() {

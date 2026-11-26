@@ -6,9 +6,9 @@
     <string name="measure_step_back">पीछे हटें, ताकि पूरी चीज़ स्क्रीन पर आ जाए।</string>
     <string name="measure_reject_too_close">नापने के लिए बहुत पास है। पीछे हटें।</string>
     <string name="measure_reject_warming_up">पहले फ़ोन को धीरे-धीरे दाएँ-बाएँ घुमाएँ।</string>
-    <string name="rect_searching">पूरा आयत स्क्रीन पर रखें।</string>
+    <string name="rect_searching">पूरा आयत स्क्रीन पर रखें, और निशाना उसी पर रखें।</string>
     <string name="rect_holding">आयत मिल गया। फ़ोन स्थिर रखें।</string>
     <string name="rect_too_steep">आयत के ज़्यादा सामने से देखें।</string>
-    <string name="rect_no_plane">उस सतह पर निशाना रखें जिस पर आयत रखा है।</string>
+    <string name="rect_no_plane">निशाने को आयत पर ही रखें।</string>
     <string name="rect_outline">पहचाना गया आयत</string>
 </resources>

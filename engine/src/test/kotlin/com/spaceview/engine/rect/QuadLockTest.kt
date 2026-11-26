@@ -75,4 +75,41 @@ class QuadLockTest {
         lock.offer(scene.trueCornersPx, 0.3, scene.camera, wall, 0.0025)
         assertEquals(QuadLock.Reject.NOT_ON_PLANE, lock.lastReject)
     }
+
+    @Test
+    fun missesBreakTheStreakAndClearTheGhostOutline() {
+        val scene = SyntheticScene()
+        val lock = QuadLock()
+        repeat(5) { lock.offer(scene.trueCornersPx, 0.3, scene.camera, table, 0.0025) }
+        lock.miss()
+        assertEquals(0.0, lock.progress, 0.0) // the 8 frames must be consecutive
+        assertNotNull(lock.lastCorners)
+        repeat(QuadLock.MISSES_TO_CLEAR - 1) { lock.miss() }
+        assertNull(lock.lastCorners)
+        repeat(QuadLock.STABLE_FRAMES) { lock.offer(scene.trueCornersPx, 0.3, scene.camera, table, 0.0025) }
+        assertNotNull(lock.locked)
+        lock.miss()
+        assertNotNull(lock.locked) // no effect once locked
+    }
+
+    @Test
+    fun aQuadMustContainTheCrosshairHitOfItsPlane() {
+        // Gate V4: the plane was measured at a point outside the rectangle (e.g. a parallel surface beyond it).
+        val scene = SyntheticScene(tiltDeg = 20.0)
+        val img = scene.render(0.7, 2.0)
+        val det = QuadDetector()
+        val c = scene.trueCornersPx
+        val inside = Vec2((c[0].x + c[2].x) / 2, (c[0].y + c[2].y) / 2)
+        val outside = Vec2(c[1].x + 60, c[1].y)
+        assertNotNull(QuadLock.detectRectangle(det, img, scene.camera, table, inside))
+        assertNull(QuadLock.detectRectangle(det, img, scene.camera, table, outside))
+        assertTrue(QuadLock.contains(c, inside))
+        assertTrue(!QuadLock.contains(c, outside))
+    }
+
+    @Test
+    fun orderIndicesFollowTheScreen() {
+        val pts = listOf(Vec2(10.0, 10.0), Vec2(0.0, 0.0), Vec2(0.0, 10.0), Vec2(10.0, 0.0))
+        assertTrue(QuadLock.orderIndices(pts).contentEquals(intArrayOf(1, 3, 0, 2)))
+    }
 }

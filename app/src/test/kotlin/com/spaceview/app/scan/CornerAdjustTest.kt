@@ -183,6 +183,42 @@ class CornerAdjustTest {
         assertEquals("NaN = placed by hand", hand, noSnap, 1e-12)
     }
 
+    /** Gate V3: a calibrated Auto outline keeps its factor when corners are adjusted (or honestly loses the flag). */
+    @Test fun calibratedScanKeepsItsFactorWhenCornersMove() {
+        val k = 0.97
+        val calibrated = ScanOutline(
+            ScanShape.FLAT, m(0.6 * k, 0.008), m(0.4 * k, 0.008), null, m(0.72 * k, 0.01), Quality.GOOD, true, true,
+            FrontFace(frame, Vec3.UNIT_Z), FaceChoice(0, Vec3.UP, Vec3.UNIT_Z),
+        )
+        val c = px()
+        val same = CornerAdjust.outline(calibrated, c, camera, DeviceTier.NO_DEPTH, autoCornersPx = c)!!
+        assertEquals("unchanged corners: the Auto width within 0.1 %", 0.6 * k, same.width.value, 0.6 * k * 0.001)
+        assertEquals(0.4 * k, same.height.value, 0.4 * k * 0.001)
+        assertTrue(same.calibrated)
+        val nudged = CornerAdjust.outline(calibrated, c.copyOf().also { it[2] += 2f; it[4] += 2f }, camera, DeviceTier.NO_DEPTH, autoCornersPx = c)!!
+        assertEquals("only the nudge moves W (6 mm raw, calibrated)", (0.6 + 0.006) * k, nudged.width.value, 1e-5)
+        assertTrue(nudged.calibrated)
+        // Without the automatic corners the factor can't be recovered: not calibrated, raw geometry.
+        val unknown = CornerAdjust.outline(calibrated, c, camera, DeviceTier.NO_DEPTH)!!
+        assertFalse(unknown.calibrated)
+        assertEquals(0.6, unknown.width.value, 1e-6)
+        // An uncalibrated scan stays uncalibrated and raw.
+        val plain = CornerAdjust.outline(auto, c, camera, DeviceTier.NO_DEPTH, autoCornersPx = c)!!
+        assertFalse(plain.calibrated)
+        assertEquals(0.6, plain.width.value, 1e-6)
+    }
+
+    /** Gate v15: the TalkBack status reads centimetres with one decimal; a nudge moves one corner by the step. */
+    @Test fun talkBackHelpers() {
+        assertEquals("60.6", cmText(0.606))
+        assertEquals("0.5", cmText(0.005))
+        val c = floatArrayOf(10f, 10f, 90f, 10f, 90f, 60f, 10f, 60f)
+        val up = moved(c, 0, 0f, -2f, 100f, 100f)
+        assertEquals(8f, up[1], 0f)
+        assertArrayEquals(c.copyOfRange(2, 8), up.copyOfRange(2, 8), 0f)
+        assertEquals("kept inside the photo", 0f, moved(c, 0, -50f, 0f, 100f, 100f)[0], 0f)
+    }
+
     @Test fun snapshotRoundTripsTheReview() {
         val o = ReviewSnapshot.decodeOutline(ReviewSnapshot.encodeOutline(auto))!!
         assertEquals(auto.width.value, o.width.value, 0.0); assertEquals(auto.height.sigma, o.height.sigma, 0.0)

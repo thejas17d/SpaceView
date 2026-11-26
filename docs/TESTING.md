@@ -521,27 +521,28 @@ Phone: **Google Pixel 10a**, debug or release. Use a picture frame on a wall and
 8. **Crossed corners:** drag the top-left corner past the top-right one and tap Done: "These corners can't be measured…" and the editor stays open; the Review is unchanged.
 9. **Reset to auto** (in the editor or on the Review): the AR width, height, ± and picture come back.
 10. **Save and gallery:** save an adjusted scan. The gallery item shows the adjusted size and picture; Place shows the cutout at the adjusted W × H (check against the tape).
-11. **Process death (important):** adjust the corners (don't save), then turn on Developer options → **Don't keep activities** (or `adb shell am kill com.spaceview.app.debug` with the app in the background) and come back. The Review returns with the **adjusted** corners, sizes, name and the picture. If the picture could not be kept, it says so and the sizes are still the adjusted ones.
+11. **Process death (important):** adjust the corners (don't save), put the app in the background (Home), then kill its process with `adb shell am kill com.spaceview.app.debug` (or Developer options → Background process limit → No background processes, then open another app) and come back. The Review returns with the **adjusted** corners, sizes, name and the picture. ("Don't keep activities" also brings the Review back with the picture since the gate v8 fix; if the picture ever could not be kept, it says so and the sizes are still the adjusted ones.)
+11a. **Calibrated scan (gate V3):** calibrate with Known length, then scan a frame (the Review shows it as calibrated). Open Adjust corners and nudge one corner by a pixel or two, Done: the width moves only by that nudge (about 1–3 mm at 1–1.5 m), never by the calibration's few percent, and it stays calibrated.
 12. **Measure again / Back:** leaves the Review as before (asks first when there is work to lose); no adjusted corners carry into the next scan.
 13. Hindi: every new label, note and the editor's hint are in Hindi.
-14. TalkBack: the Auto / Adjust chips and the editor buttons are announced; the photo has a description.
+14. TalkBack (gate v15): the Auto / Adjust chips and the editor buttons are announced. In the editor, the photo offers the actions **Select the next corner** and **Move the corner up / down / left / right** (2 photo pixels a step); after each, TalkBack reads the selected corner and the new width and height in centimetres. Done saves those corners like dragged ones.
 
 ## 25. PLAN v3.1 W10 + W9 (Builder A): close range, smart hands-free rectangles (`docs/PLAN-v3.1-precision.md`)
 
-1. **Range guide:** with an A4 menu, 0.20 m refuses, 0.30 m gives the "move back" hint, and 0.5 m gives no hint. In Rectangle mode, "Step back…" appears once the corners leave the screen.
+1. **Range guide:** Rectangle mode with hands-free at 0.20 m is never measured (no outline lock either). With an A4 menu, 0.20 m refuses, 0.30 m gives the "move back" hint, and 0.5 m gives no hint. In Rectangle mode, "Step back…" appears once the corners leave the screen.
 2. **Warm-up:** on a fresh Measure, the first point is refused until the phone has moved about 20 cm side to side. Record how long that takes.
 3. **Blur:** sliding the phone at 0.3 m holds the stability ring. After a refocus (tap the object, then a far object), the frames are not averaged.
-4. **Padded menu (5–10 mm thick) on a table at 0.4–0.6 m:** points land on the menu, not on the table, and W is inside its ±.
+4. **Padded menu on a table at 0.4–0.6 m:** a menu about 1 cm thick or more is measured on its own surface; a thinner one (5 mm) is measured on the table plane under it (a 1–2 % bias). Either way W is inside its ±.
 5. **Hands-free rectangle:**
    - Use an A4 on wood, an A4 on a white cloth and a laminated menu, each at 0.5 m and 1 m.
    - The outline appears, then holds, locks and is measured.
    - Record the time to lock and the error vs tape.
    - A frame with glass gives its outer border.
    - A view steeper than 45° says "Face the rectangle more squarely".
-6. **No false rectangle:** sweeping over table edges and tiles for 1 minute never locks.
-7. **Scan FLAT, hands-free:** the same lock gives the outline.
+6. **No false rectangle:** sweeping over table edges and tiles for 1 minute never locks. With the crosshair on a table and a tile or rug in view beyond it, it never locks.
+7. **Scan FLAT, hands-free:** the same lock gives the outline, with the same hints as Measure. No dwell drop at the object's centre while the outline searches; if nothing locks within about 6 s, the dwell comes back.
 8. **Regression:** Height and Distance (§23) still pass.
-9. **Debug timing:** `adb logcat -s SpaceViewRect` shows the per-detection time (target ≤ 30 ms). Measure stays at 30 fps with hands-free rectangles on. Also record the blur estimate in the `dbg` line.
+9. **Debug timing:** `adb logcat -s SpaceViewRect` shows the per-detection time (target ≤ 30 ms). Measure stays at 30 fps with hands-free rectangles on.
 10. **Side by side with a non-LiDAR iPhone (accuracy contract, PLAN v3.1 §2):** run `docs/research/close-range-and-rectangles.md` §6 in full.
     - Setup: 0.3–3 m; views at 0°, 30° and 45°; two light levels; 10 trials in A-B-B-A order.
     - **Pass:**

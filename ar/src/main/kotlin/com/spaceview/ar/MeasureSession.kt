@@ -692,6 +692,8 @@ class MeasureSession(
         val s = session
         if (closed || !live || s == null || frozenCapture != null || mode != MeasureMode.RECTANGLE || endpoints.isNotEmpty() || corners.size != 4) return false
         if (lastTracking != CameraTracking.TRACKING) return false
+        // Gate V1: the W10 refusals (scale warm-up, < 25 cm) hold for a detected rectangle too.
+        if (!DetectedRectangleRules.mayCommit(warmUpDone, corners.map { it.rangeM })) return false
         val made = ArrayList<Endpoint>(4)
         for (c in corners) {
             val a = createAnchor(s, c) ?: run {

@@ -327,4 +327,16 @@
     <string name="scan_corners_snap">फ़ोटो के कोनों पर चिपकाएँ</string>
     <string name="scan_corners_refused">इन कोनों को नापा नहीं जा सकता। उन्हें चीज़ के सामने वाले हिस्से पर, क्रम में रखें (ऊपर बाएँ, ऊपर दाएँ, नीचे दाएँ, नीचे बाएँ)।</string>
     <string name="scan_photo_lost">फ़ोन ने ऐप बंद किया तो फ़ोटो चली गई। आपके नाप और कोने रखे गए हैं; नई फ़ोटो के लिए फिर से नापें।</string>
+    <!-- Corner editor, TalkBack (PLAN v3.1 gate v15). -->
+    <string name="scan_corner_tl">ऊपर बायाँ</string>
+    <string name="scan_corner_tr">ऊपर दायाँ</string>
+    <string name="scan_corner_br">नीचे दायाँ</string>
+    <string name="scan_corner_bl">नीचे बायाँ</string>
+    <string name="scan_corners_a11y_next">अगला कोना चुनें</string>
+    <string name="scan_corners_a11y_up">कोने को ऊपर करें</string>
+    <string name="scan_corners_a11y_down">कोने को नीचे करें</string>
+    <string name="scan_corners_a11y_left">कोने को बाएँ करें</string>
+    <string name="scan_corners_a11y_right">कोने को दाएँ करें</string>
+    <string name="scan_corners_a11y_status">%1$s कोना चुना गया। चौड़ाई %2$s सेंटीमीटर, ऊँचाई %3$s सेंटीमीटर।</string>
+    <string name="scan_corners_a11y_status_unmeasurable">%1$s कोना चुना गया। इन कोनों को नापा नहीं जा सकता।</string>
 </resources>

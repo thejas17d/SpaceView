@@ -96,7 +96,13 @@ object BlurGate {
     const val MAX_BLUR_SAMPLE_PX = 2.5
 
     /** Rectangle detection uses only frames up to this blur (px). Tunable. */
-    const val MAX_BLUR_DETECT_PX = 1.0
+    const val MAX_BLUR_DETECT_PX = 2.0 // gate v7: 1 px starved detection indoors; the refiner holds ≤ 1 px at σ = 2 px blur
+
+    /**
+     * The sample blur limit applies only nearer than this (m) (gate v7): up close the linear blur term and the research
+     * problem live; from 1 m on, the room-scale motion gate rules as before.
+     */
+    const val SAMPLE_BLUR_MAX_RANGE_M = 1.0
 
     /** Blur (px) for angular speed [angularRadS], linear speed [linearMS] at range [rangeM]. */
     fun blurPx(optics: OpticsSample, angularRadS: Double, linearMS: Double, rangeM: Double): Double {
@@ -168,5 +174,48 @@ class ScaleWarmUp {
         const val MIN_TURN_DEG = 10.0
 
         private const val MAX_STEP_M = 0.25
+    }
+}
+
+/** Gate V1: the W10 refusals also hold for a rectangle found by [RectangleFinder]. Pure. */
+object DetectedRectangleRules {
+    /** A detected rectangle may be committed only after the scale warm-up and with every corner beyond the hard minimum. */
+    fun mayCommit(warmUpDone: Boolean, cornerRangesM: List<Double>): Boolean =
+        warmUpDone && cornerRangesM.isNotEmpty() && cornerRangesM.all { RangeGuide.mayCommit(it) }
+
+    /** The finder searches only while the crosshair is not too close and the warm-up is done. */
+    fun maySearch(warmingUp: Boolean, crosshairRangeM: Double): Boolean = !warmingUp && RangeGuide.mayCommit(crosshairRangeM)
+}
+
+/**
+ * Gate V2: while the rectangle finder searches for the first corner, the hands-free dwell is suspended so it cannot drop
+ * a point at the object's centre first. The dwell comes back after [FALLBACK_MS] without a lock, or as soon as a point
+ * exists (placed by "+" or by the finder). Pure; the clock is passed in.
+ */
+class FinderPriority {
+    private var searchStartMs = -1L
+
+    /** True while the dwell must wait for the finder. */
+    fun dwellSuspended(nowMs: Long, finderActive: Boolean, points: Int, canSearch: Boolean = true): Boolean {
+        if (!finderActive || points > 0) {
+            searchStartMs = -1L
+            return false
+        }
+        // Gate re-check N1: the head start only counts while the finder can actually search (not during the scale
+        // warm-up or while too close); the dwell can't drop a point then either, so it simply keeps waiting.
+        if (!canSearch) {
+            searchStartMs = -1L
+            return true
+        }
+        if (searchStartMs < 0) searchStartMs = nowMs
+        return nowMs - searchStartMs < FALLBACK_MS
+    }
+
+    /** True once the finder had its chance and the dwell is back (show the fallback hint). */
+    fun timedOut(nowMs: Long): Boolean = searchStartMs >= 0 && nowMs - searchStartMs >= FALLBACK_MS
+
+    companion object {
+        /** The finder's head start before the dwell returns (ms). Tunable from the device test. */
+        const val FALLBACK_MS = 6_000L
     }
 }

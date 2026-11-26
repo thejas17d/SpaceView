@@ -119,10 +119,14 @@ internal object FrameReaders {
     /**
      * True when a depth / feature hit at [otherDistance] is clearly nearer than the plane hit at [planeDistance]: the
      * plane lies behind the real surface (a box on the floor, a padded menu on a table). Nearer by
-     * max([NEARER_ABS_M], [NEARER_REL] × range) (W10: 8 mm, so a 5–10 mm thick object wins at arm's length).
+     * max([NEARER_ABS_M], 1.5 % × range) below 1 m, 3 % from 1 m (W10, gate v5: a ≥ 1 cm thick object wins at 0.4–0.6 m;
+     * a thinner sheet is measured on the plane under it, a bias the ± covers).
      */
-    fun nonPlaneWins(planeDistance: Double, otherDistance: Double): Boolean =
-        otherDistance < planeDistance - max(NEARER_ABS_M, NEARER_REL * planeDistance)
+    fun nonPlaneWins(planeDistance: Double, otherDistance: Double): Boolean {
+        // Gate v5: 1.5 % of range below 1 m (so a ≥ 1 cm padded menu wins at 0.4–0.6 m), 3 % from 1 m on as before.
+        val rel = if (planeDistance < NEARER_CLOSE_M) NEARER_REL_CLOSE else NEARER_REL
+        return otherDistance < planeDistance - max(NEARER_ABS_M, rel * planeDistance)
+    }
 
     /**
      * Offers the centre of every tracked, upward-facing ARCore plane to [floor] as an on-plane vote (W4 / W5: the
@@ -272,6 +276,37 @@ internal object FrameReaders {
     }
 
     /** Copies the CPU camera image as NV21 (closed before returning); null on any failure. */
+    /**
+     * Only the Y (luma) plane of the CPU image, row by row honouring rowStride (gate v13: the finder needs no chroma,
+     * and skipping the NV21 interleave keeps the main-thread cost to one ~0.9 MB copy). Null on any failure.
+     */
+    fun cpuLuma(frame: Frame): LumaImage? = try {
+        frame.acquireCameraImage().use { img ->
+            if (img.format != ImageFormat.YUV_420_888) {
+                null
+            } else {
+                val y = img.planes[0]
+                val w = img.width
+                val h = img.height
+                val out = ByteArray(w * h)
+                val buf = y.buffer
+                val stride = y.rowStride
+                val pix = y.pixelStride
+                for (r in 0 until h) {
+                    if (pix == 1) {
+                        buf.position(r * stride)
+                        buf.get(out, r * w, w)
+                    } else {
+                        for (c in 0 until w) out[r * w + c] = buf.get(r * stride + c * pix)
+                    }
+                }
+                LumaImage(out, w, h)
+            }
+        }
+    } catch (e: Exception) {
+        null
+    }
+
     fun cpuImage(frame: Frame): Nv21Image? = try {
         frame.acquireCameraImage().use { img ->
             if (img.format != ImageFormat.YUV_420_888) null else Nv21Image(toNv21(img), img.width, img.height)
@@ -323,6 +358,8 @@ internal object FrameReaders {
     /** W10 (research C4): was 3 cm, so a 5–10 mm thick menu always lost to the table plane at 0.3 m. */
     internal const val NEARER_ABS_M = 0.008
     private const val NEARER_REL = 0.03
+    internal const val NEARER_REL_CLOSE = 0.015
+    internal const val NEARER_CLOSE_M = 1.0
 
     /** Depth window half-size, in pixels of a 160-px-wide depth image (≈ ±5° around the reticle). */
     private const val PATCH_HALF_AT_160 = 10f
@@ -343,3 +380,6 @@ class StillCapture(
     /** View pixels per still pixel as drawn (≈3–4 for a VGA still on a phone). */
     val viewPxPerImagePx: Double = Double.POSITIVE_INFINITY,
 )
+
+/** The luma (Y) plane of a CPU camera image, tightly packed ([width] bytes per row). */
+class LumaImage(val bytes: ByteArray, val width: Int, val height: Int)

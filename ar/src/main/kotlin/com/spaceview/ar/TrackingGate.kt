@@ -154,7 +154,9 @@ class TrackingGate(private val config: TrackingGateConfig = TrackingGateConfig()
         val warmingUp = timestampNs - trackingSinceNs < config.warmUpNanos
         val moving = angular > config.sampleMaxAngular || linear > config.sampleMaxLinear
         val blur = optics?.let { BlurGate.blurPx(it, angular, linear, rangeM) } ?: Double.NaN
-        val opticsBad = optics != null && (optics.lensMoving || blur > config.maxBlurPx)
+        // Gate v7: the blur limit only up close (< 1 m, or range unknown); from 1 m on the motion gate rules as before.
+        val closeRange = !(rangeM >= BlurGate.SAMPLE_BLUR_MAX_RANGE_M)
+        val opticsBad = optics != null && (optics.lensMoving || (closeRange && blur > config.maxBlurPx))
         val quality = if (warmingUp || moving || opticsBad) TrackingQuality.LIMITED else TrackingQuality.TRACKING
         val status = when {
             tooFast -> TrackingStatus.TOO_FAST

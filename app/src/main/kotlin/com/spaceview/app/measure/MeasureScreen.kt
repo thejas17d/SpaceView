@@ -136,10 +136,13 @@ private fun MeasureArScreen(
         val frozen by session.frozen.collectAsStateWithLifecycle()
         // Hands-free only while the reticle and controls are on screen (never behind the reference picker), and off
         // at the start of a calibration, where the aim must be exact (SM1 review MAJOR 1).
+        // W9 / gate V2: the rectangle finder exists before the dwell, which waits while the finder has priority.
+        val finder = rememberRectangleFinder(session)
+        val finderState by finder.state.collectAsStateWithLifecycle()
         val handsFree = rememberHandsFree(
             session,
             settings.handsFreeEnabled,
-            suspended = handsFreeSuspended(calibration, sessionFailed, frozen != null),
+            suspended = handsFreeSuspended(calibration, sessionFailed, frozen != null) || finderState.dwellSuspended,
             startOff = calibration != null,
         )
 
@@ -162,8 +165,8 @@ private fun MeasureArScreen(
         ) {
             // W9: hands-free rectangles are found in the camera image (outline → hold → locked → measured).
             val state0 by session.state.collectAsStateWithLifecycle()
-            val finder = rememberRectangleFinder(
-                session,
+            FinderEnabled(
+                finder,
                 enabled = handsFree.enabled && calibration == null && frozen == null && !sessionFailed &&
                     measureMode == MeasureMode.RECTANGLE && state0.mode == MeasureMode.RECTANGLE,
             )
@@ -173,7 +176,6 @@ private fun MeasureArScreen(
                 extraListeners = finderListeners, handsFree = handsFree,
             )
             if (frozen == null && finder.enabled && state0.pointCount == 0) RectangleOutline(finder)
-            val finderState by finder.state.collectAsStateWithLifecycle()
             val rectHint = finderState.hintRes()?.takeIf { finder.enabled && state0.pointCount == 0 }
 
             val f = frozen

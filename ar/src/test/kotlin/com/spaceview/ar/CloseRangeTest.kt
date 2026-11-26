@@ -121,4 +121,71 @@ class CloseRangeTest {
         val h = Math.toRadians(deg) / 2
         return Quaternion(0.0, sin(h), 0.0, cos(h))
     }
+
+    @Test
+    fun aDetectedRectangleObeysTheWarmUpAndTheMinimumRange() {
+        // Gate V1.
+        assertFalse(DetectedRectangleRules.mayCommit(warmUpDone = false, cornerRangesM = listOf(0.5, 0.5, 0.5, 0.5)))
+        assertFalse(DetectedRectangleRules.mayCommit(true, listOf(0.5, 0.5, 0.22, 0.5)))
+        assertTrue(DetectedRectangleRules.mayCommit(true, listOf(0.5, 0.5, 0.5, 0.5)))
+        assertFalse(DetectedRectangleRules.maySearch(warmingUp = true, crosshairRangeM = 0.5))
+        assertFalse(DetectedRectangleRules.maySearch(false, 0.20))
+        assertTrue(DetectedRectangleRules.maySearch(false, 0.5))
+    }
+
+    @Test
+    fun theDwellWaitsForTheFinderThenComesBack() {
+        // Gate V2.
+        val p = FinderPriority()
+        assertTrue(p.dwellSuspended(0, finderActive = true, points = 0))
+        assertTrue(p.dwellSuspended(FinderPriority.FALLBACK_MS - 1, true, 0))
+        assertFalse(p.dwellSuspended(FinderPriority.FALLBACK_MS, true, 0))
+        // N1: while the finder can't search (warm-up / too close) the head start does not run down.
+        val q = FinderPriority()
+        assertTrue(q.dwellSuspended(0, true, 0, canSearch = false))
+        assertTrue(q.dwellSuspended(FinderPriority.FALLBACK_MS * 2, true, 0, canSearch = false))
+        assertTrue(q.dwellSuspended(FinderPriority.FALLBACK_MS * 2 + 1, true, 0, canSearch = true))
+        assertTrue(q.dwellSuspended(FinderPriority.FALLBACK_MS * 3, true, 0, canSearch = true))
+        assertFalse(q.dwellSuspended(FinderPriority.FALLBACK_MS * 3 + 1, true, 0, canSearch = true))
+        assertTrue(p.timedOut(FinderPriority.FALLBACK_MS))
+        // A point placed by "+" (or the finder) ends the priority; a new search starts a new head start.
+        assertFalse(p.dwellSuspended(10_000, true, 1))
+        assertTrue(p.dwellSuspended(10_001, true, 0))
+        assertFalse(p.dwellSuspended(10_002, finderActive = false, points = 0))
+    }
+
+    @Test
+    fun onlyPlaneOrSnappedNormalsAreLiftedOnto() {
+        // Gate V4: a noisy point normal is used only when it is nearly horizontal or vertical, then snapped exactly.
+        assertEquals(Vec3.UP, RectangleFinder.snapNormal(HitKind.DEPTH_POINT, Vec3(0.05, 1.0, 0.0).normalized()))
+        val wall = RectangleFinder.snapNormal(HitKind.FEATURE_POINT, Vec3(0.1, 0.05, 1.0).normalized())!!
+        assertEquals(0.0, wall.y, 0.0)
+        assertEquals(null, RectangleFinder.snapNormal(HitKind.DEPTH_POINT, Vec3(0.0, 0.7, 0.7).normalized()))
+        val tilted = Vec3(0.0, 0.7, 0.7).normalized()
+        assertEquals(tilted, RectangleFinder.snapNormal(HitKind.PLANE, tilted))
+    }
+
+    @Test
+    fun aCentimetrePaddedMenuWinsAtArmsLength() {
+        // Gate v5: 1.5 % of range below 1 m.
+        assertTrue(FrameReaders.nonPlaneWins(0.5, 0.49))   // 10 mm thick at 0.5 m
+        assertTrue(FrameReaders.nonPlaneWins(0.6, 0.589))  // 11 mm at 0.6 m
+        assertFalse(FrameReaders.nonPlaneWins(0.5, 0.495)) // 5 mm: measured on the table plane (bias covered by the ±)
+        assertFalse(FrameReaders.nonPlaneWins(1.5, 1.47))  // room scale unchanged (3 %)
+    }
+
+    @Test
+    fun theSampleBlurLimitOnlyAppliesUpClose() {
+        // Gate v7: turning at 0.15 rad/s at 2 m stays TRACKING (blur ≈ 4.6 px would have been LIMITED).
+        val gate = TrackingGate()
+        var t = 0L
+        var r: GateResult? = null
+        repeat(40) { i ->
+            t += 33_333_333L
+            val h = 0.15 * t / 1e9 / 2
+            r = gate.update(t, CameraTracking.TRACKING, FailureReason.NONE, Pose(Vec3.ZERO, Quaternion(0.0, kotlin.math.sin(h), 0.0, kotlin.math.cos(h))), 0.5f, OpticsSample(33_000_000L, 920.0, false), 2.0)
+        }
+        assertEquals(TrackingQuality.TRACKING, r!!.sampleQuality)
+        assertTrue(r!!.blurPx > BlurGate.MAX_BLUR_SAMPLE_PX)
+    }
 }

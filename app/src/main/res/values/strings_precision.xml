@@ -6,9 +6,9 @@
     <string name="measure_step_back">Step back so the whole object fits on the screen.</string>
     <string name="measure_reject_too_close">Too close to measure. Move back.</string>
     <string name="measure_reject_warming_up">First move your phone slowly side to side.</string>
-    <string name="rect_searching">Hold the whole rectangle on the screen.</string>
+    <string name="rect_searching">Hold the whole rectangle on the screen, with the crosshair on it.</string>
     <string name="rect_holding">Rectangle found. Hold steady.</string>
     <string name="rect_too_steep">Face the rectangle more squarely.</string>
-    <string name="rect_no_plane">Aim at the surface the rectangle lies on.</string>
+    <string name="rect_no_plane">Aim the crosshair at the rectangle itself.</string>
     <string name="rect_outline">Detected rectangle</string>
 </resources>

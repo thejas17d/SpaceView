@@ -125,10 +125,13 @@ internal fun ScanArScreen(
         val state by session.state.collectAsStateWithLifecycle()
         val frozen by session.frozen.collectAsStateWithLifecycle()
         // Hands-free only while the outline reticle is on screen (not the photo step, a result card or a freeze).
+        // W9 / gate V2: the finder exists before the dwell, which waits while the finder has priority (flat objects).
+        val finder = com.spaceview.app.measure.rememberRectangleFinder(session)
+        val finderState by finder.state.collectAsStateWithLifecycle()
         val handsFree = rememberHandsFree(
             session,
             settings.handsFreeEnabled,
-            suspended = step != ScanStep.OUTLINE || sessionFailed || frozen != null || state.isComplete,
+            suspended = step != ScanStep.OUTLINE || sessionFailed || frozen != null || state.isComplete || finderState.dwellSuspended,
         )
         val capture by session.frontCapture.collectAsStateWithLifecycle()
         val photoReady by session.frontPhoto.collectAsStateWithLifecycle()
@@ -180,8 +183,8 @@ internal fun ScanArScreen(
         ) {
             // W9: a flat object's outline is found in the camera image when hands-free is on.
             val scanState by session.state.collectAsStateWithLifecycle()
-            val finder = com.spaceview.app.measure.rememberRectangleFinder(
-                session,
+            com.spaceview.app.measure.FinderEnabled(
+                finder,
                 enabled = handsFree.enabled && frozen == null && !sessionFailed && step == ScanStep.OUTLINE &&
                     shape == com.spaceview.ar.ScanShape.FLAT,
             )
@@ -206,6 +209,8 @@ internal fun ScanArScreen(
                 )
             } else {
                 ScanHud(
+                    // Gate v12: the finder's coaching in Scan too.
+                    rectHint = with(com.spaceview.app.measure.RectangleFinderHints) { finderState.hint(finder.enabled && state.pointCount == 0) },
                     kind = kind,
                     shape = shape,
                     step = step,
@@ -255,6 +260,7 @@ private fun ScanHud(
     onSkipPhoto: () -> Unit,
     onRemeasure: () -> Unit,
     handsFree: HandsFreeUi,
+    @StringRes rectHint: Int? = null,
 ) {
     val coaching = state.tracking == TrackingStatus.INITIALIZING || !state.sessionRunning
     // Flat objects: no surface under the reticle for ~5 s while tracking → wall hint (the wall–floor-line
@@ -297,6 +303,7 @@ private fun ScanHud(
                 // W10: scale warm-up and range guide.
                 com.spaceview.app.measure.closeRangeHintRes(state) != null ->
                     CoachingCard(message = stringResource(com.spaceview.app.measure.closeRangeHintRes(state)!!))
+                rectHint != null -> CoachingCard(message = stringResource(rectHint))
                 state.aimTooSteep -> CoachingCard(message = stringResource(R.string.measure_height_too_steep))
                 wallHint -> CoachingCard(message = stringResource(R.string.scan_wall_hint))
                 // W6: until the first surface point of the session, coach the motion that finds one.
