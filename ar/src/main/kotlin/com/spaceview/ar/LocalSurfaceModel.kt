@@ -57,14 +57,25 @@ class LocalSurfaceConfig(
     val coneRadiusRel: Double = 0.07,
     val minPoints: Int = 24,
     val maxRms: Double = 0.008,
+    val maxRmsMin: Double = 0.003,
+    val maxRmsRel: Double = 0.008,
+    val inlierMin: Double = 0.003,
+    val inlierRel: Double = 0.01,
     val minInlierRatio: Double = 0.6,
     val minCosIncidence: Double = 0.26,
     val refitIntervalNanos: Long = 150_000_000L,
     val ransac: RansacConfig = RansacConfig(inlierThreshold = 0.01, maxIterations = 200, minInliers = 16),
     val bufferConeFactor: Double = 3.0,
-    val depthBandMin: Double = 0.04,
+    val depthBandMin: Double = 0.015,
     val depthBandRel: Double = 0.05,
-)
+) {
+    /** RANSAC inlier band at [rangeM]: max([inlierMin], [inlierRel] × range), never above the room-scale band. */
+    fun inlierThreshold(rangeM: Double): Double =
+        kotlin.math.min(ransac.inlierThreshold, kotlin.math.max(inlierMin, inlierRel * rangeM))
+
+    /** RMS limit at [rangeM]: max([maxRmsMin], [maxRmsRel] × range), never above [maxRms]. */
+    fun rmsLimit(rangeM: Double): Double = kotlin.math.min(maxRms, kotlin.math.max(maxRmsMin, maxRmsRel * rangeM))
+}
 
 /**
  * Keeps recent world-space points and fits a local plane around the reticle ray on demand.
@@ -154,8 +165,13 @@ class LocalSurfaceModel(private val config: LocalSurfaceConfig = LocalSurfaceCon
             current = null
             return null
         }
-        val fit = PlaneFitter.ransac(near, config.ransac)
-        current = if (fit != null && fit.rmsResidual <= config.maxRms && fit.inlierRatio >= config.minInlierRatio) {
+        // W10 (research C7): inlier band and RMS limit scale with the range (tighter up close), capped at the room-scale
+        // values so 1–3 m behaviour is unchanged.
+        val range = hint ?: (near.sumOf { (it - o) dot d } / near.size)
+        val tol = config.inlierThreshold(range)
+        val ransac = RansacConfig(tol, config.ransac.maxIterations, config.ransac.confidence, config.ransac.minInliers)
+        val fit = PlaneFitter.ransac(near, ransac)
+        current = if (fit != null && fit.rmsResidual <= config.rmsLimit(range) && fit.inlierRatio >= config.minInlierRatio) {
             LocalSurface(fit, near.size, nowNs)
         } else {
             null

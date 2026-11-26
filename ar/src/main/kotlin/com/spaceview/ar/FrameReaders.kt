@@ -5,6 +5,8 @@ import android.media.Image
 import com.google.ar.core.Coordinates2d
 import com.google.ar.core.DepthPoint
 import com.google.ar.core.Frame
+import android.hardware.camera2.CameraMetadata
+import com.google.ar.core.ImageMetadata
 import com.google.ar.core.InstantPlacementPoint
 import com.google.ar.core.Plane
 import com.google.ar.core.Point
@@ -15,6 +17,9 @@ import com.google.ar.core.exceptions.NotYetAvailableException
 import com.spaceview.engine.Vec3
 import kotlin.math.max
 import kotlin.math.roundToInt
+
+/** [best] hit under the reticle, plus a plane hit outside its polygon ([extendedPlane]) when no in-polygon plane was hit. */
+internal class CentreHits(val best: ArHit?, val extendedPlane: ArHit?)
 
 /** Best surface under the reticle in one frame (main-thread only: holds an ARCore trackable). */
 internal class ArHit(
@@ -52,16 +57,28 @@ internal object FrameReaders {
      * feature-point hit is clearly nearer (then the plane lies behind the real surface, e.g. the
      * floor under a box). Instant Placement points are never used.
      */
-    fun centreHit(frame: Frame, x: Float, y: Float): ArHit? {
+    fun centreHit(frame: Frame, x: Float, y: Float): ArHit? = centreHits(frame, x, y)?.best
+
+    /**
+     * [centreHit] plus the first tracked plane hit **outside** its polygon (W10, research C6: ARKit's "existing plane,
+     * infinite"). When the object fills the view, the table polygon may not reach under it yet; the caller may use
+     * that infinite-plane hit when a depth / feature hit agrees with it ([SurfaceChooser.choose]).
+     */
+    fun centreHits(frame: Frame, x: Float, y: Float): CentreHits? {
         val hits = try { frame.hitTest(x, y) } catch (e: Exception) { return null }
+        var extended: ArHit? = null
         var plane: ArHit? = null
         var depth: ArHit? = null
         var feature: ArHit? = null
         for (hit in hits) {
             val pose = hit.hitPose
             when (val t = hit.trackable) {
-                is Plane -> if (plane == null && t.trackingState == TrackingState.TRACKING && t.subsumedBy == null && t.isPoseInPolygon(pose)) {
-                    plane = ArHit(pose.position(), pose.yAxisVec(), HitKind.PLANE, hit.distance.toDouble(), t)
+                is Plane -> if (t.trackingState == TrackingState.TRACKING && t.subsumedBy == null) {
+                    if (t.isPoseInPolygon(pose)) {
+                        if (plane == null) plane = ArHit(pose.position(), pose.yAxisVec(), HitKind.PLANE, hit.distance.toDouble(), t)
+                    } else if (extended == null) {
+                        extended = ArHit(pose.position(), pose.yAxisVec(), HitKind.PLANE, hit.distance.toDouble(), t)
+                    }
                 }
                 is DepthPoint -> if (depth == null && t.trackingState == TrackingState.TRACKING) {
                     depth = ArHit(pose.position(), pose.yAxisVec(), HitKind.DEPTH_POINT, hit.distance.toDouble(), t)
@@ -76,11 +93,36 @@ internal object FrameReaders {
             }
         }
         val nonPlane = depth ?: feature
-        if (plane == null) return nonPlane
-        if (nonPlane == null) return plane
-        val tol = max(NEARER_ABS_M, NEARER_REL * plane.distance)
-        return if (nonPlane.distance < plane.distance - tol) nonPlane else plane
+        val best = when {
+            plane == null -> nonPlane
+            nonPlane == null -> plane
+            else -> if (nonPlaneWins(plane.distance, nonPlane.distance)) nonPlane else plane
+        }
+        return CentreHits(best, extended.takeIf { plane == null })
     }
+
+    /**
+     * This frame's optics from `ImageMetadata` (W10, research §2.1): exposure time, lens / autofocus state and the
+     * frame's own CPU-image focal length. Any missing key degrades gracefully (exposure null, lens assumed settled).
+     */
+    fun optics(frame: Frame): OpticsSample? {
+        val focal = imageIntrinsics(frame)?.focalPx ?: return null
+        val meta = try { frame.imageMetadata } catch (e: Exception) { null }
+        val exposure = meta?.let { m -> runCatching { m.getLong(ImageMetadata.SENSOR_EXPOSURE_TIME) }.getOrNull() }
+        val lens = meta?.let { m -> runCatching { m.getByte(ImageMetadata.LENS_STATE).toInt() }.getOrNull() }
+        val af = meta?.let { m -> runCatching { m.getByte(ImageMetadata.CONTROL_AF_STATE).toInt() }.getOrNull() }
+        val moving = lens == CameraMetadata.LENS_STATE_MOVING ||
+            af == CameraMetadata.CONTROL_AF_STATE_PASSIVE_SCAN || af == CameraMetadata.CONTROL_AF_STATE_ACTIVE_SCAN
+        return OpticsSample(exposure?.takeIf { it > 0 }, focal, moving)
+    }
+
+    /**
+     * True when a depth / feature hit at [otherDistance] is clearly nearer than the plane hit at [planeDistance]: the
+     * plane lies behind the real surface (a box on the floor, a padded menu on a table). Nearer by
+     * max([NEARER_ABS_M], [NEARER_REL] × range) (W10: 8 mm, so a 5–10 mm thick object wins at arm's length).
+     */
+    fun nonPlaneWins(planeDistance: Double, otherDistance: Double): Boolean =
+        otherDistance < planeDistance - max(NEARER_ABS_M, NEARER_REL * planeDistance)
 
     /**
      * Offers the centre of every tracked, upward-facing ARCore plane to [floor] as an on-plane vote (W4 / W5: the
@@ -278,7 +320,8 @@ internal object FrameReaders {
     }
 
     /** A depth / feature hit this much nearer than a plane hit wins over it. */
-    private const val NEARER_ABS_M = 0.03
+    /** W10 (research C4): was 3 cm, so a 5–10 mm thick menu always lost to the table plane at 0.3 m. */
+    internal const val NEARER_ABS_M = 0.008
     private const val NEARER_REL = 0.03
 
     /** Depth window half-size, in pixels of a 160-px-wide depth image (≈ ±5° around the reticle). */

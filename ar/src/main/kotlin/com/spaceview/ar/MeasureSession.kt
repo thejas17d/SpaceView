@@ -60,6 +60,9 @@ import kotlin.math.abs
  * @property surfaceSeen W6: a usable surface point has been found at least once in this ARCore session (until then the
  *   UI coaches "move the phone slowly side to side").
  * @property diagnostics W6: surface-finding timings for the debug HUD line.
+ * @property rangeAdvice W10: the range guide for the surface under the crosshair (too close / move back), or
+ *   [RangeAdvice.STEP_BACK] when the points of a rectangle or box no longer fit in the view.
+ * @property warmingUp W10: the scale warm-up sweep is not done yet; no point can be placed (coach "move side to side").
  */
 data class MeasureState(
     val mode: MeasureMode = MeasureMode.DISTANCE,
@@ -82,6 +85,8 @@ data class MeasureState(
     val aimTooSteep: Boolean = false,
     val surfaceSeen: Boolean = false,
     val diagnostics: SurfaceDiagnostics? = null,
+    val rangeAdvice: RangeAdvice = RangeAdvice.OK,
+    val warmingUp: Boolean = false,
 ) {
     val requiredPoints: Int get() = mode.requiredPoints
 }
@@ -110,6 +115,12 @@ enum class CommitFailure {
 
     /** [MeasureMode.BOX]: the top point is not above the base (aim at the top of the object). */
     BOX_TOP_TOO_LOW,
+
+    /** W10: the surface is nearer than [RangeGuide.REFUSE_BELOW_M]. */
+    TOO_CLOSE,
+
+    /** W10: the scale warm-up sweep ([ScaleWarmUp]) is not done yet. */
+    WARMING_UP,
 }
 
 /** One-off events (sounds, snackbars). */
@@ -139,8 +150,11 @@ class FrozenFrame(
  * The front photo of a scan: the CPU camera image (sensor orientation, ARGB) and the four face corners
  * in its pixels, top-left, top-right, bottom-right, bottom-left as seen from the front (x, y pairs).
  * The receiver owns [bitmap] (rectify it, then recycle it).
+ *
+ * @property camera the sensor pose and the intrinsics of [bitmap] at capture (PLAN v3.1 W8: lets Review turn
+ *   adjusted corner pixels back into metres); null when unknown.
  */
-class FrontPhoto(val bitmap: Bitmap, val cornersPx: FloatArray)
+class FrontPhoto(val bitmap: Bitmap, val cornersPx: FloatArray, val camera: com.spaceview.engine.CaptureCamera? = null)
 
 /** Result of dragging the last point on a frozen frame. */
 class FrozenAdjustment(val screen: ScreenPoint, val position: Vec3, val reading: Reading?)
@@ -286,6 +300,11 @@ class MeasureSession(
     // ---- W5 / W6, main thread ----
     /** The floor under the camera (W5 far base): robust lowest horizontal surface of this session. */
     private val floor = FloorEstimator()
+    /** W10: the camera must have moved and turned enough before the first point of a session (scale warm-up). */
+    private val warmUp = ScaleWarmUp()
+    private var warmUpDone = false
+    /** W10: points of a rectangle / box are out of the view (main-owned flag behind [RangeAdvice.STEP_BACK]). */
+    private var outOfView = false
     private var frameCounter = 0
     /** Camera timestamp of the last processed frame (repeats are skipped on main, W6). */
     private var lastFrameTs = Long.MIN_VALUE
@@ -369,6 +388,8 @@ class MeasureSession(
         lastPlaneHit = null
         lastPointCloudTs = -1L
         floor.reset()
+        warmUp.reset()
+        warmUpDone = false
         sessionEpoch++
         sessionStartMs = -1L
         lastFrameTs = Long.MIN_VALUE
@@ -465,14 +486,27 @@ class MeasureSession(
         var hit: ArHit? = null
         var cloudCount = 0
         var depth: DepthPatch? = null
+        var optics: OpticsSample? = null
+        var extended: ArHit? = null
         if (tracking == CameraTracking.TRACKING) {
             // Camera-image intrinsics (fixed for the session's camera config): the aim error is
             // defined in camera-image pixels, never in view pixels (M2 review B1).
-            if (intrinsics == null) {
-                intrinsics = FrameReaders.imageIntrinsics(frame)
-                updateViewScale()
+            // W10 (research C11): intrinsics per frame, since autofocus moves the lens (and the focal length with it).
+            FrameReaders.imageIntrinsics(frame)?.let { fresh ->
+                val old = intrinsics
+                if (old == null || old.focalPx != fresh.focalPx || old.widthPx != fresh.widthPx) {
+                    intrinsics = fresh
+                    updateViewScale()
+                }
             }
-            hit = FrameReaders.centreHit(frame, centreX, centreY)
+            optics = FrameReaders.optics(frame)
+            val hits = FrameReaders.centreHits(frame, centreX, centreY)
+            hit = hits?.best
+            extended = hits?.extendedPlane
+            if (!warmUpDone) {
+                warmUp.add(cameraPose)
+                if (warmUp.ready) warmUpDone = true
+            }
             latestCentreHit = hit
             if (hit?.kind == HitKind.PLANE) lastPlaneHit = hit
             val n = FrameReaders.pointCloud(frame, lastPointCloudTs, sample.cloud, cloudTs)
@@ -529,6 +563,9 @@ class MeasureSession(
         sample.mode = mode
         sample.frozen = frozenCapture != null
         sample.floorY = floor.floorY() ?: Double.NaN
+        sample.optics = optics
+        sample.extended = extended?.let { HitSample(it.position, it.normal, it.kind, it.distance) }
+        updateMainGuides(vp)
         sample.epoch = sessionEpoch
         // DROP_OLDEST: a dropped sample goes back to the pool through onUndeliveredElement.
         if (frames.trySend(sample).isFailure) samplePool.offer(sample)
@@ -594,6 +631,8 @@ class MeasureSession(
             )
             if (!allowed) return null
             val c = candidate ?: return null
+            // W10: never dropped too close, or before the scale warm-up of the session.
+            if (c.tooClose || (!warmUpDone && endpoints.isEmpty())) return null
             return c.data.takeIf { c.locked && SystemClock.elapsedRealtimeNanos() - c.wallNs < STALE_NS }
         }
 
@@ -641,6 +680,56 @@ class MeasureSession(
         tapGuard.onPointsRemoved()
         bumpGeneration()
         _state.update { it.copy(pointCount = 0, isComplete = false, tip = null, reading = null, pendingCommit = false) }
+    }
+
+    /**
+     * W9: commits a rectangle found by [RectangleFinder] as the measurement's 4 corners (top-left, top-right,
+     * bottom-right, bottom-left), anchored in the world like tapped points. Only in [MeasureMode.RECTANGLE] with no
+     * point placed yet. False when refused (then nothing changed).
+     */
+    @MainThread
+    fun commitDetectedRectangle(corners: List<EndpointData>): Boolean {
+        val s = session
+        if (closed || !live || s == null || frozenCapture != null || mode != MeasureMode.RECTANGLE || endpoints.isNotEmpty() || corners.size != 4) return false
+        if (lastTracking != CameraTracking.TRACKING) return false
+        val made = ArrayList<Endpoint>(4)
+        for (c in corners) {
+            val a = createAnchor(s, c) ?: run {
+                made.forEach { detach(it) }
+                return false
+            }
+            made += Endpoint(a, c, auto = true)
+        }
+        commitRequestedAtMs = -1L
+        endpoints += made
+        bumpGeneration()
+        tapGuard.onCommitted(SystemClock.elapsedRealtime(), corners.last().point.position, auto = true, complete = true)
+        _state.update { it.copy(pendingCommit = false, pointCount = endpoints.size, isComplete = true) }
+        _events.tryEmit(MeasureEvent.PointAdded(endpoints.size - 1, true, auto = true))
+        return true
+    }
+
+    /** W10: the warm-up and step-back flags owned by the main thread, published when they change. */
+    private fun updateMainGuides(vp: ViewProjection) {
+        val warming = !warmUpDone
+        val multi = (mode == MeasureMode.RECTANGLE || mode == MeasureMode.BOX) && endpoints.isNotEmpty() && endpoints.size < mode.requiredPoints
+        val out = multi && !RangeGuide.fitsView(
+            DoubleArray(endpoints.size) { vp.project(endpoints[it].data.point.position)?.x?.toDouble() ?: Double.NaN },
+            DoubleArray(endpoints.size) { vp.project(endpoints[it].data.point.position)?.y?.toDouble() ?: Double.NaN },
+            viewW, viewH,
+        )
+        val cur = _state.value
+        if (cur.warmingUp != warming || out != outOfView) {
+            outOfView = out
+            _state.update {
+                val advice = when {
+                    out -> RangeAdvice.STEP_BACK
+                    it.rangeAdvice == RangeAdvice.STEP_BACK -> RangeAdvice.OK
+                    else -> it.rangeAdvice
+                }
+                it.copy(warmingUp = warming, rangeAdvice = advice)
+            }
+        }
     }
 
     /** Committed endpoints. */
@@ -808,6 +897,14 @@ class MeasureSession(
         val fresh = c != null && SystemClock.elapsedRealtimeNanos() - c.wallNs < STALE_NS
         if (tracking == CameraTracking.TRACKING && fresh && c.locked) {
             val data = c.data
+            if (!warmUpDone && endpoints.isEmpty()) {
+                finishCommit(CommitFailure.WARMING_UP)
+                return
+            }
+            if (c.tooClose) {
+                finishCommit(CommitFailure.TOO_CLOSE)
+                return
+            }
             if (endpoints.any { it.data.point.position.distanceTo(data.point.position) < MeasurementComposer.MIN_LENGTH_M }) {
                 finishCommit(CommitFailure.SAME_SPOT)
                 return
@@ -919,7 +1016,8 @@ class MeasureSession(
      * every few frames; the face is rebuilt once more at the moment of capture.
      */
     private fun processFrontCapture(frame: Frame, pose: com.spaceview.engine.Pose, trackingOk: Boolean, anchored: Boolean) {
-        val cam = cpuCamera ?: FrameReaders.cpuImageCamera(frame)?.also { cpuCamera = it } ?: return
+        // W10 (research C11): the capture uses this very frame's intrinsics (autofocus moves the lens).
+        val cam = FrameReaders.cpuImageCamera(frame)?.also { cpuCamera = it } ?: cpuCamera ?: return
         val take = capture.onFrame(frame.timestamp, trackingOk, anchored, pose, ::currentPoints, cam, cornerPx)
         val status = capture.status
         if (_frontCapture.value != status) _frontCapture.value = status
@@ -964,7 +1062,7 @@ class MeasureSession(
                     return@launch
                 }
                 _frontPhoto.value?.bitmap?.recycle()
-                _frontPhoto.value = FrontPhoto(b, corners)
+                _frontPhoto.value = FrontPhoto(b, corners, com.spaceview.engine.CaptureCamera(pose, imageCam.intrinsics, imageCam.widthPx, imageCam.heightPx))
                 bitmap = null // published: the receiver owns it now
             } finally {
                 bitmap?.recycle()
@@ -1011,6 +1109,7 @@ class MeasureSession(
         var lowLightSeen = false
         var lastTs = Long.MIN_VALUE
         var noSurfaceRun = 0
+        var lastRange = Double.NaN
         var kindRun = 0
         var lastGround = false
         var epoch = -1
@@ -1036,7 +1135,8 @@ class MeasureSession(
                 if (repeated && s.generation == lastGeneration) continue
                 val reps = repeatedFrames
                 if (diag.repeatedFrames != reps) diag = diag.copy(repeatedFrames = reps)
-                val gateResult = gate.update(s.timestampNs, s.tracking, s.reason, s.cameraPose, s.light)
+                // W10: blur and focus gate from this frame's ImageMetadata, at the last surface range.
+                val gateResult = gate.update(s.timestampNs, s.tracking, s.reason, s.cameraPose, s.light, s.optics, lastRange)
                 if (s.endpoints.isEmpty()) lowLightSeen = false
                 if (gateResult.lowLight) lowLightSeen = true
                 val tracked = gateResult.sampleQuality != TrackingQuality.NOT_TRACKING
@@ -1057,7 +1157,7 @@ class MeasureSession(
                         HeightAim.Top.TooSteep -> { tooSteep = true; null }
                         HeightAim.Top.None -> null
                         null -> {
-                            val surfacePoint = SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs)
+                            val surfacePoint = SurfaceChooser.choose(s.hit, surface, ray, s.cameraPose.translation, s.timestampNs, s.extended)
                             noSurfaceRun = if (surfacePoint == null) noSurfaceRun + 1 else 0
                             // Far base only after a run of frames with nothing under the crosshair (review MINOR 3): a hit
                             // that drops out for a frame must not flip the base to the floor behind it.
@@ -1074,6 +1174,8 @@ class MeasureSession(
                     liveAim = null
                 }
                 val range = chosen?.range ?: 0.0
+                if (chosen != null) lastRange = range
+                val advice = if (chosen != null) RangeGuide.advise(range) else RangeAdvice.OK
                 val loc = chosen?.localisation(s.intrinsics?.let { AimModel.aim(range, it, s.viewPxPerImagePx) })
                 val ground = chosen?.kind == HitKind.GROUND
                 val active = if (ground) groundStabilizer else stabilizer
@@ -1116,7 +1218,7 @@ class MeasureSession(
                 if (chosen != null) surfaceSeen = true
                 // Only a full-quality frame may offer a commit (never during the post-loss warm-up).
                 candidate = if (liveData != null && est != null && gateResult.sampleQuality == TrackingQuality.TRACKING) {
-                    CommitCandidate(liveData, est.isStable, s.timestampNs, SystemClock.elapsedRealtimeNanos())
+                    CommitCandidate(liveData, est.isStable, s.timestampNs, SystemClock.elapsedRealtimeNanos(), advice == RangeAdvice.TOO_CLOSE)
                 } else {
                     null
                 }
@@ -1155,6 +1257,8 @@ class MeasureSession(
                             aimTooSteep = tooSteep,
                             surfaceSeen = surfaceSeen,
                             diagnostics = diag,
+                            // STEP_BACK (main-owned, from the projected points) wins over the worker's range advice.
+                            rangeAdvice = if (cur.rangeAdvice == RangeAdvice.STEP_BACK && advice != RangeAdvice.TOO_CLOSE) cur.rangeAdvice else advice,
                         )
                     }
                 }
@@ -1206,7 +1310,14 @@ class MeasureSession(
         val viewPxPerImagePx: Double,
     )
 
-    private class CommitCandidate(val data: EndpointData, val locked: Boolean, val timestampNs: Long, val wallNs: Long)
+    private class CommitCandidate(
+        val data: EndpointData,
+        val locked: Boolean,
+        val timestampNs: Long,
+        val wallNs: Long,
+        /** W10: nearer than the range guide allows. */
+        val tooClose: Boolean = false,
+    )
 
     /**
      * One frame's copied-out data, pooled (R3). Filled on main, read by the worker, then returned to
@@ -1234,6 +1345,10 @@ class MeasureSession(
         var frozen = false
         /** The floor height (world y) under the camera, NaN when unknown (W5 far base). */
         var floorY = Double.NaN
+        /** W10: this frame's optics (exposure, focal, lens state), null when unknown. */
+        var optics: OpticsSample? = null
+        /** W10: a plane hit outside its polygon (the infinite plane), when no in-polygon plane was hit. */
+        var extended: HitSample? = null
         /** [sessionEpoch] when filled. */
         var epoch = 0
     }

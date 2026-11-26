@@ -173,7 +173,7 @@ class DwellTrigger(
         const val STEADY_MAX_LINEAR_M_S = 0.10
 
         /** The target may wander this far (or [DRIFT_REL] × range) from where the hold started. */
-        const val DRIFT_M = 0.01
+        const val DRIFT_M = 0.003 // W10 (research C2): was 1 cm at any range; 1 % of range still rules from 0.3 m
 
         /** Relative drift limit (1% of the range: 3 cm at 3 m, where the aim error is already larger). */
         const val DRIFT_REL = 0.01

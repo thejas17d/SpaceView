@@ -85,6 +85,7 @@ internal fun MeasureHud(
     calibrationCheck: (ReferenceObject) -> CalibrationCheck?,
     knownLengthCheck: (Double, Double) -> CalibrationCheck?,
     handsFree: HandsFreeUi? = null,
+    @androidx.annotation.StringRes rectHint: Int? = null,
 ) {
     val coaching = state.tracking == TrackingStatus.INITIALIZING || !state.sessionRunning
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -107,7 +108,7 @@ internal fun MeasureHud(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            HintArea(state, settings, calibration, sessionFailed, transient, onStartOver, onRetrySession, onDismissSafety)
+            HintArea(state, settings, calibration, sessionFailed, transient, onStartOver, onRetrySession, onDismissSafety, rectHint)
             // W6: debug builds show how long surface finding took (R8 removes this from release: DEBUG is a constant).
             if (com.spaceview.app.BuildConfig.DEBUG) SurfaceDebugLine(state)
         }
@@ -172,7 +173,9 @@ private fun HintArea(
     onStartOver: () -> Unit,
     onRetrySession: () -> Unit,
     onDismissSafety: () -> Unit,
+    @StringRes rectHint: Int? = null,
 ) {
+    val guide = closeRangeHintRes(state)
     when {
         sessionFailed -> CoachingCard(
             message = stringResource(R.string.arcore_session_failed),
@@ -196,6 +199,10 @@ private fun HintArea(
         calibration == CalibrationStep.Choosing -> Unit
         state.isComplete -> Unit
         state.pendingCommit -> CoachingCard(message = stringResource(R.string.measure_hold_steady))
+        // W10: scale warm-up first, then the range guide (too close / move back / step back).
+        guide != null -> CoachingCard(message = stringResource(guide))
+        // W9: the rectangle finder's coaching while it searches and holds.
+        rectHint != null -> CoachingCard(message = stringResource(rectHint))
         // W5: the height top is on the vertical plane through the base; past 75° grazing it is refused.
         state.aimTooSteep -> CoachingCard(message = stringResource(R.string.measure_height_too_steep))
         // W6: until the first surface point of the session, coach the motion that finds one.
@@ -222,6 +229,8 @@ private fun TransientMessage.messageRes(): Int = when (this) {
         CommitFailure.NOT_STEADY -> R.string.measure_reject_not_steady
         CommitFailure.SAME_SPOT -> R.string.measure_reject_same_spot
         CommitFailure.BOX_TOP_TOO_LOW -> R.string.scan_reject_box_top
+        CommitFailure.TOO_CLOSE -> R.string.measure_reject_too_close
+        CommitFailure.WARMING_UP -> R.string.measure_reject_warming_up
     }
     TransientMessage.FreezeUnavailable -> R.string.measure_freeze_unavailable
     TransientMessage.Saved -> R.string.measure_saved
@@ -559,4 +568,19 @@ internal fun surfaceDebugText(d: com.spaceview.ar.SurfaceDiagnostics, now: com.s
     }
     return "dbg track ${s(d.trackingMs)} · hit ${s(d.firstHitMs)} ${d.firstHitKind ?: ""} · lock ${s(d.firstLockMs)} · " +
         "now ${now ?: "-"} · depth $depth · rep ${d.repeatedFrames}"
+}
+
+/**
+ * W10 coaching from the AR state, shared by Measure and Scan: the scale warm-up sweep before the first point, then the
+ * range guide (refuse < 25 cm, "move back" < 35 cm) and "step back" when a rectangle / box no longer fits. Null when
+ * none applies (or once the measurement is complete).
+ */
+@StringRes
+internal fun closeRangeHintRes(state: MeasureState): Int? = when {
+    state.isComplete -> null
+    state.warmingUp && state.pointCount == 0 -> R.string.measure_coach_move
+    state.rangeAdvice == com.spaceview.ar.RangeAdvice.TOO_CLOSE -> R.string.measure_too_close
+    state.rangeAdvice == com.spaceview.ar.RangeAdvice.STEP_BACK -> R.string.measure_step_back
+    state.rangeAdvice == com.spaceview.ar.RangeAdvice.MOVE_BACK_HINT -> R.string.measure_move_back
+    else -> null
 }

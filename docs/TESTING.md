@@ -507,5 +507,51 @@ Phone: Google Pixel 10a. **"Use depth" is now ON by default**, so first check it
 13. **Hindi:** in the Hindi locale, every Distance string shows in Hindi.
 14. **Imperial units:** decimal feet, never with more digits than the ± supports.
 
+## 24. PLAN v3.1 W8 (Builder B): Auto or Adjust corners after a scan (`docs/PLAN-v3.1-precision.md`)
+
+Phone: **Google Pixel 10a**, debug or release. Use a picture frame on a wall and a carton on the floor, each with a tape-measured width and height.
+
+1. **Auto first:** after a scan, Review shows the picture with **Auto** selected and "Corners found and measured automatically…". Width, height and ± are exactly what AR showed.
+2. **Open the editor:** tap **Adjust corners**. The frozen front photo opens upright (the object's top at the top, in portrait and landscape scans) with the 4 corners joined by a line.
+3. **Drag a corner:** the corner follows the finger; a round **magnifier** in the top corner (away from your finger) shows the spot 3× with a crosshair.
+4. **Drag a side:** touching a side (not a corner) moves both of its corners together.
+5. **Snapping:** release a corner a few pixels from the frame's real corner: it jumps onto it. Turn **Snap to corners in the photo** off: it stays exactly where released. On a plain wall (no corner nearby) it never jumps.
+6. **Done:** the note says the corners were set by you; **width and height change** and keep a ±. Check them with the tape: put each corner exactly on the frame's outer corner and the result must be inside its ±. Moving a corner sideways by a frame-moulding width should change the width by about that much (it is geometry, not a pixel ratio).
+7. **Picture follows:** the straightened picture (and, for the carton, the background-free cutout) is redone from the new corners: nothing outside them, the inside not stretched.
+8. **Crossed corners:** drag the top-left corner past the top-right one and tap Done: "These corners can't be measured…" and the editor stays open; the Review is unchanged.
+9. **Reset to auto** (in the editor or on the Review): the AR width, height, ± and picture come back.
+10. **Save and gallery:** save an adjusted scan. The gallery item shows the adjusted size and picture; Place shows the cutout at the adjusted W × H (check against the tape).
+11. **Process death (important):** adjust the corners (don't save), then turn on Developer options → **Don't keep activities** (or `adb shell am kill com.spaceview.app.debug` with the app in the background) and come back. The Review returns with the **adjusted** corners, sizes, name and the picture. If the picture could not be kept, it says so and the sizes are still the adjusted ones.
+12. **Measure again / Back:** leaves the Review as before (asks first when there is work to lose); no adjusted corners carry into the next scan.
+13. Hindi: every new label, note and the editor's hint are in Hindi.
+14. TalkBack: the Auto / Adjust chips and the editor buttons are announced; the photo has a description.
+
+## 25. PLAN v3.1 W10 + W9 (Builder A): close range, smart hands-free rectangles (`docs/PLAN-v3.1-precision.md`)
+
+1. **Range guide:** with an A4 menu, 0.20 m refuses, 0.30 m gives the "move back" hint, and 0.5 m gives no hint. In Rectangle mode, "Step back…" appears once the corners leave the screen.
+2. **Warm-up:** on a fresh Measure, the first point is refused until the phone has moved about 20 cm side to side. Record how long that takes.
+3. **Blur:** sliding the phone at 0.3 m holds the stability ring. After a refocus (tap the object, then a far object), the frames are not averaged.
+4. **Padded menu (5–10 mm thick) on a table at 0.4–0.6 m:** points land on the menu, not on the table, and W is inside its ±.
+5. **Hands-free rectangle:**
+   - Use an A4 on wood, an A4 on a white cloth and a laminated menu, each at 0.5 m and 1 m.
+   - The outline appears, then holds, locks and is measured.
+   - Record the time to lock and the error vs tape.
+   - A frame with glass gives its outer border.
+   - A view steeper than 45° says "Face the rectangle more squarely".
+6. **No false rectangle:** sweeping over table edges and tiles for 1 minute never locks.
+7. **Scan FLAT, hands-free:** the same lock gives the outline.
+8. **Regression:** Height and Distance (§23) still pass.
+9. **Debug timing:** `adb logcat -s SpaceViewRect` shows the per-detection time (target ≤ 30 ms). Measure stays at 30 fps with hands-free rectangles on. Also record the blur estimate in the `dbg` line.
+10. **Side by side with a non-LiDAR iPhone (accuracy contract, PLAN v3.1 §2):** run `docs/research/close-range-and-rectangles.md` §6 in full.
+    - Setup: 0.3–3 m; views at 0°, 30° and 45°; two light levels; 10 trials in A-B-B-A order.
+    - **Pass:**
+      - median |error| ≤ the iPhone's;
+      - ± coverage ≥ 90 %;
+      - no confident badge below 0.25 m or at steep views.
+    - Also log:
+      - the fixed-vs-auto focus A/B at 0.4 m and 0.6 m;
+      - the coverage at 0.3–0.5 m, to decide whether to lower the tier floor.
+11. **Snap (W8 + W9):** in Adjust corners, a corner snaps sub-pixel onto a sharp corner and onto a rounded frame corner. Check that the 9 px jump cap still feels right.
+
 ## Values to tune from results
 Aim error 2 px, motion gates, RANSAC limits, Good/Fair/Rough thresholds, device-tier ± floors (1 cm / 5 mm), calibration acceptance.

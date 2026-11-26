@@ -24,6 +24,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -94,6 +95,66 @@ class ScanViewModelTest {
         v.skipPhoto()
         assertEquals(ScanStep.REVIEW, v.state.value.step)
         return v
+    }
+
+    /** PLAN v3.1 W8: adjusted corners re-measure W from geometry, reach the draft, and survive process death. */
+    @Test
+    fun adjustedCornersAreMeasuredSavedAndSurviveProcessDeath() {
+        val frame = listOf(Vec3(-0.3, 1.4, 0.0), Vec3(0.3, 1.4, 0.0), Vec3(0.3, 1.0, 0.0), Vec3(-0.3, 1.0, 0.0))
+        val cam = com.spaceview.engine.CaptureCamera(
+            com.spaceview.engine.Pose(Vec3(0.0, 1.2, 1.5)), com.spaceview.engine.CameraIntrinsics(500.0, 500.0, 320.0, 240.0), 640, 480,
+        )
+        fun m(v: Double, b: Double) = Measurement(v, b / Uncertainty.K95)
+        val measured = ScanOutline(
+            ScanShape.FLAT, m(0.6, 0.012), m(0.4, 0.011), null, m(0.72, 0.013), Quality.FAIR, false, true,
+            FrontFace(frame, Vec3.UNIT_Z), FaceChoice(0, Vec3.UP, Vec3.UNIT_Z),
+        )
+        val auto = FloatArray(8).also { out ->
+            frame.forEachIndexed { k, p -> com.spaceview.engine.FaceReprojection.project(p, cam)!!.let { out[2 * k] = it[0].toFloat(); out[2 * k + 1] = it[1].toFloat() } }
+        }
+        val handle = SavedStateHandle()
+        val v = vm(handle)
+        v.chooseKind(ObjectKind.FRAME)
+        v.onOutline(measured, null, DeviceTier.NO_DEPTH)
+        v.onCapture(auto, cam)
+        assertEquals(ScanStep.REVIEW, v.state.value.step)
+        assertFalse(v.state.value.cornersAdjusted)
+        assertTrue(v.state.value.canAdjustCorners)
+        // Drag the right side 2 px right: +6 mm at 1.5 m.
+        val dragged = auto.copyOf().also { it[2] += 2f; it[4] += 2f }
+        v.applyCorners(dragged)
+        assertTrue(v.state.value.cornersAdjusted)
+        assertEquals(0.606, v.state.value.outline!!.width.value, 1e-5)
+        assertEquals("the measured outline is kept for Reset", 0.6, v.state.value.autoOutline!!.width.value, 0.0)
+        v.setLabel("Hall frame")
+
+        // Process death: a new view model from the same SavedStateHandle comes back on the Review, adjusted.
+        val again = vm(handle)
+        val s = again.state.value
+        assertEquals(ScanStep.REVIEW, s.step)
+        assertTrue(s.restored)
+        assertArrayEquals(dragged, s.adjustedCorners!!, 0f)
+        assertArrayEquals(auto, s.autoCorners!!, 0f)
+        assertEquals(0.606, s.outline!!.width.value, 1e-5)
+        assertEquals("Hall frame", s.label)
+        again.save("Frame")
+        assertEquals(0.606, store.saved.single().width.meters, 1e-3)
+
+        // Crossed corners are refused; Reset to auto brings the measured size back.
+        val v2 = vm(SavedStateHandle())
+        v2.chooseKind(ObjectKind.FRAME)
+        v2.onOutline(measured, null, DeviceTier.NO_DEPTH)
+        v2.onCapture(auto, cam)
+        v2.applyCorners(auto.copyOf().also { it[0] = auto[2]; it[1] = auto[3]; it[2] = auto[0]; it[3] = auto[1] })
+        assertTrue(v2.state.value.cornersRefused)
+        assertFalse(v2.state.value.cornersAdjusted)
+        v2.applyCorners(dragged)
+        v2.resetCornersToAuto()
+        assertFalse(v2.state.value.cornersAdjusted)
+        assertEquals(0.6, v2.state.value.outline!!.width.value, 0.0)
+        // Setting the automatic corners again is "Auto", not an adjustment.
+        v2.applyCorners(auto.copyOf())
+        assertFalse(v2.state.value.cornersAdjusted)
     }
 
     private val rect = ArgbImage(4, 3, IntArray(12) { 0xFF336699.toInt() })
@@ -255,13 +316,23 @@ class ScanViewModelTest {
 
     @Test
     fun processDeathWhileMeasuringRestartsTheOutline() {
+        // While measuring (outline or photo step) the AR anchors cannot survive: measure again, same kind.
         val handle = SavedStateHandle()
-        atReview(vm(handle))
+        val v = vm(handle)
+        v.chooseKind(ObjectKind.FRAME)
+        v.onOutline(outline(), null, DeviceTier.NO_DEPTH)
+        assertEquals(ScanStep.PHOTO, v.state.value.step)
         val restored = vm(handle)
-        // The AR outline cannot survive (anchors die with ARCore): measure again, same kind.
         assertEquals(ScanStep.OUTLINE, restored.state.value.step)
         assertEquals(ObjectKind.FRAME, restored.state.value.kind)
         assertNull(restored.state.value.outline)
         assertEquals(ScanStep.TYPE, vm(SavedStateHandle()).state.value.step)
+        // PLAN v3.1 W8: on the Review the measured numbers need no anchors, so the Review comes back.
+        val h2 = SavedStateHandle()
+        atReview(vm(h2))
+        val review = vm(h2).state.value
+        assertEquals(ScanStep.REVIEW, review.step)
+        assertEquals(0.6, review.outline!!.width.value, 1e-9)
+        assertTrue(review.restored)
     }
 }

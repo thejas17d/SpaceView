@@ -23,7 +23,7 @@ The evidence is thin. **No peer-reviewed study** directly compares ARCore and AR
 | Benchmark of 4 proprietary VIO systems, *Sensors* 2022 (OptiTrack ground truth) | ARKit, ARCore, T265, ZED2 | ARKit most accurate and consistent, ARCore close second. Drift ≈ 0.02 m/s of motion. ARKit final drift 0.19 m in xy over a long trajectory | Drift grows with **path length/time**, so keep measurements local and short |
 | Feigl et al., GRAPP 2020 (large industrial hall) | ARCore, ARKit, HoloLens | Worst case: ~17 m drift over 120 m, **scale error up to 14.4 cm per metre** | Shows the failure mode in large, dynamic, low-feature spaces |
 | RealityCheck (ISM 2021) | ARCore | ~1.5 cm average virtual-object error vs ground truth over 22 trials | Rough hint at ARCore's local consistency |
-| ARCore depth evaluations (arXiv 2204.01693, ISPRS 2022) | ARCore depth-from-motion (OnePlus 6 etc.) | Per-scene depth errors of **~7–30 cm** in room-scale scenes | Monocular depth maps are **not** good enough to measure from directly. Use them only for refinement and plane fitting |
+| ARCore depth evaluations (ISPRS 2022; *citation corrected 2026-11-25: arXiv 2204.01693 was a miscitation, it is a social-distancing paper*) | ARCore depth-from-motion (OnePlus 6 etc.) | Per-scene depth errors of **~7–30 cm** in room-scale scenes | Monocular depth maps are **not** good enough to measure from directly. Use them only for refinement and plane fitting |
 | Google's own Measure app | ARCore | Pulled from Play Store June 2021. Reviews complained of stability and inaccuracy | Reputational warning: a mediocre Android measure app gets punished |
 | RoomPlan informal (it-jim) | ARKit + LiDAR | 6.45 m room measured as 6.821 m (+37 cm, ~5.8%). Forum reports ~15 cm. Apple publishes only detection precision/recall (91%/90% at 3D IoU 0.3 for objects; 95% walls/windows), **no cm accuracy** | RoomPlan is for floor plans, not certified dimensions |
 | iOS 13 Pro scanning apps vs TLS (MDPI 2025) | LiDAR apps | Big differences between apps on the same device. None met survey specs. Position tracking was the main weakness | App pipeline matters as much as the sensor |
@@ -304,7 +304,7 @@ Release gate: no regression of more than 10% in median or P95 against the previo
 - Feigl et al. (2020), *Localization Limitations of ARCore, ARKit, and Hololens in Dynamic Large-scale Industry Environments*. https://www.scitepress.org/Papers/2020/89899/89899.pdf
 - RealityCheck (ISM 2021). https://www.cs.ucr.edu/~jiasi/pub/RealityCheck_ism21.pdf
 - Hologram stability in markerless smartphone AR. https://arxiv.org/pdf/2109.14757
-- ARCore depth evaluations: https://arxiv.org/pdf/2204.01693 ; https://isprs-archives.copernicus.org/articles/XLIII-B2-2022/201/2022/isprs-archives-XLIII-B2-2022-201-2022.pdf
+- ARCore depth evaluations: https://isprs-archives.copernicus.org/articles/XLIII-B2-2022/201/2022/isprs-archives-XLIII-B2-2022-201-2022.pdf
 - MDPI 2023/2025 iPhone 13 Pro LiDAR scanning apps comparison. https://www.mdpi.com/2673-7418/3/4/30
 - ISPRS 2024 LiDAR apps on Apple devices. https://isprs-archives.copernicus.org/articles/XLVIII-2-W8-2024/431/2024/
 - Apple ML Research, *3D Parametric Room Representation with RoomPlan*. https://machinelearning.apple.com/research/roomplan

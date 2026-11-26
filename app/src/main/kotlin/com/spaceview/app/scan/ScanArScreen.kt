@@ -178,12 +178,22 @@ internal fun ScanArScreen(
                 .background(Color.Black)
                 .onSizeChanged { session.setViewSize(it.width, it.height) },
         ) {
+            // W9: a flat object's outline is found in the camera image when hands-free is on.
+            val scanState by session.state.collectAsStateWithLifecycle()
+            val finder = com.spaceview.app.measure.rememberRectangleFinder(
+                session,
+                enabled = handsFree.enabled && frozen == null && !sessionFailed && step == ScanStep.OUTLINE &&
+                    shape == com.spaceview.ar.ScanShape.FLAT,
+            )
+            val finderListeners = remember(finder) { listOf<com.spaceview.ar.ArFrameListener>(finder) }
             ArCameraView(
                 session,
                 planeRenderer = frozen == null && step == ScanStep.OUTLINE,
                 onSessionFailed = { sessionFailed = true },
+                extraListeners = finderListeners,
                 handsFree = handsFree,
             )
+            if (frozen == null && finder.enabled && scanState.pointCount == 0) com.spaceview.app.measure.RectangleOutline(finder)
             val f = frozen
             if (f != null) {
                 FreezeOverlay(
@@ -284,6 +294,9 @@ private fun ScanHud(
                 state.isComplete -> Unit
                 state.pendingCommit -> CoachingCard(message = stringResource(R.string.measure_hold_steady))
                 // W5: the box top is on the vertical plane; past 75° it is refused, and the user should step back.
+                // W10: scale warm-up and range guide.
+                com.spaceview.app.measure.closeRangeHintRes(state) != null ->
+                    CoachingCard(message = stringResource(com.spaceview.app.measure.closeRangeHintRes(state)!!))
                 state.aimTooSteep -> CoachingCard(message = stringResource(R.string.measure_height_too_steep))
                 wallHint -> CoachingCard(message = stringResource(R.string.scan_wall_hint))
                 // W6: until the first surface point of the session, coach the motion that finds one.
@@ -433,6 +446,8 @@ private fun CommitFailure.messageRes(): Int = when (this) {
     CommitFailure.NOT_STEADY -> R.string.measure_reject_not_steady
     CommitFailure.SAME_SPOT -> R.string.measure_reject_same_spot
     CommitFailure.BOX_TOP_TOO_LOW -> R.string.scan_reject_box_top
+    CommitFailure.TOO_CLOSE -> R.string.measure_reject_too_close
+    CommitFailure.WARMING_UP -> R.string.measure_reject_warming_up
 }
 
 private const val TRANSIENT_MS = 3000L

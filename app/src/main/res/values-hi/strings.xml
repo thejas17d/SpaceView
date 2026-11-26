@@ -315,4 +315,16 @@
     <string name="scan_cutout_not_sure">चीज़ के किनारे साफ़ नहीं मिले, इसलिए फ़ोटो आयत के रूप में रखी गई है। सादे बैकग्राउंड के सामने फिर से कोशिश करें।</string>
     <string name="scan_cutout_undo">कटआउट वापस लें</string>
     <string name="scan_cutout_redo">बैकग्राउंड फिर से हटाएँ</string>
+    <!-- Scan Review: Auto or Adjust corners (PLAN v3.1 W8, Builder B). -->
+    <string name="scan_corners_auto">अपने-आप</string>
+    <string name="scan_corners_adjust">कोने ठीक करें</string>
+    <string name="scan_corners_reset">अपने-आप पर लौटें</string>
+    <string name="scan_corners_auto_note">कोने अपने-आप ढूँढे और नापे गए। अगर वे चीज़ के किनारों पर नहीं हैं, तो उन्हें ठीक करें।</string>
+    <string name="scan_corners_adjusted_note">कोने आपने रखे हैं: चौड़ाई और ऊँचाई उन्हीं से फिर से नापी गई है।</string>
+    <string name="scan_corners_editor_title">कोने ठीक करें</string>
+    <string name="scan_corners_editor_hint">हर कोने, या किसी किनारे, को खींचकर चीज़ के असली किनारे पर रखें। आपकी उँगली के नीचे की जगह आवर्धक में बड़ी दिखती है।</string>
+    <string name="scan_corners_editor_a11y">चीज़ की फ़ोटो, उसके चार कोनों के साथ। किसी कोने या किनारे को खिसकाने के लिए खींचें।</string>
+    <string name="scan_corners_snap">फ़ोटो के कोनों पर चिपकाएँ</string>
+    <string name="scan_corners_refused">इन कोनों को नापा नहीं जा सकता। उन्हें चीज़ के सामने वाले हिस्से पर, क्रम में रखें (ऊपर बाएँ, ऊपर दाएँ, नीचे दाएँ, नीचे बाएँ)।</string>
+    <string name="scan_photo_lost">फ़ोन ने ऐप बंद किया तो फ़ोटो चली गई। आपके नाप और कोने रखे गए हैं; नई फ़ोटो के लिए फिर से नापें।</string>
 </resources>

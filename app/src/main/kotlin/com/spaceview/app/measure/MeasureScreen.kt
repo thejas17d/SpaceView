@@ -160,7 +160,21 @@ private fun MeasureArScreen(
                 .background(Color.Black)
                 .onSizeChanged { session.setViewSize(it.width, it.height) },
         ) {
-            ArCameraView(session, planeRenderer = frozen == null, onSessionFailed = { sessionFailed = true }, handsFree = handsFree)
+            // W9: hands-free rectangles are found in the camera image (outline → hold → locked → measured).
+            val state0 by session.state.collectAsStateWithLifecycle()
+            val finder = rememberRectangleFinder(
+                session,
+                enabled = handsFree.enabled && calibration == null && frozen == null && !sessionFailed &&
+                    measureMode == MeasureMode.RECTANGLE && state0.mode == MeasureMode.RECTANGLE,
+            )
+            val finderListeners = remember(finder) { listOf<com.spaceview.ar.ArFrameListener>(finder) }
+            ArCameraView(
+                session, planeRenderer = frozen == null, onSessionFailed = { sessionFailed = true },
+                extraListeners = finderListeners, handsFree = handsFree,
+            )
+            if (frozen == null && finder.enabled && state0.pointCount == 0) RectangleOutline(finder)
+            val finderState by finder.state.collectAsStateWithLifecycle()
+            val rectHint = finderState.hintRes()?.takeIf { finder.enabled && state0.pointCount == 0 }
 
             val f = frozen
             if (f != null) {
@@ -208,6 +222,7 @@ private fun MeasureArScreen(
                     calibrationCheck = session::calibrationCheck,
                     knownLengthCheck = session::knownLengthCheck,
                     handsFree = handsFree,
+                    rectHint = rectHint,
                 )
             }
         }

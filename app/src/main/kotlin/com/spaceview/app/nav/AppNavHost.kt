@@ -171,6 +171,8 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                     namer = mlKitObjectNamer(context),
                     // PLAN v3 W2 (Builder B): on-device background removal for Box / Other (ML Kit, Play services).
                     segmenter = mlKitSubjectSegmenter(context),
+                    // PLAN v3.1 W8 (Builder B): the Review's camera photo survives process death (cache, not Room).
+                    photoStore = com.spaceview.app.scan.FileReviewPhotoStore(java.io.File(context.cacheDir, com.spaceview.data.gallery.GalleryRepository.SCAN_REVIEW_DIR)),
                 )
             }
             // A scan visit is a Measure-style visit: an interstitial is only possible after a save, and only

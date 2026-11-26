@@ -59,6 +59,9 @@ enum class HitKind {
 
     /** Far height base (W5): the crosshair ray on the tracked floor beyond the hit range (Ground range, level floor). */
     GROUND,
+
+    /** W9: a corner of a rectangle found in the camera image (sub-pixel line intersection) and lifted onto its plane. */
+    DETECTED_CORNER,
 }
 
 /**
@@ -181,7 +184,8 @@ object MeasurementComposer {
                     // Only the first edge so far: show it as the width.
                     lengthReading(mode, all[0], all[1], model, extra, isLive, rounding)
                 } else {
-                    rectangleReading(all.take(3), model, extra, isLive, rounding)
+                    // W9: a detected rectangle commits all 4 corners (no inferred 4th corner); tapped ones are 3.
+                    rectangleReading(all.take(4), model, extra, isLive, rounding)
                 }
             }
             MeasureMode.BOX -> when (all.size) {

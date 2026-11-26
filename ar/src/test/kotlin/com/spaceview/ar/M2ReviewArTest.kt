@@ -191,9 +191,10 @@ class M2ReviewArTest {
         val plane = HitSample(Vec3(0.0, 0.0, -1.2), Vec3.UP, HitKind.PLANE, 1.7)
         val c = SurfaceChooser.choose(plane, LocalSurfaceModel(), toBoxTop, camera, 1L)!!
         assertEquals(HitKind.PLANE, c.kind)
-        assertEquals(0.0, c.planeBiasRel, 0.0)
+        // W10 (research C5): a plane hit carries the plane σ, max(1 mm, 0.5 %) of its range.
+        assertEquals(0.005, c.planeBiasRel, 1e-12)
         assertNull(SurfaceChooser.choose(null, LocalSurfaceModel(), toBoxTop, camera, 1L))
-        assertEquals(0.02, SurfaceChooser.tolerance(0.3), 0.0)
+        assertEquals(0.009, SurfaceChooser.tolerance(0.3), 1e-12) // W10: max(6 mm, 3 % of range)
         assertEquals(0.06, SurfaceChooser.tolerance(2.0), 1e-12)
     }
 

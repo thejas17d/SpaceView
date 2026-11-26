@@ -315,4 +315,16 @@
     <string name="scan_cutout_not_sure">Couldn\'t find the object\'s edges clearly, so the photo is kept as a rectangle. Try again against a plainer background.</string>
     <string name="scan_cutout_undo">Undo cutout</string>
     <string name="scan_cutout_redo">Remove background again</string>
+    <!-- Scan Review: Auto or Adjust corners (PLAN v3.1 W8, Builder B). -->
+    <string name="scan_corners_auto">Auto</string>
+    <string name="scan_corners_adjust">Adjust corners</string>
+    <string name="scan_corners_reset">Reset to auto</string>
+    <string name="scan_corners_auto_note">Corners found and measured automatically. If they miss the object\'s edges, adjust them.</string>
+    <string name="scan_corners_adjusted_note">Corners set by you: width and height were measured again from them.</string>
+    <string name="scan_corners_editor_title">Adjust corners</string>
+    <string name="scan_corners_editor_hint">Drag each corner, or a side, onto the object\'s real edge. A magnifier shows the spot under your finger.</string>
+    <string name="scan_corners_editor_a11y">Photo of the object with its four corners. Drag a corner or a side to move it.</string>
+    <string name="scan_corners_snap">Snap to corners in the photo</string>
+    <string name="scan_corners_refused">These corners can\'t be measured. Keep them on the object\'s face, in order (top left, top right, bottom right, bottom left).</string>
+    <string name="scan_photo_lost">The photo was lost when the phone closed the app. Your sizes and corners are kept; measure again for a new photo.</string>
 </resources>

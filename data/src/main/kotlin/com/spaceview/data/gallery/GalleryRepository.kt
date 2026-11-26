@@ -416,7 +416,11 @@ class GalleryRepository(
         writeLock.withLock {
             guarded {
                 dao.deleteAll()
-                val dirs = listOfNotNull(layout.galleryDir, shareDir(), File(cacheDir ?: File(filesDir, ".cache"), PLACE_DIR))
+                // SCAN_REVIEW_DIR: the unsaved capture photo kept for an open scan Review (PLAN v3.1 W8); app-owned, so it goes too.
+                val dirs = listOfNotNull(
+                    layout.galleryDir, shareDir(), File(cacheDir ?: File(filesDir, ".cache"), PLACE_DIR),
+                    cacheDir?.let { File(it, SCAN_REVIEW_DIR) },
+                )
                 // deleteRecursively() is true when the directory is gone afterwards (also when it never existed).
                 dirs.map { it.deleteRecursively() }.all { it }
             }
@@ -1026,6 +1030,9 @@ class GalleryRepository(
         const val THUMB = "thumb.webp"
         private const val STAGING_PREFIX = ".tmp-"
         private const val SHARE_DIR = "share"
+
+        /** Must match the folder `AppNavHost` gives `FileReviewPhotoStore`. */
+        const val SCAN_REVIEW_DIR = "scan-review"
 
         /** Share copies older than this are pruned on the next share. */
         internal const val SHARE_TTL_MS = 24L * 60 * 60 * 1000

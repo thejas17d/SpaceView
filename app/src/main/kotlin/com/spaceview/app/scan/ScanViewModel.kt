@@ -11,9 +11,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spaceview.app.scan.imaging.CutoutChoice
 import com.spaceview.app.scan.imaging.CutoutMaker
+import com.spaceview.app.scan.imaging.CornerSnap
 import com.spaceview.app.scan.imaging.CutoutStatus
 import com.spaceview.app.scan.imaging.FrontPhotoRectifier
 import com.spaceview.app.scan.imaging.JpegEncoder
+import com.spaceview.app.scan.imaging.QuarterTurns
 import com.spaceview.app.scan.imaging.SubjectSegmenter
 import com.spaceview.app.settings.SettingsRepository
 import com.spaceview.app.smart.NameSuggestion
@@ -29,6 +31,7 @@ import com.spaceview.data.gallery.ObjectKind
 import com.spaceview.data.gallery.ScanDraft
 import com.spaceview.data.settings.MeasureSettingsRepository
 import com.spaceview.engine.ArgbImage
+import com.spaceview.engine.CaptureCamera
 import com.spaceview.engine.DeviceTier
 import com.spaceview.engine.UnitPreference
 import kotlinx.coroutines.CancellationException
@@ -74,6 +77,42 @@ interface ScanStore {
     suspend fun shareCopy(id: Long, fileName: String): File?
 }
 
+/**
+ * Keeps the Review's camera photo across process death (PLAN v3.1 W8), in the app's cache, never in Room. Keyed per
+ * capture; removed when the Review ends (save, discard, a new photo, or the flow being closed).
+ */
+interface ReviewPhotoStore {
+    fun put(key: String, jpeg: ByteArray)
+    fun get(key: String): ByteArray?
+    fun remove(key: String)
+}
+
+/** [ReviewPhotoStore] in a cache directory (one file per capture). Never throws. */
+class FileReviewPhotoStore(private val dir: File) : ReviewPhotoStore {
+    private fun file(key: String) = File(dir, key.filter { it.isLetterOrDigit() || it == '-' } + ".jpg")
+
+    override fun put(key: String, jpeg: ByteArray) {
+        runCatching {
+            dir.mkdirs()
+            // Only the current capture is ever needed: drop older ones (a crash may have left some).
+            dir.listFiles()?.forEach { it.delete() }
+            file(key).writeBytes(jpeg)
+        }
+    }
+
+    override fun get(key: String): ByteArray? = runCatching { file(key).takeIf { it.isFile }?.readBytes() }.getOrNull()
+
+    override fun remove(key: String) {
+        runCatching { file(key).delete() }
+    }
+}
+
+/**
+ * The corner editor's picture (PLAN v3.1 W8): the capture photo turned upright ([turns]) and the corners in its
+ * pixels (display frame).
+ */
+class EditorPhoto(val image: ImageBitmap, val turns: QuarterTurns, val corners: FloatArray, val autoCorners: FloatArray)
+
 /** [ScanStore] on the real gallery. */
 class GalleryScanStore(private val gallery: GalleryRepository) : ScanStore {
     override suspend fun save(draft: ScanDraft): Long = gallery.save(draft)
@@ -116,7 +155,26 @@ data class ScanUiState(
     val removingBackground: Boolean = false,
     val cutoutStatus: CutoutStatus? = null,
     val cutoutUndone: Boolean = false,
+    /** PLAN v3.1 W8: the outline as measured in AR; [outline] is the one in use (re-measured when corners were adjusted). */
+    val autoOutline: ScanOutline? = null,
+    /** The face's corners in the capture photo (sensor pixels: TL, TR, BR, BL), as detected and measured. */
+    val autoCorners: FloatArray? = null,
+    /** The corners the user set ("Adjust corners"); null = Auto. */
+    val adjustedCorners: FloatArray? = null,
+    /** Per adjusted corner: the sub-pixel snap's σ (px), NaN when placed by hand (AimModel's error applies). */
+    val cornerSnapSigma: FloatArray? = null,
+    /** "Adjust corners" is possible: the capture photo and its camera are here. */
+    val canAdjustCorners: Boolean = false,
+    /** The corner editor is open with this picture. */
+    val editor: EditorPhoto? = null,
+    /** The last corners set in the editor could not be measured (a corner off the face plane, or a degenerate quad). */
+    val cornersRefused: Boolean = false,
+    /** The Review came back after the app was closed by the system; the photo may be missing. */
+    val restored: Boolean = false,
 ) {
+    /** The corners are the user's ("Adjust corners"), not the automatic ones. */
+    val cornersAdjusted: Boolean get() = adjustedCorners != null
+
     /** A background-free cutout exists (Undo / Redo cutout is offered). */
     val hasCutout: Boolean get() = cutoutStatus == CutoutStatus.REMOVED
 
@@ -157,9 +215,19 @@ class ScanViewModel(
     private val namer: ObjectNamer? = null,
     /** PLAN v3 W2: removes the background of a Box / Other photo; null = never (the rectangle is kept). */
     private val segmenter: SubjectSegmenter? = null,
+    /** PLAN v3.1 W8: keeps the Review's camera photo across process death; null = the photo is lost then. */
+    private val photoStore: ReviewPhotoStore? = null,
 ) : ViewModel() {
 
     val settings: StateFlow<ScanSettings> = settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, ScanSettings())
+
+    // Declared before _state: restore() reads them.
+
+    /** PLAN v3.1 W8: the capture photo (sensor orientation) kept for re-rectifying with adjusted corners. */
+    private var source: Bitmap? = null
+    private var camera: CaptureCamera? = savedState.get<DoubleArray>(KEY_CAMERA)?.let { ReviewSnapshot.decodeCamera(it) }
+    private var photoKey: String? = savedState.get<String>(KEY_PHOTO)
+    @Volatile private var snapper: CornerSnap? = null
 
     private val _state = MutableStateFlow(restore())
     val state: StateFlow<ScanUiState> = _state.asStateFlow()
@@ -173,16 +241,52 @@ class ScanViewModel(
 
     init {
         _state.value.savedId?.let { loadSavedItem(it) }
+        if (_state.value.restored) restorePhoto()
     }
 
     private fun restore(): ScanUiState {
         val kind = savedState.get<String>(KEY_KIND)?.let { n -> ObjectKind.entries.firstOrNull { it.name == n } }
         val savedId = savedState.get<Long>(KEY_SAVED_ID)
+        val review = if (kind != null && savedId == null && savedState.get<String>(KEY_STEP) == ScanStep.REVIEW.name) restoreReview(kind) else null
         return when {
             kind != null && savedId != null -> ScanUiState(step = ScanStep.SAVED, kind = kind, savedId = savedId)
+            review != null -> review
             kind != null -> ScanUiState(step = ScanStep.OUTLINE, kind = kind)
             else -> ScanUiState()
         }
+    }
+
+    /**
+     * A Review that the system closed (PLAN v3.1 W8): the measured outline, the corners (automatic and adjusted, so an
+     * adjustment survives), the camera, edits, name and choices come back from [savedState]; the photo from
+     * [photoStore] ([restorePhoto]). Null when the snapshot is incomplete (the flow then restarts its outline).
+     */
+    private fun restoreReview(kind: ObjectKind): ScanUiState? {
+        val auto = ReviewSnapshot.decodeOutline(savedState.get<DoubleArray>(KEY_OUTLINE)) ?: return null
+        val tier = savedState.get<String>(KEY_TIER)?.let { n -> DeviceTier.entries.firstOrNull { it.name == n } } ?: DeviceTier.NO_DEPTH
+        val autoCorners = ReviewSnapshot.validCorners(savedState.get<FloatArray>(KEY_CORNERS_AUTO))
+        val adjusted = ReviewSnapshot.validCorners(savedState.get<FloatArray>(KEY_CORNERS_ADJ))
+        val cam = camera
+        val snapSigma = savedState.get<FloatArray>(KEY_CORNER_SIGMA)?.takeIf { it.size == 4 }
+        val adjustedOutline = if (adjusted != null && cam != null) CornerAdjust.outline(auto, adjusted, cam, tier, snapSigma) else null
+        val hasPhoto = photoKey != null && photoStore != null
+        return ScanUiState(
+            step = ScanStep.REVIEW,
+            kind = kind,
+            outline = adjustedOutline ?: auto,
+            autoOutline = auto,
+            tip = savedState.get<String>(KEY_TIP)?.let { n -> ImprovementTip.entries.firstOrNull { it.name == n } },
+            tier = tier,
+            edits = ReviewSnapshot.decodeEdits(savedState.get<DoubleArray>(KEY_EDITS)),
+            label = savedState.get<String>(KEY_LABEL),
+            handsFree = savedState.get<Boolean>(KEY_HANDS_FREE) ?: false,
+            autoCorners = autoCorners,
+            adjustedCorners = adjusted.takeIf { adjustedOutline != null },
+            cornerSnapSigma = snapSigma.takeIf { adjustedOutline != null },
+            cutoutUndone = savedState.get<Boolean>(KEY_CUTOUT_UNDONE) ?: false,
+            photoBusy = hasPhoto,
+            restored = true,
+        )
     }
 
     private fun setState(transform: (ScanUiState) -> ScanUiState) {
@@ -190,22 +294,39 @@ class ScanViewModel(
         val s = _state.value
         savedState[KEY_KIND] = s.kind?.name
         savedState[KEY_SAVED_ID] = s.savedId
+        // PLAN v3.1 W8: the Review (with its adjusted corners) survives process death; plain numbers only.
+        savedState[KEY_STEP] = s.step.name
+        savedState[KEY_OUTLINE] = s.autoOutline?.let { ReviewSnapshot.encodeOutline(it) }
+        savedState[KEY_CORNERS_AUTO] = s.autoCorners
+        savedState[KEY_CORNERS_ADJ] = s.adjustedCorners
+        savedState[KEY_CORNER_SIGMA] = s.cornerSnapSigma
+        savedState[KEY_TIER] = s.tier.name
+        savedState[KEY_TIP] = s.tip?.name
+        savedState[KEY_EDITS] = ReviewSnapshot.encodeEdits(s.edits)
+        savedState[KEY_LABEL] = s.label
+        savedState[KEY_HANDS_FREE] = s.handsFree
+        savedState[KEY_CUTOUT_UNDONE] = s.cutoutUndone
+        savedState[KEY_CAMERA] = camera?.let { ReviewSnapshot.encodeCamera(it) }
+        savedState[KEY_PHOTO] = photoKey
     }
 
     fun chooseKind(kind: ObjectKind) {
-        setState { it.copy(kind = kind, step = ScanStep.OUTLINE, outline = null, edits = emptyMap()) }
+        setState { it.copy(kind = kind, step = ScanStep.OUTLINE, outline = null, autoOutline = null, edits = emptyMap()) }
     }
 
     /** The user confirmed the outline in AR; [handsFree]: some of its points were dropped hands-free (SM1a). */
     fun onOutline(outline: ScanOutline, tip: ImprovementTip?, tier: DeviceTier, handsFree: Boolean = false) {
         dropPhoto()
-        setState { it.copy(outline = outline, tip = tip, tier = tier, handsFree = handsFree, edits = emptyMap(), step = ScanStep.PHOTO) }
+        setState {
+            it.copy(outline = outline, autoOutline = outline, tip = tip, tier = tier, handsFree = handsFree, edits = emptyMap(), step = ScanStep.PHOTO)
+        }
     }
 
     /**
-     * The front photo was taken: straighten it to the measured W:H off the main thread, then review. For Box / Other
-     * the background is then removed (PLAN v3 W2): the straightened photo shows at once, the cutout replaces it when
-     * ready, and Save waits for it. A flat object (frame, TV) is already exactly its corners: no segmentation.
+     * The front photo was taken: keep it (with its camera, for "Adjust corners"), straighten it to the measured W:H off
+     * the main thread, then review. For Box / Other the background is then removed (PLAN v3 W2): the straightened
+     * photo shows at once, the cutout replaces it when ready, and Save waits for it. A flat object (frame, TV) is
+     * already exactly its corners: no segmentation.
      */
     fun onFrontPhoto(photo: FrontPhoto) {
         val outline = _state.value.outline
@@ -215,16 +336,80 @@ class ScanViewModel(
             return
         }
         dropPhoto()
-        setState { it.copy(step = ScanStep.REVIEW, photoBusy = true, photoFailed = false) }
+        source = photo.bitmap
+        val auto = photo.cornersPx.copyOf()
+        onCapture(auto, photo.camera)
+        keepPhoto(photo.bitmap)
+        processPicture(auto, nameIt = true)
+    }
+
+    /** The capture's corners and camera (W8); the Review starts on Auto. */
+    @VisibleForTesting
+    internal fun onCapture(autoCorners: FloatArray, captureCamera: CaptureCamera?) {
+        val outline = _state.value.outline ?: return
+        camera = captureCamera
+        setState {
+            it.copy(
+                step = ScanStep.REVIEW, autoOutline = it.autoOutline ?: outline, autoCorners = autoCorners, adjustedCorners = null, cornerSnapSigma = null,
+                canAdjustCorners = captureCamera != null, cornersRefused = false, restored = false,
+            )
+        }
+    }
+
+    /** Saves the capture photo for process death (a JPEG in the cache, off the main thread). */
+    private fun keepPhoto(bitmap: Bitmap) {
+        val ps = photoStore ?: return
+        val key = java.util.UUID.randomUUID().toString()
+        photoKey = key
+        setState { it }
+        viewModelScope.launch(Dispatchers.Default) {
+            runCatching { ps.put(key, JpegEncoder.encode(bitmap, JpegEncoder.SCAN_QUALITY)) }
+        }
+    }
+
+    /** After process death: the kept capture photo, decoded, then straightened with the current corners. */
+    private fun restorePhoto() {
+        val ps = photoStore
+        val key = photoKey
+        val corners = _state.value.adjustedCorners ?: _state.value.autoCorners
+        if (ps == null || key == null || corners == null) {
+            _state.update { it.copy(photoBusy = false) }
+            return
+        }
+        viewModelScope.launch {
+            val bitmap = withContext(Dispatchers.Default) {
+                runCatching { ps.get(key)?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) } }.getOrNull()
+            }
+            if (bitmap == null) {
+                _state.update { it.copy(photoBusy = false, canAdjustCorners = false) }
+                return@launch
+            }
+            source = bitmap
+            _state.update { it.copy(canAdjustCorners = camera != null) }
+            processPicture(corners, nameIt = false)
+        }
+    }
+
+    /**
+     * Straightens the kept capture photo with [corners] (sensor pixels) to the outline's W:H, then removes the
+     * background for Box / Other. Used for the first picture, after "Adjust corners" and after "Reset to auto".
+     */
+    private fun processPicture(corners: FloatArray, nameIt: Boolean) {
+        val src = source ?: return
+        val s0 = _state.value
+        val kind = s0.kind ?: return
+        val outline = s0.outline ?: return
+        clearPictures()
+        setState { it.copy(photoBusy = true, photoFailed = false) }
         val aspect = outline.width.value / outline.height.value
         val flat = ScanDraftBuilder.shapeFor(kind) == com.spaceview.ar.ScanShape.FLAT
-        val job = viewModelScope.launch {
+        val keepUndone = s0.cutoutUndone
+        photoJob = viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
                 try {
-                    val c = photo.cornersPx
-                    val corners = List(4) { PointF(c[it * 2], c[it * 2 + 1]) }
-                    val rectified = FrontPhotoRectifier.rectify(photo.bitmap, corners, aspect, PHOTO_LONG_SIDE)
-                    val jpeg = JpegEncoder.encode(rectified, JpegEncoder.SCAN_QUALITY)
+                    val c = List(4) { PointF(corners[it * 2], corners[it * 2 + 1]) }
+                    val rectified = FrontPhotoRectifier.rectify(src, c, aspect, PHOTO_LONG_SIDE)
+                    val jpeg = if (nameIt) JpegEncoder.encode(rectified, JpegEncoder.SCAN_QUALITY) else null
                     rectified to jpeg
                 } catch (e: CancellationException) {
                     throw e
@@ -233,8 +418,6 @@ class ScanViewModel(
                     null
                 } catch (e: OutOfMemoryError) {
                     null
-                } finally {
-                    photo.bitmap.recycle()
                 }
             }
             if (result == null) {
@@ -245,7 +428,7 @@ class ScanViewModel(
             val shown = rectified.asImageBitmap()
             rectangleBitmap = shown
             setState { it.copy(photo = shown, removingBackground = !flat && segmenter != null) }
-            suggestName(jpeg)
+            jpeg?.let { suggestName(it) }
             val choice = withContext(Dispatchers.Default) {
                 val pixels = IntArray(rectified.width * rectified.height)
                 rectified.getPixels(pixels, 0, rectified.width, 0, 0, rectified.width, rectified.height)
@@ -259,10 +442,87 @@ class ScanViewModel(
                 if (choice.cutout != null && cut == null) CutoutChoice(rect, null, CutoutStatus.NOT_AVAILABLE) to null else choice to cut
             }
             onPictures(choice.first, shown, choice.second)
+            if (keepUndone && _state.value.hasCutout) setCutoutUndone(true)
         }
-        // Cancelled before the block ran (Back, Measure again): the camera image is still ours to free (m6).
-        job.invokeOnCompletion { cause -> if (cause != null) photo.bitmap.recycle() }
-        photoJob = job
+    }
+
+    // ---- "Adjust corners" (PLAN v3.1 W8) ----
+
+    /** Opens the corner editor: the capture photo turned upright, with the corners in use. */
+    fun openCornerEditor() {
+        val src = source ?: return
+        val s = _state.value
+        val auto = s.autoCorners ?: return
+        if (!s.canAdjustCorners || s.saving || s.savedId != null) return
+        viewModelScope.launch {
+            val editor = withContext(Dispatchers.Default) {
+                runCatching {
+                    val turns = QuarterTurns.upright(auto, src.width, src.height)
+                    val m = android.graphics.Matrix().apply { postRotate(90f * turns.turns) }
+                    val turned = if (turns.turns == 0) src else Bitmap.createBitmap(src, 0, 0, src.width, src.height, m, true)
+                    if (snapper == null) {
+                        val px = IntArray(src.width * src.height)
+                        src.getPixels(px, 0, src.width, 0, 0, src.width, src.height)
+                        snapper = CornerSnap(src.width, src.height, CornerSnap.luma(px))
+                    }
+                    val current = _state.value.adjustedCorners ?: auto
+                    EditorPhoto(turned.asImageBitmap(), turns, turns.cornersToDisplay(current), turns.cornersToDisplay(auto))
+                }.getOrNull()
+            }
+            if (editor != null) _state.update { it.copy(editor = editor, cornersRefused = false) }
+        }
+    }
+
+    fun closeCornerEditor() {
+        _state.update { it.copy(editor = null, cornersRefused = false) }
+    }
+
+    /** Snap a dragged corner (sensor pixels) to a nearby image corner; null = leave it where it is. */
+    /**
+     * Snaps corner [k] of [corners] (sensor pixels, TL, TR, BR, BL) to the photo's real corner: W9's sub-pixel refiner
+     * along its two sides, else a Shi–Tomasi corner. Null = leave it where it is.
+     */
+    fun snapCorner(corners: FloatArray, k: Int): com.spaceview.app.scan.imaging.SnappedCorner? {
+        if (corners.size != 8 || k !in 0..3) return null
+        fun at(i: Int) = corners[2 * ((i + 4) % 4)] to corners[2 * ((i + 4) % 4) + 1]
+        return snapper?.snap(corners[2 * k], corners[2 * k + 1], prev = at(k - 1), next = at(k + 1))
+    }
+
+    /**
+     * The user's corners (sensor pixels: TL, TR, BR, BL as seen from the front). Width and height are re-measured from
+     * geometry ([CornerAdjust]); the picture is straightened again with them. Refused (the editor stays open and says
+     * so) when they cannot be measured. The automatic corners themselves mean "Auto". [snapSigmaPx]: per corner, the
+     * sub-pixel snap's σ (NaN = placed by hand).
+     */
+    fun applyCorners(corners: FloatArray, snapSigmaPx: FloatArray? = null) {
+        val s = _state.value
+        val auto = s.autoOutline ?: return
+        val autoCorners = s.autoCorners ?: return
+        val cam = camera ?: return
+        if (s.saving || s.savedId != null || corners.size != 8) return
+        if (!CornerSnap.differ(corners, autoCorners)) {
+            resetCornersToAuto()
+            return
+        }
+        val sigma = snapSigmaPx?.takeIf { it.size == 4 }?.copyOf()
+        val adjusted = CornerAdjust.outline(auto, corners, cam, s.tier, sigma)
+        if (adjusted == null) {
+            _state.update { it.copy(cornersRefused = true) }
+            return
+        }
+        setState { it.copy(outline = adjusted, adjustedCorners = corners.copyOf(), cornerSnapSigma = sigma, editor = null, cornersRefused = false) }
+        processPicture(corners, nameIt = false)
+    }
+
+    /** "Reset to auto": the measured outline and the automatic corners again. */
+    fun resetCornersToAuto() {
+        val s = _state.value
+        val auto = s.autoOutline ?: return
+        val autoCorners = s.autoCorners ?: return
+        if (s.saving || s.savedId != null) return
+        val wasAdjusted = s.adjustedCorners != null
+        setState { it.copy(outline = auto, adjustedCorners = null, cornerSnapSigma = null, editor = null, cornersRefused = false) }
+        if (wasAdjusted) processPicture(autoCorners, nameIt = false)
     }
 
     /**
@@ -302,7 +562,7 @@ class ScanViewModel(
     /** Continue without a photo (the gallery item gets a plain-colour front). */
     fun skipPhoto() {
         dropPhoto()
-        setState { it.copy(step = ScanStep.REVIEW) }
+        setState { it.copy(step = ScanStep.REVIEW, outline = it.autoOutline ?: it.outline) }
     }
 
     fun edit(dim: ScanDim, meters: Double?) {
@@ -323,7 +583,7 @@ class ScanViewModel(
     fun remeasure() {
         if (_state.value.saving || _state.value.savedId != null) return
         dropPhoto()
-        setState { it.copy(step = ScanStep.OUTLINE, outline = null, edits = emptyMap(), label = null, saveFailed = false) }
+        setState { it.copy(step = ScanStep.OUTLINE, outline = null, autoOutline = null, edits = emptyMap(), label = null, saveFailed = false) }
     }
 
     fun backToType() {
@@ -361,6 +621,7 @@ class ScanViewModel(
                 return@launch
             }
             setState { it.copy(saving = false, savedId = id, step = ScanStep.SAVED) }
+            forgetPhoto()
             onScanSaved()
             loadSavedItem(id)
         }
@@ -394,18 +655,47 @@ class ScanViewModel(
         }
     }
 
+    /** The flow is gone for good: the kept capture photo is no longer needed. */
+    override fun onCleared() {
+        forgetPhoto()
+    }
+
+    /** Deletes the process-death copy of the capture photo. */
+    private fun forgetPhoto() {
+        val key = photoKey ?: return
+        photoKey = null
+        savedState[KEY_PHOTO] = null
+        photoStore?.let { ps -> runCatching { ps.remove(key) } }
+    }
+
+    /** Drops the capture photo, its camera and corners, and the Review's pictures. */
     private fun dropPhoto() {
-        photoJob?.cancel()
-        photoJob = null
+        clearPictures()
         nameJob?.cancel()
         nameJob = null
+        source = null
+        camera = null
+        snapper = null
+        forgetPhoto()
+        _state.update {
+            it.copy(
+                nameSuggestion = null, autoCorners = null, adjustedCorners = null, cornerSnapSigma = null, canAdjustCorners = false, editor = null,
+                cornersRefused = false, restored = false, outline = it.autoOutline ?: it.outline, cutoutUndone = false,
+            )
+        }
+    }
+
+    /** Cancels the picture job and clears the Review's pictures (the capture photo is kept). */
+    private fun clearPictures() {
+        photoJob?.cancel()
+        photoJob = null
         pictures = null
         rectangleBitmap = null
         cutoutBitmap = null
         _state.update {
             it.copy(
-                photo = null, photoBusy = false, photoFailed = false, nameSuggestion = null,
-                removingBackground = false, cutoutStatus = null, cutoutUndone = false,
+                photo = null, photoBusy = false, photoFailed = false,
+                removingBackground = false, cutoutStatus = null,
             )
         }
     }
@@ -418,6 +708,21 @@ class ScanViewModel(
         private const val TAG = "ScanViewModel"
         private const val KEY_KIND = "scan_kind"
         private const val KEY_SAVED_ID = "scan_saved_id"
+
+        // PLAN v3.1 W8: the Review across process death (SavedStateHandle only; Room is not touched).
+        private const val KEY_STEP = "scan_step"
+        private const val KEY_OUTLINE = "scan_outline_auto"
+        private const val KEY_CORNERS_AUTO = "scan_corners_auto"
+        private const val KEY_CORNERS_ADJ = "scan_corners_adjusted"
+        private const val KEY_CORNER_SIGMA = "scan_corner_snap_sigma"
+        private const val KEY_CAMERA = "scan_camera"
+        private const val KEY_TIER = "scan_tier"
+        private const val KEY_TIP = "scan_tip"
+        private const val KEY_EDITS = "scan_edits"
+        private const val KEY_LABEL = "scan_label"
+        private const val KEY_HANDS_FREE = "scan_hands_free"
+        private const val KEY_CUTOUT_UNDONE = "scan_cutout_undone"
+        private const val KEY_PHOTO = "scan_photo_key"
 
         /** Long side of the straightened photo (the gallery re-encodes it within its size budget). */
         const val PHOTO_LONG_SIDE = 1024

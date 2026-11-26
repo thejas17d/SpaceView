@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PLAN v3.1 precision round (W9 smart rectangles, W10 close range). Every string has a Hindi twin in values-hi. -->
+<resources>
+    <string name="measure_too_close">Too close. Move back to at least 25 cm.</string>
+    <string name="measure_move_back">Move back a little: hold 40 to 70 cm away.</string>
+    <string name="measure_step_back">Step back so the whole object fits on the screen.</string>
+    <string name="measure_reject_too_close">Too close to measure. Move back.</string>
+    <string name="measure_reject_warming_up">First move your phone slowly side to side.</string>
+    <string name="rect_searching">Hold the whole rectangle on the screen.</string>
+    <string name="rect_holding">Rectangle found. Hold steady.</string>
+    <string name="rect_too_steep">Face the rectangle more squarely.</string>
+    <string name="rect_no_plane">Aim at the surface the rectangle lies on.</string>
+    <string name="rect_outline">Detected rectangle</string>
+</resources>

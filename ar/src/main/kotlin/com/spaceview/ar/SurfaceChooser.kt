@@ -1,6 +1,7 @@
 package com.spaceview.ar
 
 import com.spaceview.engine.Ray
+import com.spaceview.engine.SupportPlane
 import com.spaceview.engine.Vec3
 import kotlin.math.abs
 import kotlin.math.max
@@ -49,16 +50,33 @@ internal class ChosenPoint(
  */
 internal object SurfaceChooser {
     /** Fitted and raw ranges may differ by this much (absolute part). Placeholder to tune. */
-    const val CONSISTENT_ABS_M = 0.02
+    const val CONSISTENT_ABS_M = 0.006 // W10 (research C7): was 2 cm; 3 % of range rules from 0.2 m
 
     /** … or by this fraction of the range, whichever is larger. */
     const val CONSISTENT_REL = 0.03
 
     fun tolerance(rangeM: Double): Double = max(CONSISTENT_ABS_M, CONSISTENT_REL * rangeM)
 
-    fun choose(hit: HitSample?, surface: LocalSurfaceModel, ray: Ray, cameraPosition: Vec3, nowNs: Long): ChosenPoint? {
+    fun choose(
+        hit: HitSample?,
+        surface: LocalSurfaceModel,
+        ray: Ray,
+        cameraPosition: Vec3,
+        nowNs: Long,
+        extendedPlane: HitSample? = null,
+    ): ChosenPoint? {
+        // W10 (research C5): an ARCore plane is not exact either: it carries max(1 mm, 0.5 % of range) of plane σ.
         if (hit != null && hit.kind == HitKind.PLANE) {
-            return ChosenPoint(hit.position, hit.normal, HitKind.PLANE, hit.distance, 0.0)
+            return ChosenPoint(hit.position, hit.normal, HitKind.PLANE, hit.distance, SupportPlane.biasRel(hit.distance))
+        }
+        // W10 (research C6, ARKit "existing plane, infinite"): outside the plane's polygon, the plane is used only when a
+        // depth / feature hit agrees with it closely, i.e. the object under the crosshair is a thin sheet on it.
+        if (extendedPlane != null && hit != null &&
+            abs(extendedPlane.distance - hit.distance) <= SupportPlane.agreeTolerance(hit.distance)
+        ) {
+            return ChosenPoint(
+                extendedPlane.position, extendedPlane.normal, HitKind.PLANE, extendedPlane.distance, SupportPlane.biasRel(extendedPlane.distance),
+            )
         }
         surface.update(ray, nowNs, hit?.distance)
         val fitted = surface.intersect(ray, cameraPosition)

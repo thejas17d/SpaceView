@@ -50,6 +50,10 @@ class GateResult(
     val linearSpeed: Double,
     /** True while the scene is darker than [TrackingGateConfig.lowLightIntensity]. */
     val lowLight: Boolean,
+    /** W10: estimated motion blur of this frame (px), NaN when no optics were given. */
+    val blurPx: Double = Double.NaN,
+    /** W10: the lens was moving (focus change) in this frame. */
+    val lensMoving: Boolean = false,
 )
 
 /**
@@ -73,6 +77,7 @@ class TrackingGateConfig(
     val warmUpNanos: Long = 500_000_000L,
     val lowLightIntensity: Float = 0.08f,
     val emaAlpha: Double = 0.35,
+    val maxBlurPx: Double = BlurGate.MAX_BLUR_SAMPLE_PX,
 )
 
 /**
@@ -106,6 +111,8 @@ class TrackingGate(private val config: TrackingGateConfig = TrackingGateConfig()
 
     /**
      * @param lightIntensity ARCore ambient pixel intensity, or NaN when no valid estimate.
+     * @param optics W10: this frame's exposure, focal length and lens state; with [rangeM] (camera → surface) the
+     *   motion blur is estimated ([BlurGate]) and a blurred frame, or one taken while the lens moves, is LIMITED.
      */
     fun update(
         timestampNs: Long,
@@ -113,6 +120,8 @@ class TrackingGate(private val config: TrackingGateConfig = TrackingGateConfig()
         reason: FailureReason,
         cameraPose: Pose,
         lightIntensity: Float,
+        optics: OpticsSample? = null,
+        rangeM: Double = Double.NaN,
     ): GateResult {
         val lowLight = !lightIntensity.isNaN() && lightIntensity < config.lowLightIntensity
 
@@ -144,13 +153,15 @@ class TrackingGate(private val config: TrackingGateConfig = TrackingGateConfig()
         }
         val warmingUp = timestampNs - trackingSinceNs < config.warmUpNanos
         val moving = angular > config.sampleMaxAngular || linear > config.sampleMaxLinear
-        val quality = if (warmingUp || moving) TrackingQuality.LIMITED else TrackingQuality.TRACKING
+        val blur = optics?.let { BlurGate.blurPx(it, angular, linear, rangeM) } ?: Double.NaN
+        val opticsBad = optics != null && (optics.lensMoving || blur > config.maxBlurPx)
+        val quality = if (warmingUp || moving || opticsBad) TrackingQuality.LIMITED else TrackingQuality.TRACKING
         val status = when {
             tooFast -> TrackingStatus.TOO_FAST
             lowLight -> TrackingStatus.TOO_DARK
             else -> TrackingStatus.GOOD
         }
-        return GateResult(status, quality, angular, linear, lowLight)
+        return GateResult(status, quality, angular, linear, lowLight, blur, optics?.lensMoving == true)
     }
 
     private fun updateSpeeds(t: Long, pose: Pose) {

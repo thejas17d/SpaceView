@@ -1,0 +1,43 @@
+=== APP NAME (30) ===
+SpaceView
+
+=== SHORT DESCRIPTION (80) ===
+Measure length, height & distance with your camera. Every result shows its ±.
+
+=== FULL DESCRIPTION (4000) ===
+SpaceView turns your phone's camera into a measuring tool. Aim, tap, and read the size, with an honest "±" next to every number, so you always know how far to trust it.
+
+MEASURE
+• Length: tap two points on a floor, wall or table.
+• Height: set the base, then tilt up. The measuring line stays upright above the base, so the top keeps tracking even when you tilt a lot.
+• Rectangles: width, height and area of a window, door, TV or frame.
+• Hands-free: hold the crosshair still and the point drops by itself, so tapping never shakes your aim.
+• Accuracy badge: Good, Fair or Rough, plus the ± error in cm or inches.
+
+HOW FAR?
+Find the distance to a point you aim at:
+• Close up, using your phone's AR depth.
+• On level ground nearby, from your phone's height and angle.
+• Far away, with "two sights": aim, walk a few steps to the side as the app guides you, and aim again. SpaceView works out the distance from the two views.
+SpaceView only shows a number when it can give its ±, and says "out of range" instead of guessing.
+
+SCAN AN OBJECT
+Measure a photo frame, TV, box or chair and save it to your Gallery with its exact size. The background is removed on your phone, so only the object is kept, at true size.
+
+PLACE IN YOUR ROOM
+Stand a saved item on your floor or hang it on your wall at its real size, and check "Fits / Tight / Too big" before you buy.
+
+PRIVATE BY DESIGN
+• No account, no sign-in.
+• Your measurements, photos and Gallery stay on your phone. SpaceView never uploads them.
+• Object names and background removal are worked out on the phone.
+
+FREE AND PRO
+SpaceView is free with ads. Ads never appear over the camera while you measure. SpaceView Pro removes all ads and the limit on saved items. It's available monthly, yearly (with a free trial) or as a 30-day pass.
+
+GOOD TO KNOW
+• Needs a phone that supports Google Play Services for AR.
+• Measurements are estimates. Results are best in good light on textured surfaces. Check important cuts and safety-critical distances with a tape measure.
+• Available in English and Hindi.
+
+Questions or feedback: fableformlabs@gmail.com

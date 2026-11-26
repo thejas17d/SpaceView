@@ -109,6 +109,17 @@ internal fun ScanReviewScreen(
             Text(stringResource(R.string.scan_review_title), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
 
             PhotoBlock(state, suggested, onUndoCutout = vm::setCutoutUndone)
+            CornersBlock(state, onAdjust = vm::openCornerEditor, onReset = vm::resetCornersToAuto)
+            state.editor?.let { editor ->
+                CornerEditor(
+                    editor = editor,
+                    refused = state.cornersRefused,
+                    onSnap = vm::snapCorner,
+                    onDone = vm::applyCorners,
+                    onReset = vm::resetCornersToAuto,
+                    onCancel = vm::closeCornerEditor,
+                )
+            }
 
             if (outline == null || values == null) return@Column
             InstrumentCard {
@@ -230,7 +241,45 @@ private fun PhotoBlock(state: ScanUiState, title: String, onUndoCutout: (Boolean
         }
         state.photoBusy -> Text(stringResource(R.string.scan_photo_preparing), style = MaterialTheme.typography.bodyMedium)
         state.photoFailed -> Text(stringResource(R.string.scan_photo_failed), style = MaterialTheme.typography.bodyMedium)
+        state.restored -> Text(stringResource(R.string.scan_photo_lost), style = MaterialTheme.typography.bodyMedium)
         else -> Text(stringResource(R.string.gallery_no_photo), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/**
+ * PLAN v3.1 W8: "Auto" or "Adjust corners". Auto = the corners found and measured in AR; Adjust opens the corner
+ * editor on the frozen photo; once adjusted, width and height are re-measured from the new corners and "Reset to auto"
+ * brings the measured ones back.
+ */
+@Composable
+private fun CornersBlock(state: ScanUiState, onAdjust: () -> Unit, onReset: () -> Unit) {
+    if (state.autoCorners == null || (!state.canAdjustCorners && !state.cornersAdjusted)) return
+    Text(
+        stringResource(if (state.cornersAdjusted) R.string.scan_corners_adjusted_note else R.string.scan_corners_auto_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        FilterChip(
+            selected = !state.cornersAdjusted,
+            onClick = { if (state.cornersAdjusted) onReset() },
+            enabled = !state.saving && !state.photoBusy,
+            label = { Text(stringResource(R.string.scan_corners_auto)) },
+            modifier = Modifier.heightIn(min = 48.dp),
+        )
+        FilterChip(
+            selected = state.cornersAdjusted,
+            onClick = onAdjust,
+            enabled = state.canAdjustCorners && !state.saving && !state.photoBusy,
+            label = { Text(stringResource(R.string.scan_corners_adjust)) },
+            modifier = Modifier.heightIn(min = 48.dp),
+        )
+    }
+    if (state.cornersAdjusted) {
+        TextButton(onClick = onReset, enabled = !state.saving && !state.photoBusy, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.scan_corners_reset))
+        }
     }
 }
 

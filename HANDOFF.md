@@ -2,7 +2,7 @@
 
 Living context file so any new session/LLM can continue. Updated after every step of work.
 
-_Last updated: 2026-11-24 — PLAN v3 (2D v1) built, reviewed and gated; gate conditions R1–R3 and R5 closed (see the end of the milestone list); R4 = user sign-off on Distance limits or the zoomed-aim plan. APKs: builds/SpaceView-v3-*.apk._
+_Last updated: 2026-11-25 — internal testing live (build 1, 0.9.0); store listing in progress (text + icon + feature graphic in store-assets/, AI-labelled; screenshots pending from user); PLAN v3.1 precision round started (docs/PLAN-v3.1-precision.md): research running, Builder B on W8, Builder A waits for research (W9/W10)._
 
 ## What SpaceView is
 Android-first (Google Play) AR app: measure anything precisely; scan an object (e.g. photo frame in a café) → save to "AR Gallery" with exact dimensions → place it in your room at true size. Later: B2B for Indian retailers (Croma, Reliance Digital, furniture), iOS (ARKit/LiDAR).
@@ -468,6 +468,51 @@ Original brief: user's pasted spec (8→9 agents, orchestrator = Claude Opus 5.5
   - The developer is not named, only the email.
 - **Terms of Service:** `docs/terms/index.html` → https://thejas17d.github.io/SpaceView/terms/ (Play: App content → trader status = Yes, ToS URL optional; add it once Pages is live).
 - **Next user steps:** create the `pro` subscription (`monthly` ₹129, `yearly` ₹799 with `trial7`, prepaid `pass30` ₹149; the user may lower the prices since 3D is gone), send the licence key (Monetization setup → Licensing), add licence testers, then AdMob IDs.
+- **2026-11-25 Play listing:**
+  - App content answers were given; trader status = Yes.
+  - Store settings: category Tools, email fableformlabs@gmail.com, no phone/website.
+  - `store-assets/`: `icon-512.png` and `feature-graphic-1024x500.png` (made by `%TEMP%/spaceview-orch/store_graphics.py`), plus `listing-en-US.txt` (short 77 chars, full ≈ 2,100; claims checked against the app strings).
+  - **AI asset declaration:** label the descriptions, icon and feature graphic; the screenshots (real captures) are not labelled.
+  - **Screenshots:** the user captures 6 on the Pixel 10a into `Desktop/Dev/screenshots/store/` → the orchestrator frames them at 1080×1920 (phone and 7-inch) and 1440×2560 (10-inch).
+- **PLAN v3.1 precision round** (`docs/PLAN-v3.1-precision.md`, user feedback 2026-11-25):
+  - **W8:** Review offers Auto or Adjust corners, and W×H is recomputed from geometry. **Builder B is running it.**
+  - **W9:** smart hands-free rectangles (auto edge/angle detection and crop).
+  - **W10:** close-range accuracy (the "menu" case).
+  - **Accuracy contract:** "as accurate as ARKit" = match Apple Measure on a **non-LiDAR** iPhone side by side (the Pixel 10a has no LiDAR, so LiDAR-class accuracy is impossible); the ± must cover ≥ 90 %.
+  - **Research agent running** → `docs/research/close-range-and-rectangles.md`; then Builder A does W9 + W10.
+- **Close-range research DONE** → `docs/research/close-range-and-rectangles.md`.
+  - **Menu cause:** measured too close. Apple says 0.5–3 m and ARCore depth is best at 0.5–5 m; we had no range guide.
+  - **A4 doesn't fit the frame at 0.3 m.**
+  - **Tolerances are room-scale:** the 3 cm plane bias, the 1 cm dwell drift and the 8 mm stabiliser window.
+  - **Blur and focus:** the motion gate ignores distance; autofocus is on although Google advises fixed focus; ImageMetadata isn't used.
+  - **Detector for W9:** pure-Kotlin classical, no OpenCV (≈ 13 MB), no Document Scanner.
+  - **Expected after the fixes:** A4 at 0.5 m, median ≈ 2–4 mm.
+  - The arXiv 2204.01693 miscitation in `measurement-engine.md` is fixed.
+- **Builder A started W10 → W9.** It must not edit MeasureSession.kt or ScanComposer.kt until B finishes W8 (B has a small uncommitted edit in MeasureSession). It will expose a sub-pixel corner refiner API for W8's edge snap.
+- **Builder B W8 DONE (uncommitted).** Tests: engine 243 / app 348 (1 skip) green.
+  - **Review:** Auto | Adjust corners. The editor works on the frozen upright photo: drag corners or sides, 3× loupe, corner snap within 6 px (Shi–Tomasi, `imaging/CornerEditing.kt`), Reset to auto.
+  - **Size from geometry:** W×H comes from `engine/FaceReprojection.kt`: corner pixel → ray via `CaptureCamera` → face plane. The ± covers the corner aim, plane σ, scale and floor.
+  - **Process death:** the whole Review is restored from SavedState, with the photo in `cache/scan-review`.
+  - **`:ar` touch:** `FrontPhoto.camera: CaptureCamera?`, set at the capture call.
+  - **Docs:** TESTING §24 (14 items).
+- **Orchestrator:** Delete my data now also clears `cache/scan-review` (`GalleryRepository.SCAN_REVIEW_DIR`, used by AppNavHost too).
+- **Builder A told that MeasureSession/ScanComposer are unlocked.** A will give the W9 sub-pixel refiner API; the orchestrator decides whether CornerSnap delegates to it.
+- **2026-11-25: PAUSED by the user ("pause until I ask to continue").**
+  - Builder A was stopped mid-W10, while adding plane σ / the infinite-plane option to SurfaceChooser. Its W10 work is partial and uncommitted in `:ar`/`engine`, so the tree may not compile until A resumes.
+  - Builder B's W8 is done (uncommitted). The Gradle daemon was stopped and there is no build lock.
+  - **To resume:** SendMessage Builder A to continue W10 → W9 (it keeps its context), then full build → review → gate → commit → CI → build 2 (versionCode 2).
+  - **Still pending from the user:** store screenshots → `Desktop/Dev/screenshots/store/`; menu numbers; iPhone for the side-by-side test; GitHub Pages switched on; licence key; `pro` subscription.
+- **2026-11-26:**
+  - **Closed testing (Alpha):** build 1 (0.9.0) is sent for Google review (India; testers = SpaceView team list).
+  - **Play URLs:** privacy URL saved as `https://thejas17d.github.io/SpaceView/privacy/index.html` (the trailing-slash form failed to save). The Advertising ID declaration is Yes (advertising, analytics, fraud prevention).
+  - **Open item:** App access says "restricted" with sign-in instructions. It should be "All functionality available without special access".
+  - **User decision:** NO sign-in (keep no-account).
+  - **Resumed:** the user un-paused work and wants launch quality with minimal usage. Builder A was resumed on W10 → W9.
+- **PLAN v3.1 built (A: W10 close range + W9 rectangles + speed fix; B: W8 + CornerSnap → CornerRefiner).** TESTING §24 is W8, §25 is W9/W10.
+  - **Verification:** engine 266 / ar 174 / data 70 (1 skip) / app 350 (1 skip), 0 failures; Kover OK; assembleDebug and assembleRelease pass (release 20,319,858 B); lint 0 errors; release dex has 0 debug-only strings.
+  - **Detector speed:** about 9–12 ms per 1280×720 frame (JVM, isolated); the benchmark is CI-safe at ≤ 150 ms.
+  - **Follow-ups:** depth-inside-quad → SupportPlane; ROI if the device misses 30 ms; tier floor (C13) after the bench.
+  - **Pre-review commit** pushed; a combined review + gate is running → `docs/reviews/PLAN-v3.1-gate.md`.
 - If resuming after a crash: run `git status` to see uncommitted M2/M5 work; build with lock; re-launch only the missing pieces.
 
 ## Log

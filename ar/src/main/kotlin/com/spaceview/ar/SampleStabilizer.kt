@@ -28,7 +28,7 @@ import kotlin.math.max
  */
 class SampleStabilizer(
     estimatorConfig: PointEstimatorConfig = PointEstimatorConfig(),
-    private val moveAbsM: Double = 0.008,
+    private val moveAbsM: Double = MOVE_ABS_M,
     private val moveRel: Double = 0.008,
     private val maxMisses: Int = 5,
 ) {
@@ -87,3 +87,9 @@ class SampleStabilizer(
         cached?.let { reference = it.position }
     }
 }
+
+/**
+ * Absolute floor of the stabiliser's "same spot" window (m). W10 (research C3): was 8 mm at any range, which smeared a
+ * close-range corner; now max(3 mm, 0.8 % × range), identical from 1 m on.
+ */
+const val MOVE_ABS_M = 0.003
